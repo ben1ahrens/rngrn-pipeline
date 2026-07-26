@@ -1,9 +1,16 @@
 name: tests
 
+# MANUAL ONLY. Actions minutes are metered on private repos, and when the account's
+# billing is unavailable GitHub skips the job and reports it as a *failure* that has
+# nothing to do with the code. The authoritative test run is the local pre-push hook
+# (`git config core.hooksPath .githooks`); see the README.
+#
+# To restore automatic CI — once billing is sorted, or if this repo goes public —
+# uncomment the push/pull_request triggers below.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # push:
+  #   branches: [main]
+  # pull_request:
   workflow_dispatch:
 
 jobs:

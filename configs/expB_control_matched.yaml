@@ -6,6 +6,7 @@ data:
   source: registry
   dataset_id: two_gene_classical_val
   sample_key: sample_0000
-  L: 100.0
+  # no L here: the sample's own L attr is authoritative (this dataset spans many
+  # domain sizes). Set data.L_override only to cross-check one specific sample.
 model: {N: 2, m: 2, observed_idx: [0, 1]}
 tracking: {run_name: expB_control}

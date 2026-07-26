@@ -29,7 +29,8 @@ _TUNABLE_PREFIXES = ("loss.", "train.", "solver.", "model.form", "model.n_hill")
 # problems, not different methods.
 _ARM_AXES = ("data.sample_key", "data.dataset_id", "model.observed_idx", "model.m", "model.N")
 
-_FORBIDDEN_DATA = ("data.system", "data.L", "data.resolution", "data.T_max", "data.dt",
+_FORBIDDEN_DATA = ("data.system", "data.L", "data.L_override",
+                   "data.resolution", "data.T_max", "data.dt",
                    "data.seed", "data.cache_root", "data.datasets_root", "data.source")
 
 

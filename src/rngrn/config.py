@@ -35,7 +35,15 @@ class DataConfig:
     dataset_id: Optional[str] = None   # for source='registry': registered dataset name
     hdf5_path: Optional[str] = None    # for source='hdf5_3gene'
     sample_key: Optional[str] = None   # which sample group in the hdf5/registry payload
+    # `L` is a GENERATOR parameter: it sizes the domain for source='reference' (and feeds
+    # the DatasetSpec hash). It is NOT the domain size of a loaded sample — file-backed
+    # sources (registry, cache, hdf5_3gene) read L from the sample itself, because each
+    # sample has its own. Do not add `L:` to a file-backed config expecting it to apply.
     L: float = 100.0
+    # Optional cross-check for file-backed sources: when set, the gate compares it to the
+    # sample's stored L and warns loudly if they disagree — then uses the FILE's value.
+    # Left None, no check is made. It is never an override of measured geometry.
+    L_override: Optional[float] = None
     resolution: int = 128
     T_max: float = 4000.0      # generator horizon (answer-key side; OFF the tuning axis)
     dt: float = 0.1

@@ -34,12 +34,17 @@ def _resolve_recovery_input(cfg: Config):
         return gate.from_cache(dc.cache_root, spec.hash(), cfg.model.N, obs_idx)
     if dc.source == "cache":
         return gate.from_cache(dc.cache_root, dc.dataset_hash, cfg.model.N, obs_idx)
+    # For file-backed sources the sample's own L is authoritative; `data.L` is passed
+    # through only as an EXPLICIT cross-check when the config sets one (the gate warns and
+    # prefers the file if they disagree). `L_override` is None on these configs by default,
+    # which is why the hardcoded `L: 100.0` was dropped from them — see gate._resolve_L.
     if dc.source == "registry":
         return gate.from_registry(dc.datasets_root, dc.dataset_id, dc.sample_key,
-                                  cfg.model.N, obs_idx, dc.L,
+                                  cfg.model.N, obs_idx, dc.L_override,
                                   backend=cfg.tracking.index_backend)
     if dc.source == "hdf5_3gene":
-        return gate.from_3gene_hdf5(dc.hdf5_path, dc.sample_key, cfg.model.N, obs_idx, dc.L)
+        return gate.from_3gene_hdf5(dc.hdf5_path, dc.sample_key, cfg.model.N, obs_idx,
+                                    dc.L_override)
     raise ValueError(f"unknown data.source '{dc.source}'")
 
 
@@ -60,8 +65,19 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        lbfgs_steps=cfg.train.lbfgs_steps, grad_clip=cfg.train.grad_clip,
                        seed=cfg.train.seed, verbose=verbose)
 
+    # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
+    # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is
+    # free: it is the image recovery already trained on, and it is on the recovery side of
+    # the firewall, so handing it to scoring adds no truth quantity to anything.
+    # model_frame is deliberately NOT supplied here: a field simulated from the recovered
+    # model costs a rollout (measured ~4.2 ms/step at 96x96, with the step count derived
+    # from the model's own sigma_max — ~128k steps, i.e. ~9 min, for an untrained N=3
+    # model), which fit() must not silently add to every run. Callers that want the full comparison run
+    # the rollout themselves and re-score, or use eval/. Runs therefore record
+    # morphology_scored="target_only".
     metric = score_recovery(result, answer_key,
-                            observed_idx=(cfg.model.observed_idx or list(range(cfg.model.m))))     # scoring uses the answer key, recovery did not
+                            observed_idx=(cfg.model.observed_idx or list(range(cfg.model.m))),
+                            target_frame=ri.frame)
 
     # ---- experiment-arm identity (scoring/bookkeeping side) -------------------------
     # Classify this run so the benchmark can compare like with like. n_true comes from the

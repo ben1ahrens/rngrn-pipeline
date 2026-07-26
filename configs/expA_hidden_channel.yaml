@@ -8,7 +8,8 @@ data:
   source: registry
   dataset_id: three_gene_val      # drop in + `rngrn scan-datasets` (docs/LOCAL_DATA_SETUP.md)
   sample_key: sample_0000
-  L: 100.0
+  # no L here: the sample's own L attr is authoritative (this dataset spans many
+  # domain sizes). Set data.L_override only to cross-check one specific sample.
 model:
   N: 3
   m: 2

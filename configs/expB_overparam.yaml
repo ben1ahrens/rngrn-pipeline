@@ -8,7 +8,8 @@ data:
   source: registry
   dataset_id: two_gene_classical_val   # 2-gene classical set, already in registry format
   sample_key: sample_0000
-  L: 100.0
+  # no L here: the sample's own L attr is authoritative (this dataset spans many
+  # domain sizes). Set data.L_override only to cross-check one specific sample.
 model:
   N: 3                            # deliberately one MORE than the truth
   m: 2

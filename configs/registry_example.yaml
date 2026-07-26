@@ -7,6 +7,7 @@ data:
   datasets_root: data/datasets
   dataset_id: three_gene_v1     # must match a registered id (see: rngrn list-datasets)
   sample_key: sample_0000
-  L: 100.0
+  # no L here: the sample's own L attr is authoritative (this dataset spans many
+  # domain sizes). Set data.L_override only to cross-check one specific sample.
 model: {N: 3, m: 3, observed_idx: [0, 1, 2]}
 tracking: {run_name: registry_3gene, index_backend: jsonl}

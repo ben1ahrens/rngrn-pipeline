@@ -82,7 +82,8 @@ Two validation experiments feed the model 2 observed channels and ask for a 3x3 
 **A** recovers a genuinely hidden gene (N=3 truth); **B** tests whether spare capacity
 invents one (N=2 truth, N=3 model). They need different metrics and are read against their
 own controls — see [docs/IDENTIFIABILITY_EXPERIMENTS.md](docs/IDENTIFIABILITY_EXPERIMENTS.md).
-`rngrn benchmark --degradation` prints the per-arm comparison.
+`rngrn benchmark --degradation` prints the per-arm comparison. Agent/collaborator handoff:
+[docs/HANDOFF_identifiability.md](docs/HANDOFF_identifiability.md).
 
 ## The three milestones
 

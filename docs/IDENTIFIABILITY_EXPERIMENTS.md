@@ -1,5 +1,8 @@
 # Identifiability experiments
 
+> Picking this up cold? Read [HANDOFF_identifiability.md](HANDOFF_identifiability.md)
+> for the engineering state: what changed, what is verified, and the caveats that matter.
+
 Two validation experiments that both feed the model **2 observed channels** and ask it for
 a **3×3 GRN**. They look similar and test opposite things.
 

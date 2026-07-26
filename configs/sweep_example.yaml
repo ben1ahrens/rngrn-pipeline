@@ -1,0 +1,9 @@
+# Example sweep: loss-weight + strategy grid over 3 seeds on the GM Milestone-1 problem.
+# Data-generation params are NOT permitted as axes (kept off the tuning axis by design).
+name: m1_gm_lossweights
+base_config: configs/milestone1_gm.yaml
+seeds: [0, 1, 2]
+axes:
+  loss.strategy: [fixed, scheduled]
+  loss.weights.resid: [0.1, 0.3, 0.6]
+  train.adam_lr: [0.03, 0.05]

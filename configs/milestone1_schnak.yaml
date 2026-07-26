@@ -1,0 +1,5 @@
+# Milestone 1 — Schnakenberg spots, N=m=2 fully observed.
+_base_: [base.yaml]
+data: {system: schnakenberg, L: 100.0}
+model: {N: 2, m: 2, observed_idx: [0, 1]}
+tracking: {run_name: m1_schnak}

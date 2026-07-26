@@ -1,0 +1,5 @@
+# Milestone 1 — Gierer-Meinhardt stripes, N=m=2 fully observed.
+_base_: [base.yaml]
+data: {system: gierer_meinhardt, L: 100.0}
+model: {N: 2, m: 2, observed_idx: [0, 1]}
+tracking: {run_name: m1_gm}

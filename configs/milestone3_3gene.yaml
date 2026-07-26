@@ -1,0 +1,10 @@
+# Milestone 3 — N=3 from the 3-gene HDF5 dataset. Point hdf5_path at the unpacked dataset.
+_base_: [base.yaml]
+data:
+  source: hdf5_3gene
+  hdf5_path: data/three_gene_dataset/val.h5
+  sample_key: sample_0000
+  L: 100.0
+model: {N: 3, m: 3, observed_idx: [0, 1, 2]}
+train: {adam_steps: 2000}
+tracking: {run_name: m3_3gene}

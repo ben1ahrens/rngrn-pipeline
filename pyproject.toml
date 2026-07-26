@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rngrn-pipeline"
+version = "0.1.0"
+description = "Per-frame variational recovery of gene regulatory networks from Turing patterns (inverse Turing problem)."
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0",
+    "numpy",
+    "scipy",
+    "h5py",
+    "matplotlib",
+    "pyyaml",
+    "networkx",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+tracking = ["wandb"]
+
+[project.scripts]
+rngrn = "rngrn.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

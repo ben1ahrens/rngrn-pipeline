@@ -28,6 +28,47 @@ and `docs/` for per-branch handoffs.
 - **Conventional branch prefixes, always**: `feature/`, `fix/`, `chore/`, `docs/`.
   Never an unprefixed branch name.
 - **Never commit directly to `main`.** Work on a branch and merge.
+- **New work → new branch → new worktree.** Any task that could edit files or add new
+  ones starts with a fresh branch checked out in its own **git worktree**, never by
+  switching branches in an existing checkout. Merge to `main` only after the tests pass
+  **and the user has validated the results** — passing tests alone is not the bar.
+
+  ```bash
+  # from the main checkout
+  git worktree add ../worktrees/<slug> -b feature/<slug>      # new branch + tree
+  cd ../worktrees/<slug>
+  python -m venv --system-site-packages .venv                 # see the gotcha below
+  .venv/bin/pip install -e ".[dev]" -q
+  ```
+
+  Worktrees live in `../worktrees/<slug>` — a **sibling** of the checkout, never nested
+  inside it (a nested tree lands inside the parent's working directory and git will try
+  to track it). Remove a finished one with `git worktree remove ../worktrees/<slug>`.
+
+  > **Gotcha — each worktree needs its own `.venv`.** An editable install writes an
+  > `__editable__*.pth` file holding the **absolute path** of the tree it was installed
+  > from. Reusing another tree's `.venv` therefore imports *that* tree's `src/` while you
+  > edit this one — tests silently exercise the wrong code. Creating a venv per worktree
+  > is cheap (~48 MB): `--system-site-packages` inherits the CUDA torch build from the
+  > base conda env rather than downloading its own. Verify after setup with
+  > `.venv/bin/python -c "import rngrn,os;print(os.path.dirname(rngrn.__file__))"` — the
+  > path must be inside the worktree.
+
+  > **Gotcha — a new worktree looks provisioned with datasets but is not.** Manifests and
+  > `datasets.jsonl` are tracked, so they come across with the checkout and
+  > `rngrn list-datasets` cheerfully lists every dataset. The `payload.h5` files are
+  > gitignored and do **not**, so the first load fails with `FileNotFoundError` deep in
+  > h5py. Symlink them from the main checkout rather than copying ~91 MB again:
+  >
+  > ```bash
+  > MAIN=../../rngrn-pipeline
+  > for d in "$MAIN"/data/datasets/*/; do
+  >   n=$(basename "$d"); [ -f "$d/payload.h5" ] || continue
+  >   mkdir -p "data/datasets/$n" && ln -sfn "$d/payload.h5" "data/datasets/$n/payload.h5"
+  > done
+  > ```
+  >
+  > Costs ~84 KB, loads correctly, and the symlinks stay gitignored like the payloads.
 - **Do not commit on the user's behalf without asking**, unless the work was explicitly
   scoped as "commit it".
 - Substantial branches get a `docs/HANDOFF_<topic>.md` written for a **zero-context

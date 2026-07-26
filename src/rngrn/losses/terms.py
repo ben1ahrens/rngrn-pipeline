@@ -40,7 +40,7 @@ def steady_state(model, x0=None, tol=1e-10, max_iter=100, relax_steps=2000, rela
     """
     N = model.N
     if x0 is None:
-        x0 = torch.ones(N) * 1.0
+        x0 = torch.ones(N, device=model.device, dtype=model.dtype)
     x = x0.clone()
     for _ in range(max_iter):
         fx = model.reaction(x)
@@ -60,7 +60,7 @@ def steady_state(model, x0=None, tol=1e-10, max_iter=100, relax_steps=2000, rela
             lam *= 0.5
         x = torch.clamp(x - lam * step, min=1e-9)
     # relaxation fallback
-    x = (x0.clone() if (x0 > 0).all() else torch.ones(N))
+    x = (x0.clone() if (x0 > 0).all() else torch.ones(N, device=model.device, dtype=model.dtype))
     dt = relax_dt
     for _ in range(relax_steps):
         x = torch.clamp(x + dt * model.reaction(x), min=1e-9)
@@ -151,7 +151,7 @@ def stationarity_residual(model, fields, L, observed_idx, latent_fields=None):
     N = model.N
     m, H, W = fields.shape
     # assemble full state (N, H, W)
-    full = torch.zeros(N, H, W, dtype=fields.dtype)
+    full = torch.zeros(N, H, W, dtype=fields.dtype, device=fields.device)
     for row, idx in enumerate(observed_idx):
         full[idx] = fields[row]
     if latent_fields is not None:

@@ -10,3 +10,6 @@ data/three_gene_dataset/*.h5
 experiments/
 data/datasets/*/payload.h5
 data/staging/
+
+# downloaded literature (not ours to redistribute)
+papers/

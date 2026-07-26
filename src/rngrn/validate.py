@@ -211,8 +211,8 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
 
     # 2. regime — Turing conditions on the RECOVERED model
     J_rec = result.model.jacobian(
-        __import__("torch").as_tensor(result.xstar), create_graph=False).detach().numpy()
-    D_rec = result.model.D.detach().numpy()
+        __import__("torch").as_tensor(result.xstar), create_graph=False).detach().cpu().numpy()
+    D_rec = result.model.D.detach().cpu().numpy()
     ok, info = turing_ok(J_rec, D_rec)
     out["recovered_turing"] = bool(ok)
     out["recovered_sig_max"] = float(info["sig_max"])

@@ -16,9 +16,9 @@ from .numerics import INTEGRATORS
 
 
 def _reaction_np_builder(model):
-    KA = model.KA.detach().numpy(); KR = model.KR.detach().numpy()
-    alpha = model.alpha.detach().numpy(); beta = model.beta.detach().numpy()
-    delta = model.delta.detach().numpy(); n_h = model.n_hill
+    KA = model.KA.detach().cpu().numpy(); KR = model.KR.detach().cpu().numpy()
+    alpha = model.alpha.detach().cpu().numpy(); beta = model.beta.detach().cpu().numpy()
+    delta = model.delta.detach().cpu().numpy(); n_h = model.n_hill
     form = model.form
 
     def reaction_np(X):  # X: (N,n,n)
@@ -41,14 +41,14 @@ def simulate(model, L, n=128, T=None, dt=None, seed=0, noise=1e-2, xstar=None,
     """Integrate d x/dt = D lap(x) + f(x) from x* + noise. Returns a result dict."""
     rng = np.random.default_rng(seed)
     N = model.N
-    D = model.D.detach().numpy()
+    D = model.D.detach().cpu().numpy()
     if xstar is None:
         from ..losses.terms import steady_state
-        xs, _ = steady_state(model); xstar = xs.detach().numpy()
+        xs, _ = steady_state(model); xstar = xs.detach().cpu().numpy()
 
     # growth-rate-aware dt and horizon
-    xs_t = torch.tensor(xstar)
-    Jn = model.jacobian(xs_t, create_graph=False).detach().numpy()
+    xs_t = torch.tensor(xstar, device=model.device, dtype=model.dtype)
+    Jn = model.jacobian(xs_t, create_graph=False).detach().cpu().numpy()
     kg = np.linspace(1e-3, 2 * np.pi * (n // 2) / L, 2000)
     sigd = np.array([np.max(np.real(np.linalg.eigvals(Jn - kk**2 * np.diag(D)))) for kk in kg])
     sig_max = max(sigd.max(), 1e-3)

@@ -35,8 +35,8 @@ def turing_ok(J, D, kgrid=None):
 def linear_stability(model, xstar):
     """Full linear-stability readout at a given steady state (numpy)."""
     xs_t = torch.as_tensor(np.asarray(xstar, float))
-    J = model.jacobian(xs_t, create_graph=False).detach().numpy()
-    D = model.D.detach().numpy()
+    J = model.jacobian(xs_t, create_graph=False).detach().cpu().numpy()
+    D = model.D.detach().cpu().numpy()
     ok, info = turing_ok(J, D)
     info["J"] = J.tolist(); info["D"] = D.tolist()
     info["turing"] = ok
@@ -58,8 +58,8 @@ def robustness_cloud(model, n_samples=200, sigma_log=0.1, seed=0):
                 p.copy_(base[nm] * factor)
         try:
             xs, conv = steady_state(pert)
-            J = pert.jacobian(xs, create_graph=False).detach().numpy()
-            ok, info = turing_ok(J, pert.D.detach().numpy())
+            J = pert.jacobian(xs, create_graph=False).detach().cpu().numpy()
+            ok, info = turing_ok(J, pert.D.detach().cpu().numpy())
             oks.append(ok)
             if ok and np.isfinite(info['kstar']):
                 kstars.append(info['kstar'])

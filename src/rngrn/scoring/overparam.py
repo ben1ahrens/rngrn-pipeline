@@ -586,8 +586,8 @@ def overparam_report(
 
     J_rec = result.model.jacobian(
         torch.as_tensor(np.asarray(result.xstar, dtype=float)),
-        create_graph=False).detach().numpy()
-    D_rec = result.model.D.detach().numpy()
+        create_graph=False).detach().cpu().numpy()
+    D_rec = result.model.D.detach().cpu().numpy()
     n_model = int(np.asarray(J_rec).shape[0])
     n_true = int(answer_key.n_species_true)
     obs = _as_index_tuple(observed_idx, n_model)

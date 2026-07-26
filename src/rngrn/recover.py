@@ -36,14 +36,14 @@ class RecoveryResult:
     latent_fields: object = None
 
 
-def _kgrid_for(kstar_obs, n=400, span=8.0):
+def _kgrid_for(kstar_obs, n=400, span=8.0, device=None, dtype=torch.float64):
     kmax = max(2.0, span * kstar_obs)
-    return torch.linspace(kstar_obs / 50.0 + 1e-3, kmax, n)
+    return torch.linspace(kstar_obs / 50.0 + 1e-3, kmax, n, device=device, dtype=dtype)
 
 
 def _topology(model):
-    KA = model.KA.detach().numpy(); KR = model.KR.detach().numpy()
-    s = model.s.detach().numpy(); g = model.gate.detach().numpy()
+    KA = model.KA.detach().cpu().numpy(); KR = model.KR.detach().cpu().numpy()
+    s = model.s.detach().cpu().numpy(); g = model.gate.detach().cpu().numpy()
     sign = np.where(g > 0.5, 1, -1)
     sign = np.where(s > 0.05 * s.max(), sign, 0)
     return dict(sign=sign, magnitude=s, gate=g, KA=KA, KR=KR)
@@ -51,29 +51,30 @@ def _topology(model):
 
 def recover(recovery_input, form="competitive", strategy=None, weights=None,
             tau=0.12, jac_floor=1.0, n_restarts=4, adam_steps=1500, adam_lr=0.05,
-            lbfgs_steps=50, grad_clip=10.0, seed=0, verbose=False):
+            lbfgs_steps=50, grad_clip=10.0, seed=0, verbose=False, device=None):
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
     """
     ri = recovery_input
-    frame = torch.tensor(np.asarray(ri.frame, dtype=float))
+    dev = torch.device(device) if device is not None else torch.device("cpu")
+    frame = torch.tensor(np.asarray(ri.frame, dtype=float), device=dev)
     L, N, observed_idx = ri.L, ri.N, list(ri.observed_idx)
     m = frame.shape[0]
     if strategy is None:
         base = weights or dict(kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.0)
         strategy = FixedWeighting(base)
 
-    kstar_obs = obs.kstar_of(frame[0].numpy(), L=L)   # firewall: FFT of the observed image
-    kgrid = _kgrid_for(kstar_obs)
+    kstar_obs = obs.kstar_of(frame[0].detach().cpu().numpy(), L=L)   # firewall: FFT of the observed image
+    kgrid = _kgrid_for(kstar_obs, device=dev)
 
     best = None; restart_log = []
     for r in range(n_restarts):
-        model = RNGRN(N=N, form=form, seed=seed + r)
+        model = RNGRN(N=N, form=form, seed=seed + r).to(dev)
         latent = None
         if m < N:
             base_field = frame.mean(0, keepdim=True)
-            lat0 = base_field.repeat(N - m, 1, 1) * (0.8 + 0.4 * torch.rand(N - m, 1, 1))
+            lat0 = base_field.repeat(N - m, 1, 1) * (0.8 + 0.4 * torch.rand(N - m, 1, 1, device=dev, dtype=frame.dtype))
             latent = torch.nn.Parameter(lat0.clone())
         params = list(model.parameters()) + ([latent] if latent is not None else [])
 
@@ -125,8 +126,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         if best is None or float(loss) < best[0]:
             from .losses.terms import steady_state
             xs, _ = steady_state(model)
-            best = (float(loss), model, parts, xs.detach().numpy(),
-                    latent.detach().numpy() if latent is not None else None)
+            best = (float(loss), model, parts, xs.detach().cpu().numpy(),
+                    latent.detach().cpu().numpy() if latent is not None else None)
 
     if best is None:
         # every random init failed to form a valid steady state. Fail loud to the caller —
@@ -136,9 +137,9 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             f"all {n_restarts} restarts failed to converge to a valid steady state; "
             "no recovery produced. Widen model init scales or check the frame/observed_idx.")
     loss, model, parts, xstar, latent_np = best
-    P = dict(KA=model.KA.detach().numpy(), KR=model.KR.detach().numpy(),
-             alpha=model.alpha.detach().numpy(), delta=model.delta.detach().numpy(),
-             beta=model.beta.detach().numpy(), D=model.D.detach().numpy())
+    P = dict(KA=model.KA.detach().cpu().numpy(), KR=model.KR.detach().cpu().numpy(),
+             alpha=model.alpha.detach().cpu().numpy(), delta=model.delta.detach().cpu().numpy(),
+             beta=model.beta.detach().cpu().numpy(), D=model.D.detach().cpu().numpy())
     return RecoveryResult(model=model, params=P, topology=_topology(model), xstar=xstar,
                           kstar_model=parts.get("kstar_model", float("nan")), kstar_obs=kstar_obs,
                           loss=loss, parts=parts, restarts=restart_log, latent_fields=latent_np)

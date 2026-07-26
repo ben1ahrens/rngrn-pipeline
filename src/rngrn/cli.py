@@ -62,7 +62,7 @@ def cmd_analyze(args):
     model, payload = IO.load_checkpoint(os.path.join(args.runs_root, "runs", args.run_id))
     cfg = _load(args)
     xs, _ = steady_state(model)
-    lin = linear_stability(model, xs.detach().numpy())
+    lin = linear_stability(model, xs.detach().cpu().numpy())
     rob = robustness_cloud(model, n_samples=cfg.solver.robustness_samples,
                            sigma_log=cfg.solver.robustness_sigma_log)
     print(json.dumps(dict(linear_stability=lin, robustness=rob), indent=2, default=str))

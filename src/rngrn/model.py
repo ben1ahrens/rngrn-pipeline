@@ -74,6 +74,20 @@ class RNGRN(nn.Module):
         self.theta_beta  = nn.Parameter(randn(N) * 0.3 - 1.0)      # basal (softplus)
         self.theta_D     = nn.Parameter(randn(N) * 0.5)            # diffusion (exp)
 
+    # ---- device / dtype ------------------------------------------------------------
+    @property
+    def device(self) -> torch.device:
+        """Device the parameters live on. Callers that create tensors to feed this
+        model (steady-state seeds, k-grids, latent fields) MUST place them here, or
+        .to('cuda') silently breaks with a cross-device RuntimeError."""
+        return self.theta_s.device
+
+    @property
+    def dtype(self) -> torch.dtype:
+        """Parameter dtype (float64 by default). The dispersion eigendecomposition and
+        the Newton steady-state solve both rely on it; do not silently downcast."""
+        return self.theta_s.dtype
+
     # ---- constrained physical parameters (all strictly positive) --------------------
     @property
     def s(self):     return _softplus(self.theta_s)

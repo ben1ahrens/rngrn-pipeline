@@ -12,16 +12,16 @@ import torch
 
 def qss_reaction_np(model, x):
     with torch.no_grad():
-        return model.reaction(torch.tensor(x)).numpy()
+        return model.reaction(torch.tensor(x, device=model.device, dtype=model.dtype)).detach().cpu().numpy()
 
 
 def lift_check(model, x, mu=1e-4, n=4000, dt=None):
     """Integrate lifted promoter gates to equilibrium at fixed x, form the production
     term, compare to the QSS reaction. Returns max abs difference (-> 0 as mu -> 0)."""
     N = model.N; n_h = model.n_hill
-    KA = model.KA.detach().numpy(); KR = model.KR.detach().numpy()
-    alpha = model.alpha.detach().numpy(); beta = model.beta.detach().numpy()
-    delta = model.delta.detach().numpy()
+    KA = model.KA.detach().cpu().numpy(); KR = model.KR.detach().cpu().numpy()
+    alpha = model.alpha.detach().cpu().numpy(); beta = model.beta.detach().cpu().numpy()
+    delta = model.delta.detach().cpu().numpy()
     x = np.asarray(x, float); xn = np.clip(x, 0, None) ** n_h
     GA = np.zeros((N, N)); GR = np.zeros((N, N))
     if dt is None: dt = mu * 0.1

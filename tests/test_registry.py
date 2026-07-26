@@ -51,6 +51,38 @@ def test_register_list_load(tmp_path, backend):
 
 
 @pytest.mark.parametrize("backend", ["jsonl", "sqlite"])
+def test_scan_indexes_manually_placed_dataset(tmp_path, backend):
+    """The manual-drop workflow: put payload.h5 at <root>/<id>/ yourself, then scan."""
+    from rngrn.data import registry as reg
+    from rngrn.data import gate
+
+    droot = tmp_path / "datasets"
+    dsdir = droot / "dropped_v1"
+    dsdir.mkdir(parents=True)
+    _make_payload(str(dsdir / "payload.h5"))
+
+    # before scan: no manifest -> loading fails loud
+    with pytest.raises(FileNotFoundError):
+        reg.load_manifest(str(droot), "dropped_v1")
+
+    found = reg.scan(str(droot), backend=backend)
+    assert [f["dataset_id"] for f in found] == ["dropped_v1"]
+    assert found[0]["action"] == "indexed" and found[0]["n_samples"] == 3
+
+    # after scan: manifest exists, listed, and loadable through the firewall gate
+    assert (dsdir / "manifest.json").exists()
+    assert any(r["dataset_id"] == "dropped_v1"
+               for r in reg.list_datasets(str(droot), backend=backend))
+    ri, ak = gate.from_registry(str(droot), "dropped_v1", "sample_0000", N=3,
+                                observed_idx=[0, 1, 2], L=100.0, backend=backend)
+    assert ri.frame.shape == (3, 16, 16) and ak.J.shape == (3, 3)
+
+    # idempotent: a second scan does not re-index
+    again = reg.scan(str(droot), backend=backend)
+    assert again[0]["action"] == "already-indexed"
+
+
+@pytest.mark.parametrize("backend", ["jsonl", "sqlite"])
 def test_index_roundtrip(tmp_path, backend):
     from rngrn.index import open_index
     idx = open_index(str(tmp_path), "runs", backend)

@@ -91,6 +91,19 @@ def cmd_register_data(args):
                      indent=2, default=str))
 
 
+def cmd_scan_datasets(args):
+    """Index datasets you placed manually at <datasets_root>/<id>/payload.h5."""
+    from .data import registry as reg
+    rows = reg.scan(args.datasets_root, backend=args.index_backend,
+                    observable_key=args.observable_key, refresh=args.refresh)
+    if not rows:
+        print(json.dumps({"found": 0, "hint":
+                          f"put a payload.h5 at {args.datasets_root}/<dataset_id>/payload.h5"},
+                         indent=2))
+        return
+    print(json.dumps(rows, indent=2, default=str))
+
+
 def cmd_list_datasets(args):
     from .data import registry as reg
     rows = reg.list_datasets(args.datasets_root, backend=args.index_backend)
@@ -134,6 +147,12 @@ def build_parser():
     sp.add_argument("--index-backend", choices=["jsonl", "sqlite"], default="jsonl")
     sp.add_argument("--overwrite", action="store_true")
     sp.set_defaults(func=cmd_register_data)
+    sp = sub.add_parser("scan-datasets", help="index datasets placed manually in datasets_root")
+    sp.add_argument("--datasets-root", default="data/datasets")
+    sp.add_argument("--index-backend", choices=["jsonl", "sqlite"], default="jsonl")
+    sp.add_argument("--observable-key", default="final_frame")
+    sp.add_argument("--refresh", action="store_true", help="rebuild existing manifests")
+    sp.set_defaults(func=cmd_scan_datasets)
     sp = sub.add_parser("list-datasets")
     sp.add_argument("--datasets-root", default="data/datasets")
     sp.add_argument("--index-backend", choices=["jsonl", "sqlite"], default="jsonl")

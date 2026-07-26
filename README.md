@@ -102,11 +102,22 @@ elsewhere and downloaded — the ones you can't (or don't want to) regenerate fr
 spec in this codebase. Register once, then load by name from any config:
 
 ```bash
+# either: let the CLI copy the file into the store
 rngrn register-data --dataset-id three_gene_v1 --payload /path/to/val.h5 \
      --provenance "3-gene val split"
+
+# or: drop it in yourself, then index it in place (nothing is copied)
+mkdir -p data/datasets/three_gene_v1
+cp /path/to/val.h5 data/datasets/three_gene_v1/payload.h5
+rngrn scan-datasets
+
 rngrn list-datasets
 rngrn train --config configs/registry_example.yaml    # source: registry, dataset_id: three_gene_v1
 ```
+
+`payload.h5` files are gitignored; manifests and the index are tracked, so the repo
+records which datasets an experiment used without carrying the data itself. A fresh
+clone has no datasets — re-drop them and run `scan-datasets`.
 
 Each dataset lives at `data/datasets/<dataset_id>/{payload.h5, manifest.json}`; the
 manifest and a `datasets` index hold **metadata only** (provenance, shape, splits,

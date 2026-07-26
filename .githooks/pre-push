@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# pre-push: run the test suite locally before anything leaves the machine.
+#
+# This is the local stand-in for CI. Enable it once per clone with:
+#
+#     git config core.hooksPath .githooks
+#
+# Skip it for a single push with `git push --no-verify` (use sparingly).
+#
+# Unlike a GitHub Actions runner this uses the repo's own .venv when present, so
+# the tests run against the same CUDA torch build you develop with.
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root" || exit 1
+
+if [ -x .venv/bin/python ]; then
+    PY=.venv/bin/python
+elif command -v python >/dev/null 2>&1; then
+    PY=python
+else
+    echo "pre-push: no python interpreter found; skipping tests." >&2
+    exit 0
+fi
+
+echo "pre-push: running test suite with $PY"
+start=$(date +%s)
+"$PY" -m pytest -q
+status=$?
+elapsed=$(( $(date +%s) - start ))
+
+if [ $status -ne 0 ]; then
+    cat >&2 <<EOF
+
+pre-push: tests FAILED after ${elapsed}s — push aborted.
+          Fix the failures, or bypass deliberately with:  git push --no-verify
+EOF
+    exit 1
+fi
+
+echo "pre-push: tests passed in ${elapsed}s"
+exit 0

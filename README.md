@@ -140,6 +140,25 @@ dataset registry index use it. `jsonl` (default) is zero-setup and diff-friendly
 `sqlite` gives real SQL (`SELECT … WHERE recovered_turing AND kstar_rel_err < 0.15
 GROUP BY config_id`) once runs pile up. Same rows either way — switch freely.
 
+## Tests: run them locally, before you push
+
+The authoritative test run is **local**, via a `pre-push` hook. Enable it once per
+clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+From then on `git push` runs `pytest -q` first (using this repo's `.venv` if present,
+so the tests exercise the same torch build you develop against) and aborts the push
+on failure. Bypass deliberately with `git push --no-verify`.
+
+The GitHub Actions workflow in `.github/workflows/tests.yml` is kept as a definition
+but should not be relied on: Actions minutes for private repos are metered, and runs
+are skipped entirely when the account's billing is unavailable — the job then reports
+a *failure* that has nothing to do with the code. The hook costs ~8 s and needs no
+account state.
+
 ## Sandbox note
 
 If `import torch` aborts with `OMP: Error #179` (seen in some containers), set

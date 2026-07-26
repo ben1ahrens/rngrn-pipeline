@@ -6,7 +6,7 @@
 _base_: [base.yaml]
 data:
   source: registry
-  dataset_id: two_gene_val        # 2-gene classical set, already in registry format
+  dataset_id: two_gene_classical_val   # 2-gene classical set, already in registry format
   sample_key: sample_0000
   L: 100.0
 model:

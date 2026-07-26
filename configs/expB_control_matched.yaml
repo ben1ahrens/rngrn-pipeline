@@ -4,7 +4,7 @@
 _base_: [base.yaml]
 data:
   source: registry
-  dataset_id: two_gene_val
+  dataset_id: two_gene_classical_val
   sample_key: sample_0000
   L: 100.0
 model: {N: 2, m: 2, observed_idx: [0, 1]}

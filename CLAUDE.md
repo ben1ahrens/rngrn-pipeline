@@ -77,10 +77,35 @@ and `docs/` for per-branch handoffs.
 
 ## 3. Testing
 
-- **The local pre-push hook is the authoritative test run.** Enable once per clone:
-  `git config core.hooksPath .githooks`. It runs `pytest -q` against the repo `.venv`, so
-  tests exercise the same torch build you develop against, and aborts the push on failure.
-  Bypass deliberately with `git push --no-verify`.
+- **The local pre-push hook is the authoritative test run.** It runs `pytest -q` against
+  the repo `.venv`, so tests exercise the same torch build you develop against, and aborts
+  the push on failure. Bypass deliberately with `git push --no-verify`. Run it on demand
+  without pushing: `git hook run pre-push`.
+- **Enable it once per REPOSITORY, not per worktree:**
+
+  ```bash
+  git config core.hooksPath .githooks      # from any worktree; covers them all
+  ```
+
+  Git's local config lives in the one `.git/config` and is **shared by every worktree** (a
+  worktree's `.git` is a pointer file, not a config of its own). The value is a *relative*
+  path and `.githooks/pre-push` is tracked, so it resolves against whichever worktree you
+  push from, and the hook picks up that worktree's own `.venv`. Setting it again in a new
+  worktree is a no-op — but it is also harmless.
+- **Claude Science cannot set this** — in the sandbox `.git/config` (and each
+  `.git/worktrees/*/config.worktree`) is bind-mounted read-only, so any `git config` write
+  fails with `Device or resource busy`. The rest of `.git/` is writable, which is why
+  commits work. An agent pushing from the sandbox must therefore inject the setting per
+  command so the tests still gate the push:
+
+  ```bash
+  git -c core.hooksPath=.githooks push ...
+  # or: GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath \
+  #     GIT_CONFIG_VALUE_0=.githooks git push ...
+  ```
+
+  Both are verified to fire the hook. Do not push from the sandbox without one of them —
+  otherwise the authoritative test run is silently skipped.
 - **GitHub Actions is not a signal here.** `.github/workflows/tests.yml` is
   `workflow_dispatch`-only; the `push`/`pull_request` triggers are commented out, not
   deleted. The account's Actions billing has lapsed, so runs are *skipped* and reported as

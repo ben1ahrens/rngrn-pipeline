@@ -111,7 +111,17 @@ def cmd_list_datasets(args):
 
 
 def cmd_benchmark(args):
-    from .optim.benchmark import build_table, to_markdown, COLUMNS
+    from .optim.benchmark import (build_table, to_markdown, COLUMNS,
+                                  degradation_table, degradation_markdown,
+                                  DEGRADATION_COLUMNS)
+    if getattr(args, "degradation", False):
+        table = degradation_table(runs_root=args.runs_root, backend=args.index_backend)
+        if args.format == "markdown":
+            print(degradation_markdown(table)); return
+        import csv, sys
+        w = csv.DictWriter(sys.stdout, fieldnames=DEGRADATION_COLUMNS); w.writeheader()
+        for row in table: w.writerow({c: row.get(c) for c in DEGRADATION_COLUMNS})
+        return
     table = build_table(runs_root=args.runs_root, backend=args.index_backend)
     if args.format == "markdown":
         print(to_markdown(table))
@@ -138,7 +148,7 @@ def build_parser():
     sp = sub.add_parser("evaluate"); add_cfg(sp); sp.add_argument("--run-id", required=True); sp.set_defaults(func=cmd_evaluate)
     sp = sub.add_parser("analyze"); add_cfg(sp); sp.add_argument("--run-id", required=True); sp.set_defaults(func=cmd_analyze)
     sp = sub.add_parser("sweep"); sp.add_argument("--sweep", required=True); sp.set_defaults(func=cmd_sweep)
-    sp = sub.add_parser("benchmark"); sp.add_argument("--format", choices=["markdown", "csv"], default="markdown"); sp.add_argument("--index-backend", choices=["jsonl", "sqlite"], default="jsonl"); sp.set_defaults(func=cmd_benchmark)
+    sp = sub.add_parser("benchmark"); sp.add_argument("--format", choices=["markdown", "csv"], default="markdown"); sp.add_argument("--index-backend", choices=["jsonl", "sqlite"], default="jsonl"); sp.add_argument("--degradation", action="store_true", help="identifiability degradation table (experiment arms)"); sp.set_defaults(func=cmd_benchmark)
     sp = sub.add_parser("register-data")
     sp.add_argument("--datasets-root", default="data/datasets")
     sp.add_argument("--dataset-id", required=True)

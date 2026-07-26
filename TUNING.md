@@ -103,6 +103,16 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
 - **[NOTE] dataset registry** — datasets you download/generate elsewhere go in the store via
   `rngrn register-data --dataset-id <id> --payload <file.h5>` and load by name (`source: registry`,
   `dataset_id: <id>`), through the same firewall gate. `data/registry.py` + `gate.from_registry`.
+- **[TUNE] spare-species inertness threshold** — `scoring/overparam.py::DEFAULT_COUPLING_THRESHOLD`
+  (0.05, relative). UNCALIBRATED starting point. Calibrate from the distribution of
+  `max_abs_coupling_*` in the `expB_control_matched` arm, where no spare species exists.
+- **[VALIDATE] Experiment A identifiability read** — with N=3 and m=2 the permutation search is
+  degenerate (one hidden index), so permutation alignment is a no-op there; the honest read is
+  `latent_field_quality` (use |r|, since sign/scale is a gauge freedom). Validate that the
+  latent correlation separates good from bad recoveries before trusting it as a metric.
+- **[TUNE] hidden-channel choice** — `model.observed_idx` in `expA_hidden_channel.yaml`. Rotate
+  which gene is hidden ([0,1] / [0,2] / [1,2]); identifiability may depend on which node in the
+  topology is unobserved (a hub vs a leaf).
 - **[VALIDATE] acceptance test** — once a config reliably converges, freeze it as an acceptance
   test with tolerances on k* + Turing conditions (the summary in `tests/` explains the "only once
   it passes" rule).

@@ -1,0 +1,16 @@
+# EXPERIMENT B — over-parameterisation robustness.
+# N=2 truth (there is NO third gene), but the model is given N=3.
+# Success is NOT a "correct" 3x3: it is (a) the spare species staying INERT and
+# (b) the observed 2x2 sub-block matching the truth. An active third gene is a
+# FALSE POSITIVE — the failure mode this experiment exists to detect.
+_base_: [base.yaml]
+data:
+  source: registry
+  dataset_id: two_gene_val        # 2-gene classical set, already in registry format
+  sample_key: sample_0000
+  L: 100.0
+model:
+  N: 3                            # deliberately one MORE than the truth
+  m: 2
+  observed_idx: [0, 1]            # both true genes observed; species 2 is spare capacity
+tracking: {run_name: expB_overparam}

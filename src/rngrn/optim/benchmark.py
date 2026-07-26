@@ -60,6 +60,78 @@ def build_table(runs_root="experiments", backend="jsonl") -> list[dict]:
     return table
 
 
+# --------------------------------------------------------------------------------------
+# Identifiability degradation table (the two N=3 experiments)
+# --------------------------------------------------------------------------------------
+
+DEGRADATION_COLUMNS = [
+    "arm", "dataset", "n_true", "n_model", "n_runs",
+    "kstar_rel_err_mean", "recovered_turing_frac",
+    "subblock_sign_match_mean",        # comparison valid across ALL arms
+    "sign_match_aligned_mean",         # permutation-aligned (hidden-channel arm)
+    "spare_inert_frac",                # over-parameterised arm only
+    "kstar_identifiability_std",
+]
+
+
+def degradation_table(runs_root="experiments", backend="jsonl") -> list[dict]:
+    """Compare experiment ARMS: fully-observed control vs hidden-channel vs over-parameterised.
+
+    This is the headline output of the two identifiability experiments. Grouping is by
+    (arm, dataset, n_true, n_model) so an arm is never silently averaged with a different
+    one. Columns that do not apply to an arm are NaN by construction, not by failure:
+      * `sign_match_aligned_mean` is meaningful only where a same-size true J exists
+        (the hidden-channel and fully-observed arms).
+      * `spare_inert_frac` is meaningful only in the over-parameterised arm.
+      * `subblock_sign_match_mean` restricts to the OBSERVED species and is therefore the
+        one column comparable across every arm — read this for cross-arm degradation.
+    """
+    rows = IO.read_run_index(runs_root, backend=backend)
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r.get("arm"), _dataset_of(r), r.get("n_true"), r.get("n_model"))].append(r)
+
+    out = []
+    for (arm, dataset, n_true, n_model), members in groups.items():
+        kstars_ok = [x["kstar_model"] for x in members
+                     if x.get("recovered_turing") and _isnum(x.get("kstar_model"))]
+        out.append(dict(
+            arm=arm, dataset=dataset, n_true=n_true, n_model=n_model, n_runs=len(members),
+            kstar_rel_err_mean=_col_mean(members, "kstar_rel_err"),
+            recovered_turing_frac=_safe(mean, [1.0 if x.get("recovered_turing") else 0.0
+                                               for x in members]),
+            subblock_sign_match_mean=_col_mean(members, "subblock_sign_match"),
+            sign_match_aligned_mean=_col_mean(members, "sign_match_frac_aligned"),
+            spare_inert_frac=_safe(mean, [1.0 if x.get("spare_species_inert") else 0.0
+                                          for x in members
+                                          if x.get("spare_species_inert") is not None]),
+            kstar_identifiability_std=(_safe(pstdev, kstars_ok) if len(kstars_ok) > 1
+                                       else float("nan")),
+        ))
+    # stable, readable ordering: controls first, then the degraded arms
+    order = {"fully_observed": 0, "hidden_channel": 1, "overparameterised": 2,
+             "underparameterised": 3}
+    out.sort(key=lambda r: (order.get(r["arm"], 9), str(r["dataset"])))
+    return out
+
+
+def _col_mean(members, key):
+    return _safe(mean, [x[key] for x in members if _isnum(x.get(key))])
+
+
+def degradation_markdown(table: list[dict]) -> str:
+    if not table:
+        return "_(no runs indexed yet)_"
+    hdr = ("| " + " | ".join(DEGRADATION_COLUMNS) + " |\n"
+           + "|" + "---|" * len(DEGRADATION_COLUMNS) + "\n")
+    body = ""
+    for row in table:
+        body += "| " + " | ".join(
+            (f"{row.get(c):.4g}" if isinstance(row.get(c), float) else str(row.get(c)))
+            for c in DEGRADATION_COLUMNS) + " |\n"
+    return hdr + body
+
+
 def _isnum(v):
     return isinstance(v, (int, float)) and v == v  # not None, not NaN
 

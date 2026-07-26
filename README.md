@@ -76,6 +76,14 @@ rngrn benchmark     --format markdown
 Config is composed from `base.yaml` via `_base_:` and overridden on the CLI with
 `-o dotted.key=value` (e.g. `-o loss.weights.resid=0.6 train.adam_lr=0.03`).
 
+## Identifiability experiments
+
+Two validation experiments feed the model 2 observed channels and ask for a 3x3 GRN:
+**A** recovers a genuinely hidden gene (N=3 truth); **B** tests whether spare capacity
+invents one (N=2 truth, N=3 model). They need different metrics and are read against their
+own controls — see [docs/IDENTIFIABILITY_EXPERIMENTS.md](docs/IDENTIFIABILITY_EXPERIMENTS.md).
+`rngrn benchmark --degradation` prints the per-arm comparison.
+
 ## The three milestones
 
 | milestone | config | what it isolates |

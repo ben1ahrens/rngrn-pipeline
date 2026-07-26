@@ -1,0 +1,10 @@
+# EXPERIMENT A CONTROL — same N=3 data, FULLY observed (m=3).
+# The reference arm: degradation in experiment A is measured against THIS, not against zero.
+_base_: [base.yaml]
+data:
+  source: registry
+  dataset_id: three_gene_val
+  sample_key: sample_0000
+  L: 100.0
+model: {N: 3, m: 3, observed_idx: [0, 1, 2]}
+tracking: {run_name: expA_control}

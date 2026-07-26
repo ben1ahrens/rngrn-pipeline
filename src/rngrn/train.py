@@ -60,7 +60,28 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        lbfgs_steps=cfg.train.lbfgs_steps, grad_clip=cfg.train.grad_clip,
                        seed=cfg.train.seed, verbose=verbose)
 
-    metric = score_recovery(result, answer_key)     # scoring uses the answer key, recovery did not
+    metric = score_recovery(result, answer_key,
+                            observed_idx=(cfg.model.observed_idx or list(range(cfg.model.m))))     # scoring uses the answer key, recovery did not
+
+    # ---- experiment-arm identity (scoring/bookkeeping side) -------------------------
+    # Classify this run so the benchmark can compare like with like. n_true comes from the
+    # ANSWER KEY (it is truth, and is used only here for labelling/scoring — never by
+    # recovery, which was already finished above).
+    obs_idx_used = list(cfg.model.observed_idx or range(cfg.model.m))
+    n_true = getattr(answer_key, "n_species_true", None)
+    hidden_idx = [i for i in range(cfg.model.N) if i not in obs_idx_used]
+    if n_true is not None and cfg.model.N > n_true:
+        arm = "overparameterised"      # Experiment B: model has more species than exist
+    elif n_true is not None and cfg.model.N < n_true:
+        arm = "underparameterised"     # model has fewer species than exist
+    elif len(hidden_idx) > 0:
+        arm = "hidden_channel"         # Experiment A: right N, but some channels unobserved
+    else:
+        arm = "fully_observed"         # control
+    metric["arm"] = arm
+    metric["n_true"] = n_true
+    metric["n_model"] = cfg.model.N
+    metric["observed_idx"] = str(obs_idx_used)   # single source of truth for this key
 
     IO.save_checkpoint(rdir, result.model, extra=dict(kstar_obs=result.kstar_obs))
     IO.save_results(rdir, "train_results.json",
@@ -85,14 +106,22 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
         dataset_label = f"{os.path.basename(cfg.data.hdf5_path or '')}:{cfg.data.sample_key}"
     else:
         dataset_label = None
-    IO.append_run_index(runs_root, dict(
+    # Build the run-index row explicitly. The scorers return their own keys (and may echo
+    # observed_idx / loss / n_true), so MERGE rather than **-expand into a dict() literal —
+    # that raises TypeError on any duplicate key. Run identity wins over scorer echoes.
+    row = {k: (v if isinstance(v, (int, float, bool, str)) or v is None else str(v))
+           for k, v in metric.items()}          # flat scalars only, for sqlite/jsonl
+    row.update(
         run_id=run_id, config_id=cfg.config_id(),
         source=src, dataset_label=dataset_label,
         dataset_hash=(cfg.data.dataset_hash or getattr(ri, "dataset_hash", None)),
         dataset_id=cfg.data.dataset_id, sample_key=cfg.data.sample_key,
         system=system_label, N=cfg.model.N, m=cfg.model.m, form=cfg.model.form,
-        strategy=cfg.loss.strategy, loss=result.loss, **metric),
-        backend=cfg.tracking.index_backend)
+        # experiment-arm identity: which observation regime, and how the model's assumed
+        # species count relates to the truth.
+        hidden_idx=str(hidden_idx), strategy=cfg.loss.strategy, loss=result.loss,
+    )
+    IO.append_run_index(runs_root, row, backend=cfg.tracking.index_backend)
     metric["run_id"] = run_id
     metric["loss"] = result.loss
     return metric

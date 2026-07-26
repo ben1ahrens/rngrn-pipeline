@@ -1,6 +1,6 @@
 # Handoff — identifiability experiments branch
 
-**Branch:** `feature/identifiability-experiments` · **Base:** `main` · **One commit ahead.**
+**Branch:** `feature/identifiability-experiments` · **Base:** `main` (merged in).
 For an agent or collaborator picking this up cold. Read
 [IDENTIFIABILITY_EXPERIMENTS.md](IDENTIFIABILITY_EXPERIMENTS.md) first for the *science*;
 this file is the *engineering* state: what changed, what is verified, what is not, and
@@ -8,10 +8,53 @@ where to start.
 
 ## Status in one line
 
-The harness for both experiments is built, wired, and dry-runs end to end on CPU
-(77 tests pass). **Nothing is tuned and no scientific result has been produced** — the dry
-run uses 6 Adam steps and recovers nothing meaningful. That is expected and correct for this
-stage; do not present dry-run numbers as findings.
+The harness for both experiments is built, wired, and now dry-runs end to end **on real
+registered data** for all four arms (77 tests pass). **Nothing is tuned and no scientific
+result has been produced** — the dry run uses 6 Adam steps and recovers nothing meaningful.
+That is expected and correct for this stage; do not present dry-run numbers as findings.
+
+### Update 2026-07-26 — first real-data dry run
+
+The repo moved to `~/projects/personal/rngrn/rngrn-pipeline` (a parent directory that will
+hold sibling worktrees). `main` was merged into this branch, so the local dev setup — the
+`.githooks/pre-push` test hook, the tracked dataset manifests, `configs/m3_registry.yaml` —
+is present here too.
+
+Three things were verified or fixed:
+
+- **Experiment B could not run at all.** Both B configs referenced `dataset_id:
+  two_gene_val`, which is not registered; `gate.from_registry` raised `FileNotFoundError`.
+  The registered id is `two_gene_classical_val` (a dataset's directory name *is* its id).
+  Fixed in both configs and in `docs/LOCAL_DATA_SETUP.md`, which had the same wrong name.
+- **All four arms now load real data and route to the right scorer.** Verified:
+  A-control and A-hidden → `permutation_aligned` with a 3×3 true J; B-control →
+  `permutation_aligned` 2×2; B-overparam → `overparameterised`, `n_true=2, n_model=3`,
+  `sign_match_frac=NaN` by design, spare-species metrics emitted. `subblock_sign_match` is
+  populated in every arm, as intended.
+- **`n_permutations_searched == 1` for Experiment A, as caveat 1 predicts.** Confirmed on
+  real data, not just in the unit test.
+
+**Open defect — `kstar_rel_err` is NaN in every arm.** It is scoring priority #1 and it is
+currently never computed. `AnswerKey.kstar` is `None` because no payload carries a `kstar`
+attribute: `gate.from_registry` reads `g.attrs["kstar"]`, and these HDF5 samples store
+`jacobian`, `x_star`, `D` (+ `interaction_matrix`) as datasets with no such attr. The
+`answer_key_keys` list in each manifest advertises `kstar`, which is misleading — it is the
+registry's default tuple, not an observed fact about the file.
+
+The fix is a science decision, not a mechanical one, because there are three distinct k*:
+
+| quantity | source | status |
+|---|---|---|
+| `kstar_model` | argmax_k of σ(k) from the **recovered** J, D | computed |
+| `kstar_obs` | `observables.kstar_of(field)` — measured from the image | computed, drives the loss |
+| `kstar_true` | argmax_k of σ(k) from the **true** J, D | **missing** — this is the NaN |
+
+`kstar_true` is computable from the answer key with the machinery already in
+`eval/analysis.turing_ok`, and that is the like-for-like comparison against `kstar_model`.
+Scoring against `kstar_obs` instead would compare a dispersion-relation prediction to a
+Fourier measurement of a finite noisy frame — a different and weaker claim. **Decide which
+before tuning anything**, since every recovery knob will be tuned against whichever
+number this ends up being.
 
 ## What the two experiments are
 

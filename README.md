@@ -143,15 +143,17 @@ GROUP BY config_id`) once runs pile up. Same rows either way — switch freely.
 ## Tests: run them locally, before you push
 
 The authoritative test run is **local**, via a `pre-push` hook. Enable it once per
-clone:
+repository — the setting is shared by every worktree, so you do not repeat it when you
+add one:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-From then on `git push` runs `pytest -q` first (using this repo's `.venv` if present,
-so the tests exercise the same torch build you develop against) and aborts the push
-on failure. Bypass deliberately with `git push --no-verify`.
+From then on `git push` runs `pytest -q` first (using the `.venv` of whichever worktree
+you push from, so the tests exercise the same torch build you develop against) and aborts
+the push on failure. Bypass deliberately with `git push --no-verify`. To run the suite
+through the hook without pushing: `git hook run pre-push`.
 
 The GitHub Actions workflow in `.github/workflows/tests.yml` is kept as a definition
 but should not be relied on: Actions minutes for private repos are metered, and runs

@@ -115,6 +115,9 @@ rngrn list-datasets
 rngrn train --config configs/registry_example.yaml    # source: registry, dataset_id: three_gene_v1
 ```
 
+**One-time per machine:** see [docs/LOCAL_DATA_SETUP.md](docs/LOCAL_DATA_SETUP.md)
+for which artifacts to download, where to drop them, and which need conversion.
+
 `payload.h5` files are gitignored; manifests and the index are tracked, so the repo
 records which datasets an experiment used without carrying the data itself. A fresh
 clone has no datasets — re-drop them and run `scan-datasets`.

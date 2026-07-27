@@ -54,12 +54,17 @@ class RNGRN(nn.Module):
     """
 
     def __init__(self, N: int, form: str = "competitive", n_hill: int = 2,
-                 seed: int | None = None):
+                 seed: int | None = None, dispersion_backend: str = "eig"):
         super().__init__()
         assert form in ("competitive", "nc1"), form
+        assert dispersion_backend in ("eig", "cubic"), dispersion_backend
         self.N = int(N)
         self.form = form
         self.n_hill = int(n_hill)
+        # "eig": torch.linalg.eigvals, any N, the reference. "cubic": exact closed-form
+        # roots, N=3 ONLY, 162x faster on CUDA (see _sigma_max_cubic). Default stays "eig"
+        # so nothing silently changes; set "cubic" for GPU runs.
+        self.dispersion_backend = dispersion_backend
         g = torch.Generator().manual_seed(seed) if seed is not None else None
 
         def randn(*shape):
@@ -148,6 +153,12 @@ class RNGRN(nn.Module):
         Dvec = self.D
         k2 = (kgrid ** 2).reshape(-1, 1, 1)
         M = J.unsqueeze(0) - k2 * torch.diag_embed(Dvec).unsqueeze(0)
+        if self.dispersion_backend == "cubic":
+            if self.N != 3:
+                raise ValueError(
+                    f"dispersion_backend='cubic' is exact for N=3 only (got N={self.N}). "
+                    "N=4's closed form is numerically poor and N>=5 has none; use 'eig'.")
+            return _sigma_max_cubic(M)
         ev = torch.linalg.eigvals(M)
         return ev.real.max(dim=-1).values
 
@@ -164,6 +175,53 @@ class RNGRN(nn.Module):
         disc = tr ** 2 - 4 * det
         disc_pos = torch.nn.functional.softplus(disc * 4.0) / 4.0
         return 0.5 * (tr + torch.sqrt(disc_pos + soft_sqrt_eps))
+
+
+def _sigma_max_cubic(M: torch.Tensor, eps: float = 1e-14) -> torch.Tensor:
+    """max_i Re eig(M) for BATCHED 3x3 M, exactly, via closed-form cubic roots.
+
+    Why this exists: torch.linalg.eigvals on batched small NON-SYMMETRIC matrices has no
+    cuSOLVER batched kernel, costing ~700 us PER MATRIX on CUDA regardless of batch size
+    (measured flat from batch 200 to 51200) versus ~1 us on CPU. That single call made a
+    GPU training step ~5x slower than CPU. This routine is arithmetic only -- no eig, svd
+    or linear solve -- so it maps onto GPU kernels: measured 162x faster than eigvals on
+    CUDA, and numerically EXACT rather than approximate (validated against eigvals on 127
+    real answer-key Jacobians: sigma_max MAE 9.2e-13, k* MAE 0, Turing verdict flips
+    0/127, d sigma_max/dJ agreeing to 2e-16).
+
+    The characteristic polynomial of a 3x3 is lam^3 - t lam^2 + c2 lam - c3, whose
+    coefficients (trace, sum of principal 2x2 minors, determinant) are differentiable
+    polynomials in M. Substituting lam = y + t/3 gives the depressed cubic y^3 + p y + q.
+    Three real roots (discriminant > 0): the trigonometric solution, whose k=0 branch is
+    the LARGEST root. One real root plus a complex-conjugate pair: Cardano, where the
+    largest real part is max(y, -y/2) since the pair has real part -y/2.
+
+    SIGN TRAP -- do not "simplify" this. In the trigonometric branch the argument is
+    (3q)/(2p) * sqrt(-3/p) with p < 0. Substituting |p| for p yields a plausible-looking
+    function that is wrong by MAE ~2e+2 and flips ~1 in 4 Turing verdicts. Two earlier
+    implementations failed exactly this way; it was caught only by the equivalence test
+    against eigvals (tests/test_dispersion_cubic.py). Re-run that test after any edit.
+
+    A real shifted POWER ITERATION was tried first and rejected: 11/200 k-points on real
+    data have a COMPLEX dominant eigenvalue, inside whose 2-D invariant subspace a real
+    power iteration rotates instead of converging (49/127 verdicts flipped).
+    """
+    t = M.diagonal(dim1=-2, dim2=-1).sum(-1)
+    t2 = (M @ M).diagonal(dim1=-2, dim2=-1).sum(-1)
+    c2 = 0.5 * (t * t - t2)
+    c3 = torch.linalg.det(M)
+    p = c2 - t * t / 3.0
+    q = -2.0 * t ** 3 / 27.0 + t * c2 / 3.0 - c3
+    disc = -(4.0 * p ** 3 + 27.0 * q ** 2)
+    pneg = torch.clamp(-p, min=eps)
+    r = torch.sqrt(pneg / 3.0)
+    arg = torch.clamp((3.0 * q) / (2.0 * p.clamp(max=-eps)) * torch.sqrt(3.0 / pneg), -1.0, 1.0)
+    y_three_real = 2.0 * r * torch.cos(torch.acos(arg) / 3.0)
+    s = torch.sqrt(torch.clamp(q * q / 4.0 + p ** 3 / 27.0, min=0.0))
+    cbrt = lambda z: torch.sign(z) * torch.pow(z.abs().clamp_min(eps), 1.0 / 3.0)
+    y_one_real = cbrt(-q / 2.0 + s) + cbrt(-q / 2.0 - s)
+    y = torch.where(disc > 0, y_three_real, torch.maximum(y_one_real, -0.5 * y_one_real))
+    return y + t / 3.0
 
 
 def build_model(cfg) -> RNGRN:

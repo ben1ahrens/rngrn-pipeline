@@ -79,6 +79,22 @@ class FreeScaleLatent(torch.nn.Module):
         return self.W * self.kappa + self.gamma
 
 
+class FreeScaleLatent(torch.nn.Module):
+    """Free-scale latent parameterisation for m<N unobserved channels, adopted from
+    Matas-Gil & Endres (arXiv:2309.06339 / iScience 2024, CDIMA experimental case): each
+    unobserved channel is a TRAINABLE affine map of the observed frame renormalised to
+    [0,1], u_c = W*kappa_c + gamma_c, with kappa/gamma optimised jointly with the model.
+    W is derived from the OBSERVED frame only (firewall-legal)."""
+    def __init__(self, W, n_channels, dtype):
+        super().__init__()
+        self.register_buffer("W", W)
+        self.kappa = torch.nn.Parameter(torch.ones(n_channels, 1, 1, dtype=dtype))
+        self.gamma = torch.nn.Parameter(torch.zeros(n_channels, 1, 1, dtype=dtype))
+
+    def forward(self):
+        return self.W * self.kappa + self.gamma
+
+
 @dataclass
 class RecoveryResult:
     """Outcome of one recover() call.
@@ -209,6 +225,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     for r in range(n_restarts):
         model = RNGRN(N=N, form=form, seed=model_seed + r,
                       dispersion_backend=dispersion_backend).to(dev)
+
+        model = RNGRN(N=N, form=form, seed=seed + r).to(dev)
         latent_module = None
         if m < N:
             obs_mean = frame.mean(0)                     # (H, W), observed frame only

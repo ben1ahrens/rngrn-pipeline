@@ -104,6 +104,11 @@ class LossConfig:
     strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'ratio' | 'gradnorm' | 'ntk'
     tau: float = 0.12                        # k* tolerance band
     jac_floor: float = 1.0                   # anti-collapse ||J|| floor
+
+        kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.1))
+    strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'ratio' | 'gradnorm' | 'ntk'
+    tau: float = 0.12                        # k* tolerance band
+    jac_floor: float = 1.0                   # anti-collapse ||J|| floor
     ratio_update_every: int = 50            # 'ratio' strategy: recompute cadence, in steps  # unit 13
 
 

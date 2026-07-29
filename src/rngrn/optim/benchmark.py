@@ -7,10 +7,14 @@ reproduce the pattern — the metric that respects a degenerate inverse problem)
 Pure aggregation: it reconstructs the table from the ledger alone.
 """
 from __future__ import annotations
+import json
 from collections import defaultdict
 from statistics import mean, pstdev
 
+import numpy as np
+
 from .. import io as IO
+from ..scoring import reproducibility as REPRO
 
 # columns surfaced in the comparison table (priority order + identifiability).
 # `kstar_rel_err_mean` is the HEADLINE wavelength column (vs the linear answer-key k*);
@@ -132,6 +136,86 @@ def degradation_table(runs_root="experiments", backend="jsonl") -> list[dict]:
 
 def _col_mean(members, key):
     return _safe(mean, [x[key] for x in members if _isnum(x.get(key))])
+
+
+# --------------------------------------------------------------------------------------
+# Topology reproducibility table (unit 3 — the user's #1 metric: for ONE target, does
+# the model consistently learn the SAME topology across seeds?)
+# --------------------------------------------------------------------------------------
+#
+# The per-run pieces (`repro_sign_vector`, `repro_N`, `repro_kstar`, `repro_D_ratio`) are
+# written by validate.score_recovery -> scoring.reproducibility.per_run_fields on EVERY
+# run. This table is the cross-run aggregation scoring.reproducibility itself cannot do
+# (it scores K seeds against each other, not one run in isolation) — grouped the same way
+# as `build_table` (one row per config x target, i.e. per K-seed group), because that is
+# exactly "K seeds recovered on ONE target".
+
+REPRODUCIBILITY_COLUMNS = [
+    "config_id", "source", "dataset", "N", "m", "form", "strategy", "K",
+    "topology_consistency", "mean_agreement", "modal_fraction",
+    "kstar_spread", "Dratio_spread",
+]
+
+
+def _row_to_sign_matrix(row):
+    """Re-hydrate one run's stored sign vector back into an (N, N) array.
+
+    `sign_structure` is idempotent on values already in {-1, 0, 1} (see
+    scoring.reproducibility.sign_structure's docstring), so feeding this straight back
+    into `reproducibility_report` as a "Jacobian" reproduces the same sign structure
+    that was thresholded once, at score time, in `per_run_fields`.
+    """
+    n = int(row["repro_N"])
+    flat = json.loads(row["repro_sign_vector"])
+    return np.array(flat, dtype=float).reshape(n, n)
+
+
+def reproducibility_table(runs_root="experiments", backend="jsonl") -> list[dict]:
+    """Cross-seed topology reproducibility, one row per (config x target) group.
+
+    A group needs >= 2 seeds carrying `repro_sign_vector` (written by
+    scoring.reproducibility.per_run_fields) to report anything; groups with fewer are
+    SKIPPED (not NaN-padded into the table) because a single seed has nothing to be
+    reproducible with — see scoring.reproducibility.reproducibility_report.
+    """
+    rows = IO.read_run_index(runs_root, backend=backend)
+    groups = defaultdict(list)
+    for r in rows:
+        if "repro_sign_vector" in r:
+            groups[_group_key(r)].append(r)
+
+    out = []
+    for key, members in groups.items():
+        cfg_id, source, dataset, N, m, form, strategy = key
+        if len(members) < 2:
+            continue
+        J_list = [_row_to_sign_matrix(r) for r in members]
+        kstar_list = [float(r["repro_kstar"]) for r in members]
+        dratio_list = [float(r["repro_D_ratio"]) for r in members]
+        rep = REPRO.reproducibility_report(J_list, kstar_list, dratio_list)
+        out.append(dict(
+            config_id=cfg_id, source=source, dataset=dataset, N=N, m=m, form=form,
+            strategy=strategy, K=rep["K"],
+            topology_consistency=rep["topology_consistency"],
+            mean_agreement=rep["mean_agreement"],
+            modal_fraction=rep["modal_fraction"],
+            kstar_spread=rep["kstar_spread"],
+            Dratio_spread=rep["Dratio_spread"],
+        ))
+    return out
+
+
+def reproducibility_markdown(table: list[dict]) -> str:
+    if not table:
+        return "_(no group with >= 2 seeds carrying repro_sign_vector yet)_"
+    hdr = ("| " + " | ".join(REPRODUCIBILITY_COLUMNS) + " |\n"
+           + "|" + "---|" * len(REPRODUCIBILITY_COLUMNS) + "\n")
+    body = ""
+    for row in table:
+        body += "| " + " | ".join(
+            (f"{row.get(c):.4g}" if isinstance(row.get(c), float) else str(row.get(c)))
+            for c in REPRODUCIBILITY_COLUMNS) + " |\n"
+    return hdr + body
 
 
 def degradation_markdown(table: list[dict]) -> str:

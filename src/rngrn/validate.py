@@ -35,6 +35,7 @@ from .eval.analysis import turing_ok, robustness_volumes
 from .scoring import morphology as MORPH
 from .scoring import permutation as PERM
 from .scoring import overparam as OVER
+from .scoring import reproducibility as REPRO
 
 
 def _sign_structure(J):
@@ -223,6 +224,12 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
     #    eval.analysis.robustness_volumes and docs/ROBUSTNESS_MEASUREMENT.md section 4
     #    for the perturbation model and the baseline to read this against.
     out.update(robustness_volumes(result.model, xstar=result.xstar))
+
+    # unit 3 (repro-metric): per-run fields consumed by optim.benchmark's cross-seed
+    # topology reproducibility aggregation (scoring/reproducibility.py). Computed
+    # unconditionally — it needs no answer key — so it must land here, before the
+    # no_true_J early return below, not after it.
+    out.update(REPRO.per_run_fields(J_rec, D_rec, out["kstar_model"]))
 
     # 3. sign structure vs answer key — routed by ARM, never a silent NaN.
     #

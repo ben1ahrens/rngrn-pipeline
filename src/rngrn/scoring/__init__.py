@@ -12,6 +12,9 @@ the per-module ast audits enforce that.
   overparam.py   : Experiment B — over-parameterisation robustness. Measures whether a
                    spare species stays inert (norm fraction, strongest single edge,
                    decoupling) and whether the observed sub-block matches the truth.
+  reproducibility.py : cross-seed topology reproducibility (the user's #1 metric). Needs
+                   NO answer key — it compares K recovered Jacobians from K seeds on one
+                   target to each other, not to a ground truth.
 
 Import from the submodules directly (`from rngrn.scoring import permutation as P`) — this
 __init__ deliberately imports nothing so the two modules stay independently loadable and

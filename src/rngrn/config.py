@@ -63,6 +63,8 @@ class ModelConfig:
 
     dispersion_backend: str = "eig"         # 'eig'|'cubic' ('cubic' exact for N==3 only) # unit 10
 
+    init: str = "default"                   # 'default' | 'low_basal' -- see model.py (unit 2)
+
 
 @dataclass
 class LossConfig:

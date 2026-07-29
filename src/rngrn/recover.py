@@ -174,6 +174,14 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
     model_seed: seeds the model's random raw-parameter init (per-restart offset by r).
         Defaults to `seed` when not given, for backward compatibility.
+
+            init="default"):
+    """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
+
+    strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
+    init: 'default' | 'low_basal' -- model raw-parameter init strategy (see model.py).
+        Defaults to 'default' (OFF); callers opt in explicitly. Not yet wired through
+        train.py's cfg.model.init (out of this unit's scope) -- pass explicitly to use it.
     """
     ri = recovery_input
     model_seed = seed if model_seed is None else model_seed
@@ -228,6 +236,9 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
 
         model = RNGRN(N=N, form=form, seed=seed + r).to(dev)
         latent_module = None
+
+        model = RNGRN(N=N, form=form, seed=seed + r, init=init).to(dev)
+        latent = None
         if m < N:
             obs_mean = frame.mean(0)                     # (H, W), observed frame only
             lo, hi = obs_mean.min(), obs_mean.max()

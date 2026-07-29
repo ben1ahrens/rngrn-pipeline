@@ -118,6 +118,23 @@ class SolverConfig:
     noise: float = 1e-2
     robustness_samples: int = 200
     robustness_sigma_log: float = 0.1
+    # ---- morphology rollout: fit() simulates the recovered model so morphology_match is
+    # a real number instead of morphology_scored='target_only'. Measured 0.9-1.7 s per
+    # 96x96/128x128 field; the grid and L come from the TARGET frame, not from n_grid,
+    # because morphology is only comparable on a matching grid.
+    morphology_rollout: bool = True          # unit 7
+    morphology_integrator: str = "etdrk4_rfft"   # unit 7
+    # 15000 is the WORST CASE, not the typical one: at the measured etdrk4_rfft step costs
+    # (0.9 / 1.7 / 2.8 ms per step at 64 / 96 / 128) a fully-bound budget is 13 / 26 / 42 s.
+    # 96x96 — the three_gene grid — therefore stays inside the 30 s target; a 128x128 target
+    # would not, and would need this lowered. Typical runs are far shorter: a saturating
+    # Turing model ends on the horizon at ~600 steps, and a collapsing stable one on the
+    # collapse rule at ~1000 (both measured).
+    morphology_max_steps: int = 15000        # unit 7
+    morphology_early_stop: bool = True       # unit 7 — for the COLLAPSE stop; see rollout.py
+    morphology_check_every: int = 200        # unit 7
+    morphology_saturation_tol: float = 0.01  # unit 7 [TUNE] — uncalibrated stopping rule
+    morphology_saturation_window: int = 5    # unit 7 [TUNE] — uncalibrated stopping rule
 
 
 @dataclass

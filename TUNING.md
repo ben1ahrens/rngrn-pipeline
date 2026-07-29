@@ -125,8 +125,10 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
 
 ## Stage 5 — post-training rollout & analysis (eval/)
 
-- **[TUNE] integrator choice** — `solver.integrator ∈ {etdrk4, imex_split, bdf1_newton_krylov}`.
-  ETDRK4 is the stiff-safe default. `imex_split` is the reference that COLLAPSES under stiff
+- **[TUNE] integrator choice** — `solver.integrator ∈ {etdrk4, etdrk4_rfft, imex_split,
+  bdf1_newton_krylov}`. ETDRK4 is the stiff-safe default; `etdrk4_rfft` is the same scheme on
+  the half spectrum (1.8–1.9× faster, agreeing to ≤6.7e-16 after 100 steps) and is what the
+  morphology rollout uses. `imex_split` is the reference that COLLAPSES under stiff
   recovered diffusion (keep it only to reproduce the pitfall).
 - **[TUNE] rollout horizon** — `solver.horizon_growth_times` (40× the growth timescale 1/σ_max)
   and `solver.n_grid`. The dt is derived from the fastest reaction rate (diffusion is not a CFL
@@ -141,6 +143,33 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
 - **[VALIDATE] the stiff-collapse claim** — `tests/test_science.py::test_etdrk4_finite_under_stiff_diffusion`
   checks ETDRK4 stays finite; add the paired assertion that `imex_split` collapses on the SAME
   stiff parameters (the concrete evidence for the pitfall).
+
+### Morphology rollout (unit 7)
+
+- **[TUNE] saturation stopping rule** — `solver.morphology_saturation_tol` (0.01) and
+  `solver.morphology_saturation_window` (5), consumed by `eval/rollout.py::_saturated`.
+  UNCALIBRATED, and measured NOT to fire on the Turing fixture in `tests/test_rollout.py`:
+  the amplitude goes flat by ~step 200 of 609 but k\* keeps creeping as the labyrinth
+  coarsens, and the rule requires both signals. Calibrate it on real recovered models
+  before relying on it, or delete it.
+- **[TUNE] collapse margin** — `eval/rollout.py::simulate(collapse_margin=0.1)`. The
+  collapse rule stops a linearly stable model once the amplitude has been an order of
+  magnitude below the `patterned` threshold for a full window. This is the stop that
+  actually pays (a near-marginal recovered model went 15000 steps / ~28 s → 1000 steps /
+  1.7 s on `three_gene_val/sample_0000`). The margin has not been scanned.
+- **[TUNE] morphology step budget** — `solver.morphology_max_steps` (15000). At the
+  measured `etdrk4_rfft` step costs this bounds one field at 13 / 26 / 42 s on a
+  64 / 96 / 128 grid, so a 128×128 target would need it lowered to stay under 30 s.
+- **[VALIDATE] unpatterned ⇒ morphology mismatch?** — OPEN METRIC DECISION, not taken.
+  When the recovered model produces no pattern, `train.py::_morphology_rollout` withholds
+  the field and `morphology_scored` stays `"target_only"`, with `rollout_patterned=False`
+  recording the fact. The alternative — recording `morphology_match=False`, since a flat
+  field certainly does not reproduce the target's pattern — changes what the headline
+  morphology number means across a whole benchmark and needs an owner's decision.
+- **[VALIDATE] resolution independence** — measured on one synthetic Turing fixture only:
+  |Δk\*|/k\* ≤ 1.7e-2 and morphology features ≤ 9.4e-2 between 64 / 96 / 128 grids at
+  fixed L. Timestep independence is three orders tighter (≤ 1.1e-5). Re-measure on real
+  recovered models before treating the resolution number as a bound.
 
 ## Stage 6 — benchmarking (optim/benchmark.py)
 

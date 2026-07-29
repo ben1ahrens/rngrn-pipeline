@@ -11,11 +11,14 @@ on the RecoveryInput. recover() itself never sees it.
 from __future__ import annotations
 import os
 
+import numpy as np
+
 from .config import Config
 from .data import gate
 from .data.rd_models import build_system
 from .data.spec import spec_from_config
 from .data import cache
+from .eval.rollout import simulate
 from . import recover as R
 from .losses.weighting import build_strategy
 from . import io as IO
@@ -48,6 +51,87 @@ def _resolve_recovery_input(cfg: Config):
     raise ValueError(f"unknown data.source '{dc.source}'")
 
 
+def _morphology_rollout(cfg: Config, result, ri):
+    """Simulate the recovered model on the TARGET's geometry. Returns (field, row).
+
+    `field` is the (N, H, W) simulated state, or None when there is nothing comparable —
+    in which case `row` says why and scoring stays at "target_only". The row is a flat
+    dict of `rollout_*` scalars that merges straight into the run index.
+
+    THE GRID AND L COME FROM THE TARGET FRAME, not from solver.n_grid. Morphology is only
+    defined between two fields on the same grid (scoring/morphology raises on a shape
+    mismatch, deliberately, because the angular features live on the Fourier grid), and
+    `ri.L` is the sample's own box length. Both are recovery-side inputs — the firewall
+    permits exactly (frame, L, observed_idx) — so nothing new crosses it here.
+
+    A rollout that blows up, goes non-finite, or fails to produce a pattern at all is a
+    REAL RESULT about the recovered model, not an error. All three are checked explicitly
+    (never caught as exceptions) and reported as `rollout_status`: morphology_vector
+    legitimately raises on a field with no spatial variance, and fit() must not die on a
+    model that simply failed to pattern.
+    """
+    row = {"rollout_status": "disabled"}
+    if not cfg.solver.morphology_rollout:
+        return None, row
+
+    frame = np.asarray(ri.frame, dtype=float)
+    if frame.ndim != 3 or frame.shape[1] != frame.shape[2]:
+        raise ValueError(
+            f"morphology rollout needs a square (m, H, W) target frame to fix the grid; "
+            f"got shape {frame.shape}. Set solver.morphology_rollout=false for this source.")
+    n_grid = int(frame.shape[1])
+
+    res = simulate(result.model, L=float(ri.L), n=n_grid, seed=cfg.train.seed,
+                   noise=cfg.solver.noise, xstar=result.xstar,
+                   integrator=cfg.solver.morphology_integrator,
+                   horizon_growth_times=cfg.solver.horizon_growth_times,
+                   dt=cfg.solver.dt,
+                   max_steps=cfg.solver.morphology_max_steps,
+                   early_stop=cfg.solver.morphology_early_stop,
+                   check_every=cfg.solver.morphology_check_every,
+                   saturation_tol=cfg.solver.morphology_saturation_tol,
+                   saturation_window=cfg.solver.morphology_saturation_window)
+    row = dict(rollout_status="ok",
+               rollout_grid=n_grid, rollout_L=float(ri.L),
+               rollout_integrator=res["integrator"], rollout_dt=res["dt"],
+               rollout_nsteps=res["nsteps"], rollout_nsteps_run=res["nsteps_run"],
+               rollout_stopped_reason=res["stopped_reason"],
+               rollout_sig_max=res["sig_max"], rollout_seconds=res["seconds"],
+               rollout_amplitude=float(res["amplitude"]),
+               rollout_kstar=float(res["kstar"]),
+               rollout_patterned=bool(res["patterned"]))
+
+    if res["blew_up"]:
+        row["rollout_status"] = "blew_up"
+        return None, row
+    field = res["fields"]
+    ch0 = field[0]
+    if not np.isfinite(ch0).all():
+        row["rollout_status"] = "non_finite"
+        return None, row
+    # THE GUARD THAT MATTERS, and the one an earlier draft of this function got wrong.
+    # A first e2e run on three_gene_val/sample_0000 recovered a linearly stable model whose
+    # field decayed to amplitude 1.9e-12 — pure float noise — and, because the guard was an
+    # absolute 1e-12, that noise was classified, matched against the target's 'stripes' and
+    # recorded as morphology_match=True. A morphology call on decayed noise is meaningless
+    # and a match on it is a FALSE POSITIVE, which is worse than no number at all.
+    #
+    # The gate is therefore `patterned`, the verdict rollout.simulate already computes from
+    # its own threshold (amplitude > max(1e-3, 0.02*|x*_0|)) — no new threshold is invented
+    # here. An unpatterned model records rollout_patterned=False and morphology_scored stays
+    # "target_only".
+    #
+    # DECISION LEFT OPEN, deliberately: whether an unpatterned model should instead be
+    # recorded as morphology_match=False (it produces no pattern, so it certainly does not
+    # produce the TARGET's pattern) is a metric definition, not a mechanical detail. It
+    # changes what the headline morphology number means across a whole benchmark, so it is
+    # not being decided here. rollout_patterned carries the fact either way.
+    if not res["patterned"]:
+        row["rollout_status"] = "unpatterned"
+        return None, row
+    return field, row
+
+
 def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
         verbose: bool = False) -> dict:
     """Run one recovery + scoring. Returns the metric dict (and writes a run row)."""
@@ -76,15 +160,18 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is
     # free: it is the image recovery already trained on, and it is on the recovery side of
     # the firewall, so handing it to scoring adds no truth quantity to anything.
-    # model_frame is deliberately NOT supplied here: a field simulated from the recovered
-    # model costs a rollout (measured ~4.2 ms/step at 96x96, with the step count derived
-    # from the model's own sigma_max — ~128k steps, i.e. ~9 min, for an untrained N=3
-    # model), which fit() must not silently add to every run. Callers that want the full comparison run
-    # the rollout themselves and re-score, or use eval/. Runs therefore record
-    # morphology_scored="target_only".
+    #
+    # model_frame is now supplied too (unit 7), which is what turns morphology_scored from
+    # "target_only" into "compared" and makes morphology_match / morphology_distance /
+    # spectral_distance_2d real numbers rather than absent keys. It used to be omitted
+    # because the rollout cost ~6.5-10 min per field; that cost was a horizon bug (see
+    # eval/rollout.py) and is now 0.9-1.7 s. Set solver.morphology_rollout=false to go back
+    # to target-only scoring.
+    model_frame, rollout_row = _morphology_rollout(cfg, result, ri)
     metric = score_recovery(result, answer_key,
                             observed_idx=(cfg.model.observed_idx or list(range(cfg.model.m))),
-                            target_frame=ri.frame)
+                            target_frame=ri.frame, model_frame=model_frame)
+    metric.update(rollout_row)
 
     # ---- experiment-arm identity (scoring/bookkeeping side) -------------------------
     # Classify this run so the benchmark can compare like with like. n_true comes from the

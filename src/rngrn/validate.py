@@ -9,7 +9,8 @@ parameters):
                    Recorded from EXPLICITLY PASSED fields (`target_frame`, `model_frame`)
                    and computed POST-HOC only — it never enters the differentiable loss,
                    because comparing a recovered model's morphology needs a simulated
-                   field and that costs a rollout (~seconds).
+                   field, and a rollout (0.9-1.7 s per field since unit 7) is many orders
+                   of magnitude more expensive than one gradient step.
   1. wavelength  : recovered model k* vs answer-key k*.
                    HEADLINE  `kstar_fft_rel_err`  — against the FFT-MEASURED k*
                                                    (answer_key.kstar_fft), the wavenumber
@@ -116,13 +117,12 @@ def _morphology_metrics(target_frame, model_frame=None, reference_bank=None,
     * target_frame alone is FREE — it is the observed image the run already loaded, so the
       target's own morphology class and four features are recorded on every run.
     * the COMPARISON (`morphology_distance`, `morphology_match`, `spectral_distance_2d`)
-      additionally needs a field simulated from the recovered model. A default-horizon
-      ETDRK4 rollout on a 96x96 grid measured ~4.2 ms/step, and the step count is derived
-      from the model's own sigma_max (T = horizon_growth_times / sigma_max, dt from the
-      fastest reaction rate). For an untrained N=3 model that came to ~128k steps, i.e.
-      ~9 minutes for one field — and rollout.simulate clips nsteps at 200k, so ~14 min is
-      the ceiling, not the typical case. The comparison happens only when the caller has
-      already paid for that rollout and passes the field in.
+      additionally needs a field simulated from the recovered model. That used to cost
+      6.5-10 minutes per field, which is why it had never once been computed; unit 7
+      traced the cost to a horizon bug in eval/rollout.py and it is now 0.9-1.7 s
+      (64x64 to 128x128, N=3, CPU, one thread). train.fit() therefore supplies the model
+      field by default (solver.morphology_rollout). The comparison still happens only when
+      the caller passes a field in — this function never simulates anything itself.
 
     `morphology_match` compares the two CLASS CALLS (target vs model field), which is the
     owner's criterion stated directly: same morphology class, not merely a small distance.
@@ -202,9 +202,10 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
         `morphology_scored` becomes "compared".
         Both frames are passed EXPLICITLY rather than pulled off `result` or a global: a
         RecoveryResult carries neither the observed frame nor a simulated field, so there
-        is nothing to reach for, and a caller who has not paid for a rollout (measured
-        ~9 min for one 96x96 field at the default horizon) must not silently be charged for one
-        or handed a fabricated field. When a frame is absent the corresponding keys are
+        is nothing to reach for, and a caller who has not paid for a rollout must not
+        silently be charged for one or handed a fabricated field. `model_frame` must be on
+        the SAME grid as `target_frame` — a mismatch raises rather than scoring as "far".
+        When a frame is absent the corresponding keys are
         OMITTED (never NaN-filled), so an unscored morphology cannot be misread as a bad
         one; `morphology_scored` says which level was reached.
     morphology_bank : reference bank for the class call. Defaults to

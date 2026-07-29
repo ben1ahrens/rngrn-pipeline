@@ -7,3 +7,6 @@
 {"dataset_id": "two_gene_classical_test", "n_samples": 13, "frame_shape": "[2, 96, 96]", "splits": "{}", "checksum": "13f29962c8facf34", "source": "manual", "path": "two_gene_classical_test", "_ts": "2026-07-26T14:44:44.427072+00:00"}
 {"dataset_id": "two_gene_classical_train", "n_samples": 52, "frame_shape": "[2, 96, 96]", "splits": "{}", "checksum": "c43913da40d48491", "source": "manual", "path": "two_gene_classical_train", "_ts": "2026-07-26T14:44:44.431184+00:00"}
 {"dataset_id": "two_gene_classical_val", "n_samples": 10, "frame_shape": "[2, 96, 96]", "splits": "{}", "checksum": "5b0520bfe7d763f9", "source": "manual", "path": "two_gene_classical_val", "_ts": "2026-07-26T14:44:44.432393+00:00"}
+{"dataset_id": "three_gene_multiL", "n_samples": 92, "frame_shape": "[3, 96, 96]", "splits": "{}", "checksum": "90a473bbd29344bc", "source": "manual", "path": "three_gene_multiL", "_ts": "2026-07-29T16:19:04.156642+00:00"}
+{"dataset_id": "three_gene_qvar", "n_samples": 34, "frame_shape": "[3, 96, 96]", "splits": "{}", "checksum": "677b1b5ab83c1e7c", "source": "manual", "path": "three_gene_qvar", "_ts": "2026-07-29T16:19:04.168017+00:00"}
+{"dataset_id": "three_gene_qvar_smoke", "n_samples": 3, "frame_shape": "[3, 96, 96]", "splits": "{}", "checksum": "693715c7d7a82b19", "source": "manual", "path": "three_gene_qvar_smoke", "_ts": "2026-07-29T16:19:04.169791+00:00"}

@@ -1,0 +1,27 @@
+{
+  "dataset_id": "three_gene_qvar_smoke",
+  "n_samples": 3,
+  "sample_keys": [
+    "sample_0000",
+    "sample_0001",
+    "sample_0002"
+  ],
+  "frame_shape": [
+    3,
+    96,
+    96
+  ],
+  "splits": {},
+  "observable_key": "final_frame",
+  "answer_key_keys": [
+    "jacobian",
+    "x_star",
+    "D",
+    "interaction_matrix",
+    "kstar"
+  ],
+  "checksum": "693715c7d7a82b19",
+  "provenance": {
+    "source": "manually placed; indexed by scan"
+  }
+}

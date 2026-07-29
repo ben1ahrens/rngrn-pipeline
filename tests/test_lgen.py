@@ -133,12 +133,25 @@ def _reference_dimensional_fit(ri, steps, seed=0, form="competitive"):
     algorithm is intentionally changed — and then re-read every recorded number.
     """
     from rngrn.losses import total as LT
-    from rngrn.losses.weighting import FixedWeighting
+    from rngrn.losses.weighting import FixedWeighting, DataFirstStaging
     from rngrn.recover import _kgrid_for
 
+    # RE-SYNCED at the 13-unit merge (2026-07-29). Unit 1 promoted the validated objective
+    # from scripts/exp05 into the library — disjoint-support Turing hinges, the frame-scale
+    # anchor at weight 2.0, data-first staging, and resid defaulted to 0.0 (exp06: SETTLED
+    # OFF). That is an INTENTIONAL change to the dimensional algorithm, so this reference
+    # was updated to match it, per the instruction in this function's docstring.
+    # CONSEQUENCE FOR THE RECORD: every kstar/loss number produced BEFORE that merge came
+    # from a different objective and is not comparable to numbers produced after it.
     frame = torch.tensor(np.asarray(ri.frame, dtype=float))
-    strategy = FixedWeighting(dict(kstar=1.0, turing=1.0, resid=0.3,
-                                   anticollapse=0.5, morphology=0.0))
+    strategy = DataFirstStaging(
+        FixedWeighting(dict(kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5,
+                            anchor=2.0, morphology=0.0)),
+        total_steps=steps, keys=("turing",), off_frac=0.25, ramp_frac=0.25)
+    # resid base weight is 0 and the staged wrapper is static, so recover() proves the
+    # residual cannot contribute and omits it. Mirror that exactly.
+    term_kw = dict(split_hinges=True, hinge_k_min_frac=0.1, detach_xstar=False,
+                   compute_resid=False)
     kstar_obs = obs.kstar_of(frame[0].numpy(), L=ri.L)
     kgrid = _kgrid_for(kstar_obs)
     model = RNGRN(N=ri.N, form=form, seed=seed)
@@ -148,14 +161,14 @@ def _reference_dimensional_fit(ri, steps, seed=0, form="competitive"):
         opt.zero_grad()
         loss, _ = LT.total_loss(model, frame, ri.L, list(ri.observed_idx), kgrid, kstar_obs,
                                 strategy, step=step, latent_fields=None,
-                                tau=0.12, jac_floor=1.0, strict=True)
+                                tau=0.12, jac_floor=1.0, strict=True, **term_kw)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(params, 10.0)
         opt.step()
     with torch.no_grad():
         loss, parts = LT.total_loss(model, frame, ri.L, list(ri.observed_idx), kgrid,
                                     kstar_obs, strategy, step=steps, latent_fields=None,
-                                    tau=0.12, jac_floor=1.0)
+                                    tau=0.12, jac_floor=1.0, **term_kw)
     return float(loss), model.D.detach().numpy(), parts["kstar_model"], kstar_obs
 
 

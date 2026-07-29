@@ -81,8 +81,18 @@ def test_cubic_gradients_match(form):
 
 
 def test_cubic_rejects_wrong_N():
-    """Exact for N=3 only — must fail loud rather than silently return nonsense."""
-    m = RNGRN(N=2, seed=0, dispersion_backend="cubic")
+    """Exact for N=3 only — must fail loud rather than silently return nonsense.
+
+    Rejection is at CONSTRUCTION (tightened at the 13-unit merge): a model that can never
+    evaluate its own dispersion is misconfigured when it is built, not when it is first
+    used. The lazy guard inside dispersion() is kept as defence in depth for anyone who
+    mutates .dispersion_backend afterwards, and is exercised below.
+    """
+    with pytest.raises(ValueError, match="N=3 only"):
+        RNGRN(N=2, seed=0, dispersion_backend="cubic")
+
+    m = RNGRN(N=2, seed=0)                 # valid at construction ...
+    m.dispersion_backend = "cubic"         # ... then mutated into an invalid state
     with pytest.raises(ValueError, match="N=3 only"):
         m.dispersion(torch.full((2,), 0.7, dtype=torch.float64),
                      torch.linspace(0.0, 3.0, 16, dtype=torch.float64))

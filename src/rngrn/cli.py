@@ -141,7 +141,12 @@ def build_parser():
 
     def add_cfg(sp):
         sp.add_argument("--config", required=True)
-        sp.add_argument("-o", "--override", nargs="*", default=[])
+        # action="extend" is load-bearing. With the previous nargs="*" alone, argparse
+        # REPLACED args.override on every occurrence, so `-o a=1 -o b=2` silently kept only
+        # b=2 and the run used the default for a — a config that differs from the one the
+        # command line asked for, with nothing in the output saying so. Both grouped
+        # (`-o a=1 b=2`) and repeated (`-o a=1 -o b=2`) forms now accumulate.
+        sp.add_argument("-o", "--override", nargs="*", action="extend", default=[])
 
     sp = sub.add_parser("generate-data"); add_cfg(sp); sp.add_argument("--overwrite", action="store_true"); sp.set_defaults(func=cmd_generate_data)
     sp = sub.add_parser("train"); add_cfg(sp); sp.set_defaults(func=cmd_train)

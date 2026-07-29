@@ -399,16 +399,13 @@ def param_prior(model, dratio_centre=7.5, dratio_spread=1.0, box=None,
 # against 0.4 % with the residual off. The term is kept, not deleted — it is the only
 # pixel-level term and a future arm may re-enable it — but it is off by default.
 DEFAULT_WEIGHTS = dict(kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5,
-                       anchor=2.0, morphology=0.0)
-
-DEFAULT_WEIGHTS = dict(kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.0,
+                       anchor=2.0, morphology=0.0,
                        param_prior=0.0)   # param_prior default 0.0: opt-in (unit 5)
 
 
 def composite_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
                    weights=None, latent_fields=None, tau=0.12, jac_floor=1.0,
-                   k_min_frac=0.1):
-
+                   k_min_frac=0.1,
                    dratio_centre=7.5, dratio_spread=1.0, bio_box_path="configs/bio_box.yaml"):
     """The weighted objective. Returns (scalar loss, parts dict).
 

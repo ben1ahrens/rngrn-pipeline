@@ -104,6 +104,12 @@ class RatioWeighting(WeightingStrategy):
     FIXED base weight (Endres used 0.1) — it is never rescaled by this rule. No annealing,
     no gradient norms; weights are held constant between updates.
     """
+    # This strategy MOVES weights, so a base weight of 0 licenses nothing and recover()
+    # must not use it to prove the stationarity residual can be skipped. Set at the
+    # 13-unit merge: unit 13 wrote this class before unit 1 introduced `static_weights`,
+    # so it silently inherited the base class's True and would have qualified for the skip.
+    static_weights = False
+
     def __init__(self, base_weights, **kw):
         super().__init__(base_weights, **kw)
         self.data_key = kw.get("data_key", "resid")

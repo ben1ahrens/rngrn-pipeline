@@ -79,22 +79,6 @@ class FreeScaleLatent(torch.nn.Module):
         return self.W * self.kappa + self.gamma
 
 
-class FreeScaleLatent(torch.nn.Module):
-    """Free-scale latent parameterisation for m<N unobserved channels, adopted from
-    Matas-Gil & Endres (arXiv:2309.06339 / iScience 2024, CDIMA experimental case): each
-    unobserved channel is a TRAINABLE affine map of the observed frame renormalised to
-    [0,1], u_c = W*kappa_c + gamma_c, with kappa/gamma optimised jointly with the model.
-    W is derived from the OBSERVED frame only (firewall-legal)."""
-    def __init__(self, W, n_channels, dtype):
-        super().__init__()
-        self.register_buffer("W", W)
-        self.kappa = torch.nn.Parameter(torch.ones(n_channels, 1, 1, dtype=dtype))
-        self.gamma = torch.nn.Parameter(torch.zeros(n_channels, 1, 1, dtype=dtype))
-
-    def forward(self):
-        return self.W * self.kappa + self.gamma
-
-
 @dataclass
 class RecoveryResult:
     """Outcome of one recover() call.
@@ -144,7 +128,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             tau=0.12, jac_floor=1.0, n_restarts=4, adam_steps=1500, adam_lr=0.05,
             lbfgs_steps=50, grad_clip=10.0, seed=0, verbose=False, device=None,
             split_hinges=True, hinge_k_min_frac=0.1, staging_keys=("turing",),
-            staging_off_frac=0.25, staging_ramp_frac=0.25, detach_xstar=False):
+            staging_off_frac=0.25, staging_ramp_frac=0.25, detach_xstar=False,
+            nondim=False, model_seed=None, dispersion_backend="eig", init="default"):
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
@@ -154,10 +139,6 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     are held at weight 0 for the first `off_frac` of `adam_steps`, then ramped to their
     configured weight over the next `ramp_frac`. Pass staging_keys=() to disable.
 
-            nondim=False):
-    """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
-
-    strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
     nondim:   False (DEFAULT, unchanged behaviour) optimises in physical coordinates, so
               the Laplacian uses dx = L/n_grid and the k-grid is in rad/length.
               True optimises on the unit box x_hat = x/L: the Laplacian uses dx = 1/n_grid
@@ -167,21 +148,13 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
               the whole content of the claim "the recovered network generalises across L".
               Reported quantities are converted back to physical either way.
 
-            lbfgs_steps=50, grad_clip=10.0, seed=0, model_seed=None,
-            dispersion_backend="eig", verbose=False, device=None):
-    """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
-
-    strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
     model_seed: seeds the model's random raw-parameter init (per-restart offset by r).
         Defaults to `seed` when not given, for backward compatibility.
 
-            init="default"):
-    """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
+    dispersion_backend: 'eig' (any N, the reference) | 'cubic' (exact for N<=3 ONLY).
 
-    strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
     init: 'default' | 'low_basal' -- model raw-parameter init strategy (see model.py).
-        Defaults to 'default' (OFF); callers opt in explicitly. Not yet wired through
-        train.py's cfg.model.init (out of this unit's scope) -- pass explicitly to use it.
+        Defaults to 'default' (OFF); callers opt in explicitly.
     """
     ri = recovery_input
     model_seed = seed if model_seed is None else model_seed
@@ -195,7 +168,10 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         base = weights or dict(kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5,
                                anchor=2.0, morphology=0.0)
         strategy = FixedWeighting(base)
-    if staging_keys:
+    # adam_steps == 0 is a legitimate call (init-only / determinism checks). Staging is
+    # defined as a fraction OF adam_steps, so it is meaningless there and
+    # weighting.staging_factor rightly refuses total_steps=0 — skip the wrapper instead.
+    if staging_keys and adam_steps > 0:
         strategy = DataFirstStaging(strategy, total_steps=adam_steps, keys=staging_keys,
                                     off_frac=staging_off_frac, ramp_frac=staging_ramp_frac)
     # The stationarity residual is 45 % of a step (measured, 96x96 N=3: 9.39 vs 5.15 ms)
@@ -231,13 +207,9 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
 
     best = None; restart_log = []
     for r in range(n_restarts):
-        model = RNGRN(N=N, form=form, seed=model_seed + r,
+        model = RNGRN(N=N, form=form, seed=model_seed + r, init=init,
                       dispersion_backend=dispersion_backend).to(dev)
-
-        model = RNGRN(N=N, form=form, seed=seed + r).to(dev)
         latent_module = None
-
-        model = RNGRN(N=N, form=form, seed=seed + r, init=init).to(dev)
         latent = None
         if m < N:
             obs_mean = frame.mean(0)                     # (H, W), observed frame only
@@ -278,10 +250,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             lopt = torch.optim.LBFGS(params, max_iter=lbfgs_steps, line_search_fn="strong_wolfe")
             def closure():
                 lopt.zero_grad()
-                loss, _ = LT.total_loss(model, frame, L_model, observed_idx, kgrid, kstar_obs,
-
                 latent = latent_module() if latent_module is not None else None
-                loss, _ = LT.total_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
+                loss, _ = LT.total_loss(model, frame, L_model, observed_idx, kgrid, kstar_obs,
                                         strategy, step=adam_steps, latent_fields=latent,
                                         tau=tau, jac_floor=jac_floor, **term_kw)
                 loss.backward(); return loss
@@ -292,7 +262,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
 
         try:
             with torch.no_grad():
-                loss, parts = LT.total_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
+                latent = latent_module() if latent_module is not None else None
+                loss, parts = LT.total_loss(model, frame, L_model, observed_idx, kgrid, kstar_obs,
                                             strategy, step=adam_steps, latent_fields=latent,
                                             tau=tau, jac_floor=jac_floor, **term_kw)
         except SteadyStateError:
@@ -306,13 +277,6 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                                     failed_at="final_eval"))
             continue
 
-        with torch.no_grad():
-            loss, parts = LT.total_loss(model, frame, L_model, observed_idx, kgrid, kstar_obs,
-
-            latent = latent_module() if latent_module is not None else None
-            loss, parts = LT.total_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
-                                        strategy, step=adam_steps, latent_fields=latent,
-                                        tau=tau, jac_floor=jac_floor)
         restart_log.append(dict(restart=r, total=float(loss), sig_max=parts.get("sig_max"),
                                 sig_max_pos=parts.get("sig_max_pos"),
                                 kstar_model=parts.get("kstar_model"), rel_err=parts.get("rel_err")))

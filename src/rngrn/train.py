@@ -155,12 +155,10 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        staging_keys=tuple(cfg.loss.staging_keys),
                        staging_off_frac=cfg.loss.staging_off_frac,
                        staging_ramp_frac=cfg.loss.staging_ramp_frac,
-                       detach_xstar=cfg.loss.detach_xstar)
-
-                       nondim=cfg.model.nondim)   # unit 12: default False = unchanged path
-
-                       seed=cfg.train.seed, model_seed=cfg.model.seed,
-                       dispersion_backend=cfg.model.dispersion_backend, verbose=verbose)
+                       detach_xstar=cfg.loss.detach_xstar,
+                       nondim=cfg.model.nondim,   # unit 12: default False = unchanged path
+                       model_seed=cfg.model.seed,                       # unit 10
+                       dispersion_backend=cfg.model.dispersion_backend)  # unit 10
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is
@@ -174,9 +172,14 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     # eval/rollout.py) and is now 0.9-1.7 s. Set solver.morphology_rollout=false to go back
     # to target-only scoring.
     model_frame, rollout_row = _morphology_rollout(cfg, result, ri)
+    # L is passed so the k* LEAK CONTROLS populate (unit 8). Without it trivial_kstar_err
+    # and kstar_fft_bin_width are NaN on every row, and a k* number is then unreadable:
+    # on the legacy three_gene sets an image-blind 6*2pi/L predictor scores ~0 % error, so
+    # recovery's k* must always be quoted next to what ignoring the image would have got.
+    # L is already a legitimate recovery input, so this adds no truth quantity to scoring.
     metric = score_recovery(result, answer_key,
                             observed_idx=(cfg.model.observed_idx or list(range(cfg.model.m))),
-                            target_frame=ri.frame, model_frame=model_frame)
+                            target_frame=ri.frame, model_frame=model_frame, L=ri.L)
     metric.update(rollout_row)
 
     # ---- experiment-arm identity (scoring/bookkeeping side) -------------------------

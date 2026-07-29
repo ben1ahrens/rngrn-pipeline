@@ -98,6 +98,13 @@ class RNGRN(nn.Module):
         # "eig": torch.linalg.eigvals, any N, the reference. "cubic": exact closed-form
         # roots, N=3 ONLY, 162x faster on CUDA (see _sigma_max_cubic). Default stays "eig"
         # so nothing silently changes; set "cubic" for GPU runs.
+        # Rejected at CONSTRUCTION, not lazily at the first dispersion() call: a model that
+        # can never evaluate its own dispersion is misconfigured the moment it is built, and
+        # a run that only discovers that mid-optimisation has already wasted the budget.
+        if dispersion_backend == "cubic" and int(N) != 3:
+            raise ValueError(
+                f"dispersion_backend='cubic' is exact for N=3 only (got N={N}). "
+                "Use dispersion_backend='eig' for any other N.")
         self.dispersion_backend = dispersion_backend
         g = torch.Generator().manual_seed(seed) if seed is not None else None
 
@@ -275,6 +282,5 @@ def build_model(cfg) -> RNGRN:
     """Construct a model from a ModelConfig (registry-dispatched by architecture)."""
     cls = MODELS.get(cfg.architecture)
     return cls(N=cfg.N, form=cfg.form, n_hill=cfg.n_hill, seed=cfg.seed,
-               dispersion_backend=cfg.dispersion_backend)
-
+               dispersion_backend=cfg.dispersion_backend,
                init=getattr(cfg, "init", "default"))

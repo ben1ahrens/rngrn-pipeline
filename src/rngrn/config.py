@@ -79,8 +79,9 @@ class LossConfig:
     # Turing seeds with best median k* error 11.8 %, against 0.4 % with the residual off.
     # `anchor` (2.0) is the frame-scale anchor promoted from exp05; see TUNING.md [TUNE].
     weights: dict = field(default_factory=lambda: dict(
-        kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5, anchor=2.0, morphology=0.1))
-    strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'gradnorm' | 'ntk'
+        kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5, anchor=2.0, morphology=0.1,
+        param_prior=0.0))                   # param_prior default 0.0: opt-in (unit 5)
+    strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'ratio' | 'gradnorm' | 'ntk'
     tau: float = 0.12                        # k* tolerance band
     jac_floor: float = 1.0                   # anti-collapse ||J|| floor
     split_hinges: bool = True                # disjoint-support Turing hinges  # unit 1
@@ -89,28 +90,12 @@ class LossConfig:
     staging_off_frac: float = 0.25           # staged weights held at 0 for this fraction  # unit 1
     staging_ramp_frac: float = 0.25          # then ramped 0->1 over this fraction  # unit 1
     detach_xstar: bool = False               # dispersion terms see x* as a constant  # unit 1
-
-        kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.1,
-        param_prior=0.0))                   # param_prior default 0.0: opt-in (unit 5)
-    strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'gradnorm' | 'ntk'
-    tau: float = 0.12                        # k* tolerance band
-    jac_floor: float = 1.0                   # anti-collapse ||J|| floor
     dratio_centre: float = 7.5              # D-ratio prior centre, biological literature
                                              # value (Nodal/Lefty), NOT the generator's
                                              # ~135 median — see configs/bio_box.yaml # unit 5
     dratio_spread: float = 1.0              # D-ratio prior spread, natural-log units;
                                              # [TUNE], see configs/bio_box.yaml # unit 5
     bio_box_path: str = "configs/bio_box.yaml"  # source of every plausibility number # unit 5
-
-        kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.1))
-    strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'ratio' | 'gradnorm' | 'ntk'
-    tau: float = 0.12                        # k* tolerance band
-    jac_floor: float = 1.0                   # anti-collapse ||J|| floor
-
-        kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.1))
-    strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'ratio' | 'gradnorm' | 'ntk'
-    tau: float = 0.12                        # k* tolerance band
-    jac_floor: float = 1.0                   # anti-collapse ||J|| floor
     ratio_update_every: int = 50            # 'ratio' strategy: recompute cadence, in steps  # unit 13
 
 

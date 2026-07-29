@@ -329,17 +329,22 @@ def test_skipping_the_residual_leaves_the_total_unchanged_at_weight_zero():
 
 
 def test_adaptive_strategies_never_qualify_for_the_residual_skip():
-    """gradnorm/ntk may move a weight off 0 later, so a base weight of 0 licenses nothing."""
+    """An adaptive strategy may move a weight off 0 later, so a base weight of 0 licenses
+    nothing. This uses `ratio`: unit 13 made gradnorm/ntk raise at CONSTRUCTION rather than
+    silently fall back to fixed weights, so they can no longer be instantiated here."""
     from rngrn.losses.weighting import (GradNormWeighting, NTKWeighting,
-                                        ScheduledWeighting)
+                                        RatioWeighting, ScheduledWeighting)
     w = dict(resid=0.0)
     assert FixedWeighting(w).static_weights is True
     assert ScheduledWeighting(w).static_weights is True
-    assert GradNormWeighting(w).static_weights is False
-    assert NTKWeighting(w).static_weights is False
+    assert RatioWeighting(w).static_weights is False
     # the wrapper inherits its inner strategy's answer, in both directions
     assert DataFirstStaging(FixedWeighting(w), total_steps=10).static_weights is True
-    assert DataFirstStaging(GradNormWeighting(w), total_steps=10).static_weights is False
+    assert DataFirstStaging(RatioWeighting(w), total_steps=10).static_weights is False
+    # and the unimplemented strategies fail loud rather than pretending to be adaptive
+    for cls in (GradNormWeighting, NTKWeighting):
+        with pytest.raises(NotImplementedError):
+            cls(w)
 
 
 def test_latent_fields_get_no_gradient_once_the_residual_is_off():

@@ -21,6 +21,7 @@ FIREWALL: inputs are the frame, its L and observed_idx. k*_true is scoring-only.
 import argparse, json, time
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np, torch, h5py
+import _runlog
 
 torch.set_num_threads(1)
 
@@ -51,6 +52,7 @@ if __name__ == "__main__":
     ap.add_argument("--workers", type=int, default=18)
     ap.add_argument("--out", default="experiments/exp09_anchor_ensemble.json")
     a = ap.parse_args()
+    run = _runlog.start("exp09_anchor_and_ensemble", vars(a))
     path = f"data/datasets/{a.dataset}/payload.h5"
     from rngrn import observables as obs
     with h5py.File(path) as f:
@@ -97,3 +99,6 @@ if __name__ == "__main__":
     print(f"corr(anchor error, Turing hit count) = {summ['corr_anchor_vs_hitrate']:+.3f}"
           "   (negative => bad anchor hurts)")
     json.dump(dict(rows=rows, summary=summ), open(a.out, "w"), indent=1)
+    _runlog.write_meta(a.out, run)
+    row = dict(summ); row.update(dataset=a.dataset, samples=a.samples)
+    _runlog.record("experiments", run, row)

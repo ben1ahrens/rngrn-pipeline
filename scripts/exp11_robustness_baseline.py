@@ -34,6 +34,7 @@ Outputs: experiments/exp11_robustness_baseline.csv (per sample x sigma)
 """
 import argparse, glob, hashlib, os, time
 import h5py, numpy as np, pandas as pd
+import _runlog
 
 KG = np.concatenate([[0.0], np.linspace(1e-3, 4.0, 250)])
 K2 = (KG ** 2)[:, None, None]
@@ -93,6 +94,7 @@ def main():
     ap.add_argument("--ndraw", type=int, default=400)
     ap.add_argument("--out-dir", default="experiments")
     args = ap.parse_args()
+    run = _runlog.start("exp11_robustness_baseline", vars(args))
 
     cloud_rows, imm_rows = [], []
     t0 = time.time()
@@ -130,6 +132,10 @@ def main():
     cdf = pd.DataFrame(cloud_rows); idf = pd.DataFrame(imm_rows)
     cdf.to_csv(f"{args.out_dir}/exp11_robustness_baseline.csv", index=False)
     idf.to_csv(f"{args.out_dir}/exp11_immobile_node.csv", index=False)
+    wall_s = round(time.time() - t0, 1)
+    _runlog.write_meta(f"{args.out_dir}/exp11_robustness_baseline.csv", run)
+    _runlog.record(args.out_dir, run, dict(family=args.family, ndraw=args.ndraw,
+                   n_samples=len(idf), wall_s=wall_s))
     print(f"n samples {len(idf)} | wall {time.time() - t0:.0f}s")
     print(cdf.groupby("sigma").frac_strict.describe()[["count", "mean", "50%", "min"]].round(3).to_string())
     print("\nstill Turing with one node immobile:",

@@ -156,6 +156,8 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        staging_ramp_frac=cfg.loss.staging_ramp_frac,
                        detach_xstar=cfg.loss.detach_xstar)
 
+                       nondim=cfg.model.nondim)   # unit 12: default False = unchanged path
+
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is
     # free: it is the image recovery already trained on, and it is on the recovery side of
@@ -193,7 +195,12 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     metric["n_model"] = cfg.model.N
     metric["observed_idx"] = str(obs_idx_used)   # single source of truth for this key
 
-    IO.save_checkpoint(rdir, result.model, extra=dict(kstar_obs=result.kstar_obs))
+    # `nondim`/`L` ride along because the checkpointed model's D is in the units recovery
+    # ran in: dimensionless (D/L**2) on the non-dimensional path. Anyone reloading it for a
+    # rollout must know which, or they will simulate the wrong diffusivity silently. # unit 12
+    IO.save_checkpoint(rdir, result.model,
+                       extra=dict(kstar_obs=result.kstar_obs,
+                                  nondim=result.nondim, L=result.L))
     IO.save_results(rdir, "train_results.json",
                     dict(loss=result.loss, kstar_model=result.kstar_model,
                          kstar_obs=result.kstar_obs, restarts=result.restarts,

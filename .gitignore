@@ -16,18 +16,21 @@ data/staging/
 # evidence is versioned alongside the claims. It is affordable because the model is tiny
 # (3N^2+3N parameters): a whole run directory is ~15 KB and the run index ~5 KB per 30 runs.
 #
-# Same split as the dataset registry, for the same reason: the METADATA is tracked, the
-# regenerable bulk is not.
+# RECOVERED MODELS ARE TRACKED TOO. A checkpoint is ~3 KB here (the model has 3N^2+3N
+# parameters), and it is what `rngrn evaluate --run-id ...` reloads to re-simulate a
+# recovered network. results/train_results.json carries the same parameters as text for
+# reading and citing; the .pt carries them in the form you can RUN. Both, deliberately:
+# text survives a torch upgrade, the checkpoint reproduces the dynamics exactly.
+#
 #   tracked  — runs.jsonl / target_reports.jsonl (the append-only indexes),
 #              config/frozen_config.yaml (the config that ACTUALLY ran),
-#              results/*.json (metrics, provenance, and the recovered network as text),
+#              results/*.json (metrics, provenance, recovered parameters + Jacobian),
+#              checkpoints/*.pt (the runnable recovered model),
 #              exp*.json / exp*.csv (the experiment-script evidence ledger)
-#   ignored  — figures (regenerable from the run), checkpoints (binary, and redundant now
-#              that results/train_results.json carries the recovered physical parameters
-#              in plain text), and any bulk field dump.
+#   ignored  — only regenerable bulk: figures, and any raw field dump. A rollout field at
+#              96x96xN float64 is ~220 KB per run and is fully reproducible from the
+#              checkpoint plus the frozen config, so it is not worth versioning.
 experiments/**/figures/
-experiments/**/checkpoints/
-experiments/**/*.pt
 experiments/**/*.h5
 experiments/**/*.npz
 experiments/**/*.npy

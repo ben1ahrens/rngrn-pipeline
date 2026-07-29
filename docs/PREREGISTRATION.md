@@ -175,8 +175,103 @@ move to make the bar easier.
 
 ### 3.5 Generalisation across domain size
 
-> On `three_gene_multiL`: for one system across its 4 domain sizes, recovered J
-> sign-structure agreement ≥ **0.75**, and physical D-ratio spread (CV) ≤ **0.25**.
+**Amended 2026-07-30, before any convergence result existed.** The owner clarified the
+intent: *"The post training evaluation should run on a different domain size. That is part
+of the idea. Shows that the learned grn generalises across domain sizes."* The original
+3.5 (below, retained as 3.5b) compared **separately recovered** models at different L. That
+is a weaker test, and in one specific way a defective one: it cannot distinguish a network
+that generalises from a network that merely refits whatever periodicity each box wants,
+because each L gets its own fit. The primary test is therefore now a **transfer** test —
+one recovery, evaluated on domains it never saw.
+
+Amending this *adds* a criterion and tightens the claim; it does not weaken a threshold, and
+no convergence numbers existed when it was written. The original wording is kept verbatim
+so the change is visible rather than silent.
+
+#### 3.5a PRIMARY — cross-L transfer of a single recovered GRN
+
+Recover on one domain size `L_train`, then simulate the recovered model at
+`L ∈ {0.5, 1, 2, 4} × L_train` without refitting anything:
+
+> `kstar_phys_cv` ≤ **0.10** across those L, **and** the fitted slope of
+> `periods_per_box` against `L` within **15 %** of `kstar_phys/2π`, **and**
+> `morphology_class_preserved` ≥ **0.75**.
+
+*Why these are the right quantities.* Turing theory fixes k\* from the reaction and
+diffusion parameters — it is a property of the network, not of the box. So the physical
+wavelength must be **invariant** in L while the number of periods across the box scales
+**linearly** with L. The failure mode this catches is the interesting one: a network that
+memorised a box produces a constant `periods_per_box` with k\* drifting as 1/L, which
+inverts both signatures at once. Reporting the CV and the slope together makes the two
+outcomes unambiguous, which the original 3.5 could not do.
+
+*Calibration.* 0.10 on the CV is one FFT bin's worth of scatter at the resolutions in use
+(one bin is 16.7 % of k\*, so ±8.3 % is the estimator's own floor — a CV below that would be
+claiming precision the measurement does not have). 15 % on the slope is the same floor
+carried through the fit. 0.75 on class preservation is 3 of 4 domain sizes, and is
+deliberately not 1.0 because the morphology classifier scores only 33.3 % on held-out
+stripes (n=3) and would otherwise fail this criterion on classifier noise rather than on
+physics.
+
+*Ground truth is available and must be used.* `three_gene_multiL` contains the **same 23
+systems each simulated at 4 real domain sizes**, so a transferred prediction at L₂ can be
+compared against the actual generator sample at L₂ — not merely checked for
+self-consistency.
+
+*Resolution is a real confound, not a detail.* Changing L at fixed grid n changes dx, so
+large L means fewer pixels per wavelength and k\* estimation degrades until it is
+meaningless. `pixels_per_wavelength` is reported for every L and evaluation refuses below a
+stated floor (~6 px/wavelength, where the generator itself already sat at its coarsest).
+A criterion met only by unresolved fields is not met.
+
+*What is trivial here and what is not — stated plainly, because the obvious objection is
+correct.* The dispersion relation σ(k) = max Re eig(J − k²D) is a function of **J and D
+alone**. The *linear* k\* is therefore L-independent by construction, for any model
+whatsoever, on either the dimensional or the non-dimensional path. A reviewer asking "isn't
+k\*-invariance guaranteed?" is right about the linear prediction, and this criterion would
+be vacuous if that were all it measured.
+
+It is not. Three things make the transfer test substantive, and all three are nonlinear or
+discrete:
+
+1. **Mode quantisation.** On a periodic box of size L only wavenumbers k = 2πm/L exist, so
+   the realised pattern must snap to the nearest admissible mode. At small L (few periods)
+   that lattice is coarse and the realised k\* can depart materially from the linear
+   prediction. Invariance across L is a claim that selection is robust to the lattice, not
+   a restatement of the eigenvalue problem.
+2. **Nonlinear selection and saturation.** k\* is the fastest-growing *linear* mode; the
+   saturated pattern's dominant mode need not equal it, and which mode wins can depend on
+   the domain through the competition between admissible modes. `morphology_class_preserved`
+   and `amplitude` are properties of the saturated state and are not fixed by (J, D) at all.
+3. **Reachability.** A recovered network that is only marginally Turing-unstable may pattern
+   at one L and fail to pattern at another (`patterned` False), which no linear argument
+   rules out.
+
+And one further correction, made here rather than left for a referee: `periods_per_box` is
+*defined* as `L·k*/2π`, so the slope criterion and the CV criterion are **two views of one
+measurement**, not independent evidence. If k\* is invariant then q ∝ L follows
+algebraically. They are both retained because together they make the failure direction
+legible at a glance — constant q with k\* ∝ 1/L is a visibly different table from constant
+k\* with q ∝ L — but they must be counted as **one** criterion, and the earlier claim that
+the slope independently "falsifies box-memorisation" was wrong: in a transfer test nothing
+is refitted, so that failure mode cannot arise the way it would in 3.5b.
+
+**Therefore the load-bearing number in 3.5a is the comparison against ground truth**: does
+the model recovered at L_train reproduce the k\* and morphology of the *real*
+`three_gene_multiL` sample at L₂, L₃, L₄? That is a test against an independently generated
+system, not a self-consistency check, and it is the only part of 3.5a that cannot be
+satisfied by structure alone. Class preservation and patterning-at-every-L rank next, since
+both are properties of the saturated state that (J, D) does not fix. `kstar_phys_cv` and the
+slope rank last and are reported for completeness.
+
+Recorded this way deliberately: a criterion whose triviality is discovered by a reviewer
+costs more than one whose limits were stated by its author.
+
+#### 3.5b SECONDARY — agreement between independent recoveries at different L
+
+Retained from the original pre-registration, now reported as a secondary consistency check
+rather than the headline: on `three_gene_multiL`, for one system across its 4 domain sizes,
+recovered J sign-structure agreement ≥ **0.75**, and physical D-ratio spread (CV) ≤ **0.25**.
 
 *The control.* Cross-*system* agreement at fixed L. As in 3.1, the gap between within-system
 and cross-system is the substantive number; a high absolute value with no gap means the

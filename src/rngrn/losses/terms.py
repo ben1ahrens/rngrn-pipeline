@@ -10,6 +10,8 @@ inequalities on the model's own J and D. This is the Section-12 firewall in code
 
   steady_state          f(x*)=0 by damped Newton with relaxation fallback (never the frame mean)
   turing_hinges         softplus hinges on the model's Turing conditions at x* (general-N via dispersion)
+  turing_hinges_split   the same two conditions on DISJOINT k-support (the promoted default)
+  frame_scale_anchor    log-scale anchor of x* to the frame's own mean intensity
   kstar_anchor          soft tolerance-band penalty |k*_model - k*_FFT| / k*_FFT
   stationarity_residual full RHS D lap(x) + f(x) = 0 on observed channels (latent inferred if m<N)
   anticollapse          margin penalty excluding the f==0, D==0 trivial minimum
@@ -89,20 +91,110 @@ def _softplus_hinge(violation, beta=10.0):
 
 
 def turing_hinges(model, xstar, kgrid, margin=1e-3):
-    """Softplus hinges on the Turing conditions. General-N: uses the differentiable dispersion,
-    requiring sigma(0) < 0 (uniform-stable) and max_{k>0} sigma(k) > 0 (structured-unstable).
-    For N=2 this reduces to the classical four inequalities, but the dispersion form is general."""
+    """SUPERSEDED shared-support hinges. Kept because docs and scripts/exp02 reference it as
+    the control arm; `turing_hinges_split` is the default in losses/total.compute_terms.
+
+    Softplus hinges on the Turing conditions. General-N: uses the differentiable dispersion,
+    requiring sigma(0) < 0 (uniform-stable) and max_k sigma(k) > 0 (structured-unstable).
+
+    KNOWN DEFECT (measured, scripts/exp02, 60/60 random inits): argmax_k sigma(k) IS the
+    kgrid[0] point at random init, so `sig.max()` and `sig[0]` are the SAME scalar and the
+    two hinges push it in opposite directions. See docs/STATE_OF_THE_SCIENCE.md 2.2.
+    """
     J = model.jacobian(xstar, create_graph=True)
     sig = model.dispersion(xstar, kgrid, J=J)              # (K,)
-    k0 = kgrid[0]
     # sigma at (near) k=0: stability to uniform perturbations -> want sig0 < 0
     sig0 = sig[0]
-    # max growth at k>0 -> want > 0
+    # max growth over the WHOLE grid (this is the defect: it can be sig0 itself)
     sig_max_pos = sig.max()
     L_uniform = _softplus_hinge(sig0 + margin)             # penalise sig0 >= -margin
     L_unstable = _softplus_hinge(-(sig_max_pos - margin))  # penalise sig_max <= margin
     return L_uniform + L_unstable, dict(sig0=float(sig0.detach()),
                                         sig_max=float(sig_max_pos.detach()))
+
+
+def turing_hinges_split(model, xstar, kgrid, margin=1e-3, k_min_frac=0.1):
+    """Turing hinges on DISJOINT k-support. The promoted default (see total.compute_terms).
+
+    Same two conditions as `turing_hinges`, but the instability hinge maximises only over
+    k >= kgrid[i_min] with i_min = max(1, int(k_min_frac * len(kgrid))), so it can never be
+    evaluated at the same grid point as the uniform-stability hinge. One scalar therefore
+    never receives opposing gradients.
+
+    PROVENANCE: ported verbatim from scripts/exp02_objective_fix.py::turing_hinges_split
+    (identical in scripts/exp05_pixel_minibatch.py::split_hinges). Measured there over
+    40 seeds x 400 steps, N=3, WITH the frame-scale anchor: 38/40 converged, 36.8 % Turing,
+    against 37/40 converged and 0 % Turing for the shared-support form. Neither fix works
+    alone (docs/STATE_OF_THE_SCIENCE.md 2.1). That measurement was made by the experiment
+    scripts, not by this function; this is the promotion of the same arithmetic.
+
+    TWO GRID DIFFERENCES FROM THE EXPERIMENTS, both real, neither measured for its effect:
+      * kgrid[0] is TREATED AS the uniform (k=0) mode, but recover._kgrid_for starts the
+        grid at kstar_obs/50 rather than exactly 0 (the experiments used exactly 0), so
+        sig0 here is sigma(k*_obs/50). The gap is O(D k^2) at that k.
+      * `k_min_frac` is a fraction of the GRID INDEX, not of k*, so where the instability
+        hinge actually starts depends on the grid's span. Measured on three_gene_val
+        sample_0000 (kstar_obs = 0.4320): recover._kgrid_for puts k_min at
+        0.822 * kstar_obs, the exp05 grid at 0.698 * kstar_obs. The library therefore
+        excludes a wider band below k* than the experiments did. Whether the floor should
+        instead be defined relative to kstar_obs is an open call, deliberately NOT made
+        here — see TUNING.md.
+    """
+    K = len(kgrid)
+    i_min = max(1, int(k_min_frac * K))
+    if i_min >= K:
+        raise ValueError(
+            f"k_min_frac={k_min_frac} leaves no k>=k_min grid points (i_min={i_min}, K={K}); "
+            "the instability hinge would have empty support")
+    J = model.jacobian(xstar, create_graph=True)
+    sig = model.dispersion(xstar, kgrid, J=J)              # (K,)
+    sig0 = sig[0]
+    sig_pos = sig[i_min:].max()                            # strictly k > kgrid[0]
+    L_uniform = _softplus_hinge(sig0 + margin)             # penalise sig0 >= -margin
+    L_unstable = _softplus_hinge(-(sig_pos - margin))      # penalise sig_pos <= margin
+    # `sig_max` keeps its ORIGINAL meaning (max over the whole grid) so the diagnostic
+    # logged by recover.py/restart_log does not silently change definition; `sig_max_pos`
+    # is the new quantity this hinge actually uses.
+    return L_uniform + L_unstable, dict(sig0=float(sig0.detach()),
+                                        sig_max=float(sig.max().detach()),
+                                        sig_max_pos=float(sig_pos.detach()),
+                                        hinge_i_min=int(i_min))
+
+
+# --------------------------------------------------------------------------------------
+# frame-scale anchor
+# --------------------------------------------------------------------------------------
+def frame_scale_anchor(xstar, obs_scale, floor=1e-6):
+    """Anchor the model's steady state to the frame's own mean intensity, in log space:
+
+        L = mean_i ( log(obs_scale) - log(x*_i) )^2
+
+    FIREWALL: `obs_scale` must be `frame.mean()` — a statistic of the OBSERVED image. No
+    ground-truth x* is involved. Callers on the recovery side pass the frame they already
+    have; nothing else is legal here.
+
+    WHAT IT IS AND IS NOT. exp12 measured Spearman rho = +0.950 between `frame.mean()` and
+    the true x*_0, with the ratio median 0.921 — i.e. frame.mean() is a BIASED but strongly
+    monotone image-only estimator of x*_0, not an unbiased measurement of it. This term is
+    therefore a SCALE REGULARISER, not a fit to a known value: its job is to keep x* in the
+    sub-saturated Hill regime where 1 + KA x^n < n can hold, not to pin x* to a truth.
+
+    PROVENANCE: ported from scripts/exp05_pixel_minibatch.py::fit (line 86) and
+    scripts/exp02_objective_fix.py. Measured in exp02, 40 seeds x 400 steps, N=3: adding it
+    took convergence from 2/40 to 38/40 (with split hinges). Its weight (2.0 in the
+    experiments) is supplied by the weighting strategy here, NOT baked in, and has never
+    been swept — see TUNING.md.
+
+    Returns (scalar loss, parts). The zero of this term is x*_i == obs_scale for every i.
+    """
+    s = float(obs_scale)
+    if not (s > 0.0) or not np.isfinite(s):
+        # fail loud: log of a non-positive / non-finite scale is meaningless, and a silent
+        # clamp here would turn a broken frame into a plausible-looking loss.
+        raise ValueError(f"frame_scale_anchor: obs_scale must be finite and > 0, got {obs_scale!r}")
+    d = np.log(s) - torch.log(xstar.clamp_min(floor))
+    L = (d ** 2).mean()
+    return L, dict(obs_scale=s, xstar_mean=float(xstar.detach().mean()))
 
 
 # --------------------------------------------------------------------------------------
@@ -215,25 +307,38 @@ def morphology_consistency(sim_field_np, obs_field_np):
 # --------------------------------------------------------------------------------------
 # composite
 # --------------------------------------------------------------------------------------
-DEFAULT_WEIGHTS = dict(kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.0)
+# resid defaults to 0.0: SETTLED OFF. exp06 swept batch {64,128,512} x weight {1,3,10},
+# 8 seeds each; ALL NINE cells collapsed to 1/8 Turing seeds, best median k* error 11.8 %
+# against 0.4 % with the residual off. The term is kept, not deleted — it is the only
+# pixel-level term and a future arm may re-enable it — but it is off by default.
+DEFAULT_WEIGHTS = dict(kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5,
+                       anchor=2.0, morphology=0.0)
 
 
 def composite_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
-                   weights=None, latent_fields=None, tau=0.12, jac_floor=1.0):
+                   weights=None, latent_fields=None, tau=0.12, jac_floor=1.0,
+                   k_min_frac=0.1):
     """The weighted objective. Returns (scalar loss, parts dict).
 
     frame: (m,H,W) observed channels (torch). kstar_obs: measured FFT k* of the frame (float).
+
+    Uses the same terms as losses/total.compute_terms (split hinges + frame-scale anchor).
+    losses/total.py is the assembler recover.py actually calls; this one is the standalone
+    reference form.
     """
-    w = dict(DEFAULT_WEIGHTS); 
+    w = dict(DEFAULT_WEIGHTS);
     if weights: w.update(weights)
     xstar, conv = steady_state(model)
     xstar = steady_state_diff(model, xstar)                # differentiable polish
     L_k, p_k = kstar_anchor(model, xstar, kgrid, kstar_obs, tau=tau)
-    L_t, p_t = turing_hinges(model, xstar, kgrid)
+    L_t, p_t = turing_hinges_split(model, xstar, kgrid, k_min_frac=k_min_frac)
     L_r, p_r = stationarity_residual(model, frame, L, observed_idx, latent_fields)
     L_a, p_a = anticollapse(model, xstar, jac_floor=jac_floor)
-    loss = w['kstar']*L_k + w['turing']*L_t + w['resid']*L_r + w['anticollapse']*L_a
+    L_s, p_s = frame_scale_anchor(xstar, float(frame.mean()))
+    loss = (w['kstar']*L_k + w['turing']*L_t + w['resid']*L_r
+            + w['anticollapse']*L_a + w['anchor']*L_s)
     parts = dict(total=float(loss), ss_converged=conv,
-                 L_kstar=float(L_k), L_turing=float(L_t), L_resid=float(L_r), L_anti=float(L_a),
-                 **p_k, **p_t, **p_r, **p_a)
+                 L_kstar=float(L_k), L_turing=float(L_t), L_resid=float(L_r),
+                 L_anti=float(L_a), L_anchor=float(L_s),
+                 **p_k, **p_t, **p_r, **p_a, **p_s)
     return loss, parts

@@ -19,7 +19,7 @@ from .model import RNGRN
 from . import observables as obs
 from .losses import total as LT
 from .losses.total import SteadyStateError
-from .losses.weighting import build_strategy, FixedWeighting
+from .losses.weighting import build_strategy, FixedWeighting, DataFirstStaging
 
 
 @dataclass
@@ -51,10 +51,17 @@ def _topology(model):
 
 def recover(recovery_input, form="competitive", strategy=None, weights=None,
             tau=0.12, jac_floor=1.0, n_restarts=4, adam_steps=1500, adam_lr=0.05,
-            lbfgs_steps=50, grad_clip=10.0, seed=0, verbose=False, device=None):
+            lbfgs_steps=50, grad_clip=10.0, seed=0, verbose=False, device=None,
+            split_hinges=True, hinge_k_min_frac=0.1, staging_keys=("turing",),
+            staging_off_frac=0.25, staging_ramp_frac=0.25, detach_xstar=False):
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
+
+    split_hinges / hinge_k_min_frac / detach_xstar: passed through to losses.total (see
+    compute_terms). staging_keys/off_frac/ramp_frac: data-first staging — the named terms
+    are held at weight 0 for the first `off_frac` of `adam_steps`, then ramped to their
+    configured weight over the next `ramp_frac`. Pass staging_keys=() to disable.
     """
     ri = recovery_input
     dev = torch.device(device) if device is not None else torch.device("cpu")
@@ -62,8 +69,34 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     L, N, observed_idx = ri.L, ri.N, list(ri.observed_idx)
     m = frame.shape[0]
     if strategy is None:
-        base = weights or dict(kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.0)
+        base = weights or dict(kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5,
+                               anchor=2.0, morphology=0.0)
         strategy = FixedWeighting(base)
+    if staging_keys:
+        strategy = DataFirstStaging(strategy, total_steps=adam_steps, keys=staging_keys,
+                                    off_frac=staging_off_frac, ramp_frac=staging_ramp_frac)
+    # The stationarity residual is 45 % of a step (measured, 96x96 N=3: 9.39 vs 5.15 ms)
+    # and its weight now defaults to 0. Skip it ONLY when it provably cannot contribute:
+    # the strategy's weights must be a static function of base/step (adaptive strategies
+    # may raise a weight of 0 later, so they never qualify) and its base weight must be 0.
+    compute_resid = not (getattr(strategy, "static_weights", False)
+                         and float(strategy.base.get("resid", 0.0)) == 0.0)
+    if m < N and not compute_resid:
+        # MEASURED, not inferred: the latent fields enter the objective through
+        # stationarity_residual and nothing else, so at resid weight 0 their gradient is
+        # exactly 0.0 (checked at N=3, m=2). Optimising them would be theatre and the
+        # returned latent_fields would be their random init dressed up as a recovery.
+        # Fail loud rather than emit a meaningless hidden-channel result.
+        raise ValueError(
+            f"m={m} < N={N} (hidden channels) but the stationarity residual has weight 0, "
+            "and it is the ONLY term the latent fields enter. They would receive zero "
+            "gradient and the recovered latent_fields would be the init. Set "
+            "loss.weights.resid > 0 for hidden-channel runs, or add a term that sees the "
+            "latent fields. NOTE exp06 measured the residual as harmful to Turing recovery "
+            "(9/9 swept cells collapsed), so hidden-channel recovery currently has no "
+            "known-good objective — that is an open problem, not a config mistake.")
+    term_kw = dict(split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
+                   detach_xstar=detach_xstar, compute_resid=compute_resid)
 
     kstar_obs = obs.kstar_of(frame[0].detach().cpu().numpy(), L=L)   # firewall: FFT of the observed image
     kgrid = _kgrid_for(kstar_obs, device=dev)
@@ -85,7 +118,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             try:
                 loss, parts = LT.total_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
                                             strategy, step=step, latent_fields=latent,
-                                            tau=tau, jac_floor=jac_floor, strict=True)
+                                            tau=tau, jac_floor=jac_floor, strict=True,
+                                            **term_kw)
             except SteadyStateError:
                 # fail-loud honoured: this init cannot form a valid steady state — abandon
                 # the restart rather than optimise against a meaningless x*.
@@ -110,18 +144,30 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                 lopt.zero_grad()
                 loss, _ = LT.total_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
                                         strategy, step=adam_steps, latent_fields=latent,
-                                        tau=tau, jac_floor=jac_floor)
+                                        tau=tau, jac_floor=jac_floor, **term_kw)
                 loss.backward(); return loss
             try:
                 lopt.step(closure)
             except Exception:
                 pass
 
-        with torch.no_grad():
-            loss, parts = LT.total_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
-                                        strategy, step=adam_steps, latent_fields=latent,
-                                        tau=tau, jac_floor=jac_floor)
+        try:
+            with torch.no_grad():
+                loss, parts = LT.total_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
+                                            strategy, step=adam_steps, latent_fields=latent,
+                                            tau=tau, jac_floor=jac_floor, **term_kw)
+        except SteadyStateError:
+            # Same condition as a mid-training failure, so handle it the same way. Without
+            # this the FINAL scoring pass was unguarded: a single restart that ended on
+            # parameters with no valid steady state aborted the whole recovery, discarding
+            # every other restart, instead of being logged and skipped.
+            if verbose:
+                print(f"  restart {r}: steady state diverged at final scoring; skipping restart")
+            restart_log.append(dict(restart=r, total=float("inf"), steady_state_failed=True,
+                                    failed_at="final_eval"))
+            continue
         restart_log.append(dict(restart=r, total=float(loss), sig_max=parts.get("sig_max"),
+                                sig_max_pos=parts.get("sig_max_pos"),
                                 kstar_model=parts.get("kstar_model"), rel_err=parts.get("rel_err")))
         if best is None or float(loss) < best[0]:
             from .losses.terms import steady_state

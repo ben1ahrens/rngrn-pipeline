@@ -69,11 +69,21 @@ class LossConfig:
     # is currently a non-differentiable post-hoc diagnostic (losses/terms.morphology_
     # consistency) and is NOT yet in the differentiable sum in losses/total.compute_terms,
     # so this weight is inert until Claude Code wires a differentiable morphology term.
+    # `resid` defaults to 0.0 — SETTLED OFF, not merely untuned. exp06 swept pixel batch
+    # {64,128,512} x weight {1,3,10}, 8 seeds per cell: all nine cells collapsed to 1/8
+    # Turing seeds with best median k* error 11.8 %, against 0.4 % with the residual off.
+    # `anchor` (2.0) is the frame-scale anchor promoted from exp05; see TUNING.md [TUNE].
     weights: dict = field(default_factory=lambda: dict(
-        kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.1))
+        kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5, anchor=2.0, morphology=0.1))
     strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'gradnorm' | 'ntk'
     tau: float = 0.12                        # k* tolerance band
     jac_floor: float = 1.0                   # anti-collapse ||J|| floor
+    split_hinges: bool = True                # disjoint-support Turing hinges  # unit 1
+    hinge_k_min_frac: float = 0.1            # instability hinge starts at this grid fraction  # unit 1
+    staging_keys: list = field(default_factory=lambda: ["turing"])  # data-first staged terms  # unit 1
+    staging_off_frac: float = 0.25           # staged weights held at 0 for this fraction  # unit 1
+    staging_ramp_frac: float = 0.25          # then ramped 0->1 over this fraction  # unit 1
+    detach_xstar: bool = False               # dispersion terms see x* as a constant  # unit 1
 
 
 @dataclass

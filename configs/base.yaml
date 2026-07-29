@@ -18,7 +18,9 @@ model:
 
 loss:
   strategy: fixed            # 'fixed' | 'scheduled' | 'gradnorm' | 'ntk'
-  weights: {kstar: 1.0, turing: 1.0, resid: 0.3, anticollapse: 0.5, morphology: 0.1}
+  # resid: 0.0 is SETTLED OFF (exp06: 9 cells x 8 seeds all collapsed) — see config.py.
+  # anchor: the frame-scale anchor promoted from exp05. Weight 2.0 is [TUNE], never swept.
+  weights: {kstar: 1.0, turing: 1.0, resid: 0.0, anticollapse: 0.5, anchor: 2.0, morphology: 0.1}
   tau: 0.12
   jac_floor: 1.0
 

@@ -46,6 +46,51 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
 - **[VALIDATE] every loss term** — `terms.py` is repackaged from the SCAFFOLD objective. Confirm
   per-term: gradient flows to θ, and the term's zero sits where the design doc says
   (`tests/test_science.py` has the dispersion/Jacobian anchors; add per-term zero-location tests).
+  Done for the three promoted terms in `tests/test_losses.py`; the rest are still open.
+
+### Promoted from the experiments (unit 1)
+
+- **[TUNE] frame-scale anchor weight** — `loss.weights.anchor` (2.0),
+  `terms.py::frame_scale_anchor`. Ported from `scripts/exp05_pixel_minibatch.py` where 2.0 took
+  convergence from 2/40 to 38/40 seeds. **NEVER SWEPT** — 2.0 is the only value ever run. It is
+  also the term with the least principled magnitude in the objective, because its target
+  `frame.mean()` is a *biased* estimator of x\*₀ (exp12: Spearman ρ = +0.950, ratio median 0.921),
+  so it is a scale regulariser, not a fit. Sweep it before trusting any anchor-sensitive result.
+- **[TUNE] hinge k-floor** — `loss.hinge_k_min_frac` (0.1), i.e. the instability hinge maximises
+  over `k ≥ kgrid[int(0.1·K)]`. Inherited unchanged from exp02/exp05; never swept. Too small and
+  the split stops separating the two conditions; too large and it cannot select a low-k pattern.
+- **[VALIDATE] the k-floor is grid-relative, not k\*-relative** — because `k_min_frac` indexes the
+  grid, the floor moves with the grid's span. Measured on `three_gene_val/sample_0000`
+  (k\*_obs = 0.4320): `recover._kgrid_for` puts `k_min` at **0.822·k\*_obs**, the exp05 grid at
+  **0.698·k\*_obs**. So the promoted library hinge excludes a wider band below k\* than the
+  experiment that validated it. Defining the floor relative to `kstar_obs` instead would change
+  what the term means, so it was NOT changed here — decide it deliberately, then re-measure.
+- **[TUNE] data-first staging fractions** — `loss.staging_off_frac` / `loss.staging_ramp_frac`
+  (0.25 / 0.25), `weighting.py::staging_factor`. Exactly the exp05 schedule; never swept. Note
+  the schedule is a fraction of `train.adam_steps`, so changing the step budget silently moves
+  the ramp.
+- **[VALIDATE] `loss.detach_xstar`** — the library differentiates the dispersion terms through
+  x\* (`steady_state_diff`); exp05 passes `xs.detach()` to them. Default is `False` = library
+  behaviour, so nothing silently changed, but **the 36.8 % measurement was made with `True`**.
+  Which one matters has NOT been isolated in an A/B. Run one before quoting a library-vs-exp05
+  reproduction either way.
+- **[NOTE] `k≈0` grid point** — `turing_hinges_split` treats `kgrid[0]` as the uniform mode, but
+  `recover._kgrid_for` starts the grid at `kstar_obs/50`, not 0 (the experiments used exactly 0).
+  The gap is O(D·k²) at that k; unmeasured.
+- **[NOTE] `loss.weights.resid = 0.0` is SETTLED, not untuned** — exp06 swept pixel batch
+  {64,128,512} × weight {1,3,10}, 8 seeds each; all nine cells collapsed to 1/8 Turing seeds,
+  best median k\* error 11.8 % against 0.4 % with it off. The term is kept for future arms.
+  Evaluating it costs **45 % of a forward+backward step** (measured, 96×96 N=3, 40 reps:
+  9.39 ms with, 5.15 ms without), so `compute_terms(compute_resid=False)` omits it — and
+  `recover.py` selects that only when the strategy's weights are static *and* its base
+  `resid` weight is 0. Re-enabling the residual re-enables the cost automatically.
+- **[IMPL] hidden-channel (m &lt; N) recovery has no objective at `resid = 0`** — the latent
+  fields enter the objective through `stationarity_residual` and **nothing else**, so at weight 0
+  their gradient is exactly `0.0` (measured, N=3 m=2). `recover()` now REFUSES such runs rather
+  than returning the random init as a "recovered" latent field. Since exp06 also measured the
+  residual as harmful to Turing recovery, Experiment A currently has **no known-good objective**:
+  it needs a term that sees the latent fields and is not the full-RHS residual. This is an open
+  problem, not a misconfiguration.
 
 ## Stage 3 — optimisation (inner + outer)
 

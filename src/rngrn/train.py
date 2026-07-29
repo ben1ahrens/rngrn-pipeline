@@ -63,7 +63,14 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        jac_floor=cfg.loss.jac_floor, n_restarts=cfg.train.n_restarts,
                        adam_steps=cfg.train.adam_steps, adam_lr=cfg.train.adam_lr,
                        lbfgs_steps=cfg.train.lbfgs_steps, grad_clip=cfg.train.grad_clip,
-                       seed=cfg.train.seed, verbose=verbose)
+                       seed=cfg.train.seed, verbose=verbose,
+                       # promoted objective knobs (unit 1)
+                       split_hinges=cfg.loss.split_hinges,
+                       hinge_k_min_frac=cfg.loss.hinge_k_min_frac,
+                       staging_keys=tuple(cfg.loss.staging_keys),
+                       staging_off_frac=cfg.loss.staging_off_frac,
+                       staging_ramp_frac=cfg.loss.staging_ramp_frac,
+                       detach_xstar=cfg.loss.detach_xstar)
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is
@@ -136,6 +143,16 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
         # experiment-arm identity: which observation regime, and how the model's assumed
         # species count relates to the truth.
         hidden_idx=str(hidden_idx), strategy=cfg.loss.strategy, loss=result.loss,
+    )
+    # objective identity (unit 1): which promoted terms/schedule produced this row. Without
+    # these, runs.jsonl cannot distinguish two rows fitted with different objectives.
+    row.update(
+        split_hinges=cfg.loss.split_hinges, hinge_k_min_frac=cfg.loss.hinge_k_min_frac,
+        staging_off_frac=cfg.loss.staging_off_frac,
+        staging_ramp_frac=cfg.loss.staging_ramp_frac,
+        staging_keys=str(list(cfg.loss.staging_keys)), detach_xstar=cfg.loss.detach_xstar,
+        w_anchor=float(cfg.loss.weights.get("anchor", 0.0)),
+        w_resid=float(cfg.loss.weights.get("resid", 0.0)),
     )
     IO.append_run_index(runs_root, row, backend=cfg.tracking.index_backend)
     metric["run_id"] = run_id

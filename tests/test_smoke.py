@@ -19,10 +19,10 @@ from rngrn.config import load_config, apply_overrides
 CONFIGS = os.path.join(os.path.dirname(__file__), "..", "configs")
 
 
-def _tiny(cfg):
+def _tiny(cfg, form="competitive"):
     return apply_overrides(cfg, [
         "data.resolution=32", "data.T_max=5.0", "data.dt=0.05",
-        "model.N=2", "model.m=2",
+        "model.N=2", "model.m=2", f"model.form={form}",
         "train.n_restarts=1", "train.adam_steps=8", "train.lbfgs_steps=0",
         "solver.n_grid=32", "solver.robustness_samples=5",
     ])
@@ -34,9 +34,10 @@ def test_config_loads_and_hashes():
     assert len(cfg.config_id()) == 12
 
 
-def test_end_to_end_reference(tmp_path):
+@pytest.mark.parametrize("form", ["competitive", "nc1"])
+def test_end_to_end_reference(tmp_path, form):
     from rngrn.train import fit
-    cfg = _tiny(load_config(os.path.join(CONFIGS, "milestone1_schnak.yaml")))
+    cfg = _tiny(load_config(os.path.join(CONFIGS, "milestone1_schnak.yaml")), form=form)
     cfg = apply_overrides(cfg, [f"data.cache_root={str(tmp_path/'cache')}"])
     # keep the tiny generator fast: short horizon (dry-run only, not a converged pattern)
     metric = fit(cfg, runs_root=str(tmp_path / "experiments"))
@@ -44,10 +45,11 @@ def test_end_to_end_reference(tmp_path):
     assert os.path.exists(tmp_path / "experiments" / "runs.jsonl")
 
 
-def test_benchmark_reads_index(tmp_path):
+@pytest.mark.parametrize("form", ["competitive", "nc1"])
+def test_benchmark_reads_index(tmp_path, form):
     from rngrn.train import fit
     from rngrn.optim.benchmark import build_table
-    cfg = _tiny(load_config(os.path.join(CONFIGS, "milestone1_schnak.yaml")))
+    cfg = _tiny(load_config(os.path.join(CONFIGS, "milestone1_schnak.yaml")), form=form)
     cfg = apply_overrides(cfg, [f"data.cache_root={str(tmp_path/'cache')}"])
     fit(cfg, runs_root=str(tmp_path / "experiments"))
     table = build_table(runs_root=str(tmp_path / "experiments"))
@@ -55,10 +57,11 @@ def test_benchmark_reads_index(tmp_path):
     assert "kstar_rel_err_mean" in table[0]
 
 
-def test_rollout_etdrk4_runs():
+@pytest.mark.parametrize("form", ["competitive", "nc1"])
+def test_rollout_etdrk4_runs(form):
     from rngrn.model import RNGRN
     from rngrn.eval import simulate
-    m = RNGRN(N=2, seed=0)
+    m = RNGRN(N=2, form=form, seed=0)
     res = simulate(m, L=100.0, n=32, integrator="etdrk4", T=5.0, dt=0.01)
     assert "patterned" in res and "kstar" in res
 

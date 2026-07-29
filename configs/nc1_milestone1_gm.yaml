@@ -1,0 +1,6 @@
+# Milestone 1 — Gierer-Meinhardt stripes, N=m=2 fully observed, nc1 (non-competitive)
+# recovery form. Mirrors milestone1_gm.yaml with model.form overridden to nc1.
+_base_: [base.yaml]
+data: {system: gierer_meinhardt, L: 100.0}
+model: {N: 2, m: 2, form: nc1, observed_idx: [0, 1]}
+tracking: {run_name: nc1_m1_gm}

@@ -19,7 +19,7 @@ from .data import cache
 from . import recover as R
 from .losses.weighting import build_strategy
 from . import io as IO
-from .utils import seed_everything, provenance
+from .utils import seed_everything, provenance, set_deterministic
 from .validate import score_recovery
 
 
@@ -51,6 +51,7 @@ def _resolve_recovery_input(cfg: Config):
 def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
         verbose: bool = False) -> dict:
     """Run one recovery + scoring. Returns the metric dict (and writes a run row)."""
+    set_deterministic(cfg.train.deterministic)
     seed_everything(cfg.train.seed)
     run_id = run_id or IO.new_run_id(cfg.tracking.run_name)
     rdir = IO.run_dir(runs_root, run_id)
@@ -63,7 +64,8 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        jac_floor=cfg.loss.jac_floor, n_restarts=cfg.train.n_restarts,
                        adam_steps=cfg.train.adam_steps, adam_lr=cfg.train.adam_lr,
                        lbfgs_steps=cfg.train.lbfgs_steps, grad_clip=cfg.train.grad_clip,
-                       seed=cfg.train.seed, verbose=verbose)
+                       seed=cfg.train.seed, model_seed=cfg.model.seed,
+                       dispersion_backend=cfg.model.dispersion_backend, verbose=verbose)
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is

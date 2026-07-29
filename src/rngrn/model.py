@@ -25,6 +25,7 @@ TUNING KNOBS for Claude Code (see TUNING.md): n_hill (Hill exponent, default 2),
 the raw-parameter init scales in __init__ (they set where recovery starts).
 """
 from __future__ import annotations
+import math
 import torch
 import torch.nn as nn
 
@@ -82,15 +83,24 @@ class RNGRN(nn.Module):
     form : str       'competitive' or 'nc1'.
     n_hill : int     Hill exponent (default 2). Need not equal the truth's.
     seed : int|None  RNG seed for RANDOM raw-parameter init (no analytic leakage).
+    kstar_obs : float|None  unit B4 (defect 2): when given and init='default', shifts the
+        D init so it starts at median 1/kstar_obs**2 instead of median 1.0 -- see recover.py
+        module docstring. Must be a positive finite wavenumber, IN WHATEVER UNITS THE CALLER
+        RUNS THE OBJECTIVE (rad/length dimensional, rad/box nondim); it is used as-is, never
+        rescaled by anything here (that is what keeps the fix L-free). Ignored when None
+        (default) or when init='low_basal', which has its own D-ratio scheme.
     """
 
     def __init__(self, N: int, form: str = "competitive", n_hill: int = 2,
                  seed: int | None = None, dispersion_backend: str = "eig",
-                 init: str = "default"):
+                 init: str = "default", kstar_obs: float | None = None):
         super().__init__()
         assert form in ("competitive", "nc1"), form
         assert dispersion_backend in ("eig", "cubic"), dispersion_backend
         assert init in ("default", "low_basal"), init
+        if kstar_obs is not None and not (math.isfinite(kstar_obs) and kstar_obs > 0):
+            raise ValueError(
+                f"kstar_obs must be a positive finite wavenumber, got {kstar_obs!r}")
         self.N = int(N)
         self.form = form
         self.n_hill = int(n_hill)
@@ -131,7 +141,14 @@ class RNGRN(nn.Module):
         self.theta_alpha = nn.Parameter(randn(N, N) * 0.5)         # production weight (softplus)
         self.theta_delta = nn.Parameter(randn(N) * 0.3)            # degradation (softplus)
         self.theta_beta  = nn.Parameter(randn(N) * 0.3 - 1.0)      # basal (softplus)
-        self.theta_D     = nn.Parameter(randn(N) * 0.5)            # diffusion (exp)
+        theta_D = randn(N) * 0.5
+        if kstar_obs is not None:
+            # unit B4 (defect 2): shift so D = exp(theta_D) starts at median 1/kstar_obs**2
+            # instead of median 1.0. kstar_obs is already in the objective's own units (the
+            # caller computed it there), so this is L-free by construction on both the
+            # dimensional and non-dimensional paths -- no L is read here.
+            theta_D = theta_D - 2.0 * math.log(kstar_obs)
+        self.theta_D     = nn.Parameter(theta_D)                   # diffusion (exp)
 
     # ---- device / dtype ------------------------------------------------------------
     @property

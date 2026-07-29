@@ -421,14 +421,21 @@ class BatchedRNGRN(nn.Module):
             self.register_parameter(name, nn.Parameter(stacked))
 
     @classmethod
-    def from_seeds(cls, N: int, B: int, form: str = "competitive", n_hill: int = 2,
-                   seed0: int = 0, dispersion_backend: str = "eig",
-                   init: str = "default") -> "BatchedRNGRN":
-        """B members seeded seed0, seed0+1, ... seed0+B-1 — the same sequence recover()'s
-        serial restart loop uses (`seed=model_seed + r`), so the two paths start identically."""
-        return cls([RNGRN(N=N, form=form, n_hill=n_hill, seed=seed0 + r,
-                          dispersion_backend=dispersion_backend, init=init)
-                    for r in range(B)])
+    def from_seeds(cls, N: int, seeds, form: str = "competitive", n_hill: int = 2,
+                   dispersion_backend: str = "eig", init: str = "default",
+                   kstar_obs: float | None = None) -> "BatchedRNGRN":
+        """One member per entry of `seeds`, in order.
+
+        Takes the seeds EXPLICITLY rather than a base seed plus an offset rule. The rule
+        belongs to the caller (recover._restart_seed, unit B1), so the batched and serial
+        paths cannot drift apart on which inits they start from. An earlier version took
+        `seed0` and used `seed0 + r`, which is precisely the sliding-window scheme B1
+        removed — run seed s and s+1 then shared B-1 of their B inits.
+        """
+        return cls([RNGRN(N=N, form=form, n_hill=n_hill, seed=s,
+                          dispersion_backend=dispersion_backend, init=init,
+                          kstar_obs=kstar_obs)
+                    for s in seeds])
 
     # ---- device / dtype ------------------------------------------------------------
     @property

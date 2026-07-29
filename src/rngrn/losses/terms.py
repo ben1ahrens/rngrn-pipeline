@@ -481,7 +481,7 @@ def param_prior(model, dratio_centre=7.5, dratio_spread=1.0, box=None,
 # (non-differentiable numpy diagnostic) and `param_prior` (not in compute_terms at all).
 
 def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
-                         relax_steps=2000, relax_dt=1e-2):
+                         relax_steps=2000, relax_dt=1e-2, multistart=True):
     """Batched damped Newton for f(x*)=0 on B independent members. Returns (x*, converged).
 
     x*: (B, N) DETACHED. converged: (B,) bool.
@@ -514,8 +514,11 @@ def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
     dev, dt_ = model.device, model.dtype
     if x0 is None:
         x0 = torch.ones(B, N, device=dev, dtype=dt_)
-    with torch.no_grad():
-        x = x0.clone()
+
+    def _attempt(x_init):
+        """One full legacy pass — damped Newton, then the relaxation fallback — from x_init.
+        Returns (x (B,N), converged (B,)). Verbatim the pre-multistart body."""
+        x = x_init.clone()
         active = torch.ones(B, dtype=torch.bool, device=dev)
         broke = torch.zeros(B, dtype=torch.bool, device=dev)
         for _ in range(max_iter):
@@ -550,12 +553,38 @@ def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
         needs_relax = active | broke
         converged = ~needs_relax
         if bool(needs_relax.any()):
-            xr = torch.where((x0 > 0).all(dim=-1, keepdim=True), x0, torch.ones_like(x0))
+            xr = torch.where((x_init > 0).all(dim=-1, keepdim=True), x_init,
+                             torch.ones_like(x_init))
             for _ in range(relax_steps):
                 xr = torch.clamp(xr + relax_dt * model.reaction(xr), min=1e-9)
             conv_r = torch.linalg.norm(model.reaction(xr), dim=-1) < 1e-4
             x = torch.where(needs_relax.unsqueeze(-1), xr, x)
             converged = torch.where(needs_relax, conv_r, converged)
+        return x, converged
+
+    with torch.no_grad():
+        # attempt 1: the legacy pass from x0, unchanged, so any member that converged
+        # before converges to the BIT-IDENTICAL x* now.
+        x, converged = _attempt(x0)
+        # attempts 2-4: the unit-B3 analytic bracket, per member, for the stragglers only.
+        #
+        # THIS PORT IS NOT OPTIONAL. B3 added multistart to the serial solver because the
+        # single fixed seed x0 = ones is a globalisation failure that strands Newton on the
+        # det J = 0 fold, and that fix is what took nc1 from 31/32 abandoned restarts to
+        # 0/32. Without it here, the batched path would abandon members the serial path
+        # rescues -- so batched and serial would disagree on convergence, and batched nc1
+        # would still be untrainable. steady_state_bracket reads only beta/delta/alpha,
+        # which are already batch-shaped, so the same expression serves both.
+        if multistart and not bool(converged.all()):
+            lo, hi = steady_state_bracket(model)
+            for seed in (lo, hi, torch.sqrt(lo * hi)):
+                xs, ok = _attempt(seed.expand_as(x0).clone())
+                take = ok & ~converged
+                if bool(take.any()):
+                    x = torch.where(take.unsqueeze(-1), xs, x)
+                    converged = converged | take
+                if bool(converged.all()):
+                    break
     return x, converged
 
 

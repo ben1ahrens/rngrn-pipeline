@@ -747,7 +747,6 @@ while writing `CLAUDE.md` and are logged in it as known gaps.
 
 ---
 
-<<<<<<< HEAD
 ## 13. Restart seeds were NOT independent draws — fixed 2026-07-29
 
 **THE DEFECT.** `recover()` built restart `r` as `RNGRN(seed=model_seed + r)`. With
@@ -789,7 +788,7 @@ comparable** to numbers produced after it. Do not restate an old seed-agreement 
 as if it survived this fix — it did not; it was measured against a different
 (non-independent) sampling scheme. Any reproducibility claim going forward must state
 whether it predates or postdates 2026-07-29's `_restart_seed` fix.
-=======
+
 ## 13. nc1 training instability — diagnosed, and it was the SOLVER (unit B3)
 
 `nc1` (non-competitive) recovery was numerically correct at init but lost its steady state
@@ -911,4 +910,3 @@ Seed-level completion is 8/8 for both forms at both N. **nc1 is no longer the bl
   are not 4 independent samples. All 13.1/13.4 numbers use `seed = 4·i` (disjoint blocks).
   The N=3 / 250-step row is the one exception: it was measured before this was noticed and
   uses consecutive seeds, so treat its 3/32 vs 3/32 as ~2 effective seeds, not 8.
->>>>>>> feature/rngrn-nc1stab

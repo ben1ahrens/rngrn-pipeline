@@ -176,11 +176,22 @@ def _clip_grad_norm_per_member(params, max_norm, B):
     return nrm
 
 
-def _batched_restarts(N, form, model_seed, init, dispersion_backend, n_restarts,
+def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
                       frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
                       adam_steps, adam_lr, grad_clip, tau, jac_floor, dev, verbose,
-                      term_kw):
-    """Run all `n_restarts` restarts SIMULTANEOUSLY as one batched optimisation (unit b2).
+                      term_kw, kstar_obs_init=None):
+    """Run all restarts SIMULTANEOUSLY as one batched optimisation (unit b2).
+
+    `restart_seeds` is the EXPLICIT list of per-member init seeds, one per restart. It is
+    passed in rather than derived here so the seed policy lives in exactly one place
+    (recover._restart_seed, unit B1) and the batched and serial paths cannot drift apart.
+    An earlier form of this function took `model_seed` and used `seed0 + r` internally,
+    which would have reintroduced the sliding-window seed dependence B1 removed.
+
+    `kstar_obs_init` is the unit-B4 D-init wavenumber, or None to keep the legacy D init.
+    It must be in the SAME units the objective runs in (rad/length dimensional, rad/box
+    nondim) — passing the physical k* on the nondim path would put L back into the init and
+    destroy the cross-L invariance that path exists for.
 
     Returns (best, restart_log) in exactly the shape recover()'s serial loop produces, so the
     tail of recover() (unit conversion, RecoveryResult assembly) is shared and cannot drift.
@@ -201,9 +212,11 @@ def _batched_restarts(N, form, model_seed, init, dispersion_backend, n_restarts,
     seed-to-lane mapping unauditable -- so a run where most members die costs the same as one
     where none do.
     """
-    B = int(n_restarts)
-    bmodel = BatchedRNGRN.from_seeds(N=N, B=B, form=form, seed0=model_seed,
-                                    dispersion_backend=dispersion_backend, init=init).to(dev)
+    restart_seeds = list(restart_seeds)
+    B = len(restart_seeds)
+    bmodel = BatchedRNGRN.from_seeds(N=N, form=form, seeds=restart_seeds,
+                                    dispersion_backend=dispersion_backend, init=init,
+                                    kstar_obs=kstar_obs_init).to(dev)
     params = list(bmodel.parameters())
     opt = torch.optim.Adam(params, lr=adam_lr)
     alive = torch.ones(B, dtype=torch.bool, device=dev)
@@ -266,11 +279,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             split_hinges=True, hinge_k_min_frac=0.1, staging_keys=("turing",),
             staging_off_frac=0.25, staging_ramp_frac=0.25, detach_xstar=False,
             nondim=False, model_seed=None, dispersion_backend="eig", init="default",
-<<<<<<< HEAD
-            d_init_from_kstar=False):
-=======
-            batched=False):   # unit b2
->>>>>>> feature/rngrn-gpubatch
+            d_init_from_kstar=False,   # unit b4
+            batched=False):            # unit b2
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
@@ -299,12 +309,11 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     init: 'default' | 'low_basal' -- model raw-parameter init strategy (see model.py).
         Defaults to 'default' (OFF); callers opt in explicitly.
 
-<<<<<<< HEAD
     d_init_from_kstar: unit B4 (defect 2), OFF by default. When True and init='default',
         theta_D is shifted so D starts at median 1/k*_obs**2 (in the objective's own units)
         instead of median 1.0, on BOTH paths -- see the module docstring. Changes recorded
         D / D-ratio numbers for any run that opts in; leaves everything else bit-identical.
-=======
+
     batched: False (DEFAULT, unchanged serial behaviour) runs the restarts one at a time.
         True optimises ALL `n_restarts` restarts simultaneously as one batched computation
         (unit b2, model.BatchedRNGRN), which is what makes a high step budget on GPU
@@ -313,7 +322,6 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         the serial path is ~1e-12 for one step, not bit-exact over a whole run (see
         _batched_restarts). Requires lbfgs_steps=0, m==N, and a static weighting strategy
         with resid weight 0; each of those raises rather than quietly degrading.
->>>>>>> feature/rngrn-gpubatch
     """
     ri = recovery_input
     model_seed = seed if model_seed is None else model_seed
@@ -365,11 +373,6 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     kgrid = _kgrid_for(kstar_obs, device=dev)
 
     best = None; restart_log = []
-<<<<<<< HEAD
-    for r in range(n_restarts):
-<<<<<<< HEAD
-        model = RNGRN(N=N, form=form, seed=_restart_seed(model_seed, r), init=init,
-=======
     if batched:
         # unit b2. Every restriction below is refused loudly because each one would otherwise
         # make a batched number quietly non-comparable to a serial one:
@@ -396,21 +399,22 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             raise ValueError(
                 f"batched=True does not support hidden channels (m={m} < N={N}): the latent "
                 "fields enter only the stationarity residual, which has no batched form.")
+        # Seeds are derived with _restart_seed, exactly as the serial loop below does, so the
+        # two paths start from the SAME B inits and B1's seed independence holds on both.
+        # (unit b2 originally used model_seed + r here, which would have silently
+        # reintroduced the sliding-window defect B1 removed.)
         best, restart_log = _batched_restarts(
-            N, form, model_seed, init, dispersion_backend, n_restarts, frame, L_model,
+            N, form, [_restart_seed(model_seed, r) for r in range(n_restarts)], init,
+            dispersion_backend, frame, L_model,
             observed_idx, kgrid, kstar_obs, strategy, adam_steps, adam_lr, grad_clip,
-            tau, jac_floor, dev, verbose, term_kw)
+            tau, jac_floor, dev, verbose, term_kw,
+            kstar_obs_init=kstar_obs if d_init_from_kstar else None)
     # the serial loop is skipped entirely when the batched path ran; it stays the REFERENCE
     # implementation and the default, so no pre-existing number changes method.
     for r in range(0 if batched else n_restarts):
-        model = RNGRN(N=N, form=form, seed=model_seed + r, init=init,
->>>>>>> feature/rngrn-gpubatch
-                      dispersion_backend=dispersion_backend).to(dev)
-=======
-        model = RNGRN(N=N, form=form, seed=model_seed + r, init=init,
+        model = RNGRN(N=N, form=form, seed=_restart_seed(model_seed, r), init=init,
                       dispersion_backend=dispersion_backend,
                       kstar_obs=kstar_obs if d_init_from_kstar else None).to(dev)
->>>>>>> feature/rngrn-ldefects
         latent_module = None
         latent = None
         if m < N:

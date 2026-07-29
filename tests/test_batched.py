@@ -35,10 +35,17 @@ WEIGHTS = dict(kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5, anchor=2.0)
 
 
 def _pair(form="competitive", backend="eig", init="default", b=B, seed0=SEED0):
-    """B serial models and the batched model built from the SAME seeds."""
-    serial = [RNGRN(N=N, form=form, seed=seed0 + r, dispersion_backend=backend, init=init)
-              for r in range(b)]
-    batched = BatchedRNGRN.from_seeds(N=N, B=b, form=form, seed0=seed0,
+    """B serial models and the batched model built from the SAME seeds.
+
+    The seed list is built once and handed to BOTH sides, which is the point: from_seeds
+    takes explicit seeds rather than a base-plus-offset rule (the offset rule lived here
+    until unit B1 replaced `model_seed + r` with a stable hash of the pair, and a test that
+    reimplemented the old rule would have silently stopped comparing like with like).
+    """
+    seeds = [seed0 + r for r in range(b)]
+    serial = [RNGRN(N=N, form=form, seed=s, dispersion_backend=backend, init=init)
+              for s in seeds]
+    batched = BatchedRNGRN.from_seeds(N=N, seeds=seeds, form=form,
                                      dispersion_backend=backend, init=init)
     return serial, batched
 
@@ -231,15 +238,30 @@ def test_one_diverged_member_does_not_abort_the_batch():
     _, batched = _pair(b=4, seed0=200)
     with torch.no_grad():
         # delta -> ~0 with a large saturating production pushes the root out past where the
-        # damped Newton can reach it in 100 iterations; the SERIAL solver also gives up here.
+        # damped Newton can reach from x0 = ones in 100 iterations.
         batched.theta_delta[2] = -40.0
         batched.theta_alpha[2] = 40.0
-    xs, conv = T.steady_state_batched(batched)
+
+    # multistart OFF is the legacy solver, and there member 2 genuinely fails. That is the
+    # case this test exists for: the fail-loud contract becomes a PER-MEMBER FLAG, so the
+    # other three must still be solved rather than taken down with it.
+    xs, conv = T.steady_state_batched(batched, multistart=False)
     assert not bool(conv[2]), "the sabotaged member should be flagged as non-converged"
     assert bool(conv[[0, 1, 3]].all()), "healthy members must still converge"
     assert torch.isfinite(xs).all(), "a failed member must not return NaN/inf"
-    _, serial_conv = T.steady_state(batched.member(2))
+    _, serial_conv = T.steady_state(batched.member(2), multistart=False)
     assert bool(serial_conv) is False, "serial and batched must agree on the FAILURE too"
+
+    # multistart ON, the default: unit B3's analytic bracket RESCUES this member. The point
+    # is parity — the batched solver must reach the same verdict as the serial one, or the
+    # batched path would abandon restarts the serial path recovers (and batched nc1, which
+    # depends entirely on that rescue, would still be untrainable).
+    xs_ms, conv_ms = T.steady_state_batched(batched)
+    _, serial_ms = T.steady_state(batched.member(2))
+    assert bool(conv_ms[2]) is bool(serial_ms), \
+        "batched and serial must agree on the multistart verdict, member by member"
+    assert bool(conv_ms.all()), "with multistart on, the bracket rescues the sabotaged member"
+    assert torch.isfinite(xs_ms).all()
 
 
 # --------------------------------------------------------------------------------------

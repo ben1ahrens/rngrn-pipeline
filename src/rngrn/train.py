@@ -159,12 +159,9 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        nondim=cfg.model.nondim,   # unit 12: default False = unchanged path
                        model_seed=cfg.model.seed,                       # unit 10
                        dispersion_backend=cfg.model.dispersion_backend,  # unit 10
-<<<<<<< HEAD
-                       d_init_from_kstar=cfg.model.d_init_from_kstar)    # unit B4
-=======
+                       d_init_from_kstar=cfg.model.d_init_from_kstar,   # unit B4
                        batched=cfg.train.batched,                        # unit b2
                        device=cfg.train.device)                          # unit b2
->>>>>>> feature/rngrn-gpubatch
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is

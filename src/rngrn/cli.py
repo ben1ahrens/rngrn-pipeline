@@ -7,6 +7,8 @@ Subcommands:
   analyze        linear stability + topology + robustness cloud for a saved run
   sweep          run a sweep from a sweep YAML (base config + axes + seeds)
   benchmark      aggregate the run index into a comparison table (markdown/CSV)
+  target-report  run K seeds on one target (dataset_id + sample_key + form), emit ONE
+                 auditable reproducibility/robustness/pattern/viability report
 
 Every subcommand takes --config (a YAML) and optional dotted overrides (-o key=val).
 """
@@ -133,6 +135,15 @@ def cmd_benchmark(args):
             w.writerow({c: row.get(c) for c in COLUMNS})
 
 
+def cmd_target_report(args):
+    from .optim.target_report import run_target_report
+    cfg = _load(args)
+    report = run_target_report(cfg, dataset_id=args.dataset_id, sample_key=args.sample_key,
+                               form=args.form, seeds=args.seeds, runs_root=args.runs_root,
+                               n_workers=args.workers, verbose=args.verbose)
+    print(json.dumps(report, indent=2, default=str))
+
+
 def build_parser():
     p = argparse.ArgumentParser("rngrn")
     p.add_argument("--runs-root", default="experiments")
@@ -168,6 +179,14 @@ def build_parser():
     sp.add_argument("--observable-key", default="final_frame")
     sp.add_argument("--refresh", action="store_true", help="rebuild existing manifests")
     sp.set_defaults(func=cmd_scan_datasets)
+    sp = sub.add_parser("target-report", help="run K seeds on one target, emit one auditable report")
+    add_cfg(sp)
+    sp.add_argument("--dataset-id", required=True)
+    sp.add_argument("--sample-key", required=True)
+    sp.add_argument("--form", required=True, choices=["competitive", "nc1"])
+    sp.add_argument("--seeds", type=int, nargs="+", required=True)
+    sp.add_argument("--workers", type=int, default=1, help="ProcessPoolExecutor workers over seeds (1 = sequential)")
+    sp.set_defaults(func=cmd_target_report)
     sp = sub.add_parser("list-datasets")
     sp.add_argument("--datasets-root", default="data/datasets")
     sp.add_argument("--index-backend", choices=["jsonl", "sqlite"], default="jsonl")

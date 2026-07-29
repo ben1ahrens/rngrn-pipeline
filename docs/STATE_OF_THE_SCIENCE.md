@@ -744,3 +744,47 @@ Prior sessions' findings are in this repo's docs and in the Claude Science proje
 memory (133 rows). Anything in `CLAUDE.md` is authoritative for conventions. Where a
 doc and the source disagree, **the source wins** — two such discrepancies were found
 while writing `CLAUDE.md` and are logged in it as known gaps.
+
+---
+
+## 13. Restart seeds were NOT independent draws — fixed 2026-07-29
+
+**THE DEFECT.** `recover()` built restart `r` as `RNGRN(seed=model_seed + r)`. With
+`n_restarts=R`, run seed `s` and run seed `s+1` therefore shared `R-1` of their `R`
+model inits — a sliding window, not independent draws.
+
+**MEASURED EVIDENCE (pre-fix).** `three_gene_val/sample_0000`, 8 seeds x 2 arms, 200
+Adam steps, `n_restarts=2`, `lbfgs_steps=0`: seed pairs `(0,1)`, `(3,4)`, `(5,6)` in one
+arm and `(1,2)`, `(4,5)`, `(6,7)` in the other returned **bit-identical** loss, `D` and
+sign structure to 16 digits. 8 seeds were approximately 4 independent draws.
+
+**WHY THIS MATTERED.** Reproducibility across seeds is the project's primary success
+metric (see the project brief: "the model must consistently learn the SAME TOPOLOGY
+across seeds"). With overlapping restart windows, a "7 of 8 seeds agree" claim was
+inflated by roughly the overlap factor, and no seed-count in the record before this fix
+is trustworthy on that axis.
+
+**THE FIX (`src/rngrn/recover.py`, `_restart_seed`).** Each restart's model-init seed
+is now derived from a stable hash (`hashlib.blake2b`, matching the `stable_seed()`
+pattern already used in `scripts/exp11_robustness_baseline.py` — NOT builtin `hash()`,
+which Python salts per process via `PYTHONHASHSEED`) of the pair `(model_seed, r)`
+rather than `model_seed + r`. Determinism is preserved exactly: the same
+`(model_seed, r)` pair always yields the same derived seed and hence the same init,
+across processes. Distinct pairs give unrelated draws.
+
+**MEASURED EVIDENCE (post-fix).** Re-ran the identical paired experiment (same
+sample, same 8 seeds, `n_restarts=2`, 200 Adam steps, `lbfgs_steps=0`) after the fix.
+Of the 6 seed pairs that were bit-identical before the fix, **0 of 6 remain
+bit-identical** (loss, `D`, and sign structure all differ for every pair). Also
+verified directly: for adjacent run seeds `s` and `s+1` (`s` = 5, 6, 7; `n_restarts=4`),
+the 4 derived restart seeds for `s` never intersect the 4 derived restart seeds for
+`s+1`, and the corresponding model inits (`KA` at construction) are never equal —
+see `tests/test_determinism.py::test_restart_seeds_independent_across_run_seeds`.
+
+**CONSEQUENCE FOR THE RECORD — READ BEFORE COMPARING ANY SEED-COUNT.** Every
+"N seeds agree" / "N of M seeds converged to the same topology" number recorded
+**before this change** was drawn from an overlapping restart window and is **not
+comparable** to numbers produced after it. Do not restate an old seed-agreement count
+as if it survived this fix — it did not; it was measured against a different
+(non-independent) sampling scheme. Any reproducibility claim going forward must state
+whether it predates or postdates 2026-07-29's `_restart_seed` fix.

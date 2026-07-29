@@ -51,10 +51,14 @@ def _topology(model):
 
 def recover(recovery_input, form="competitive", strategy=None, weights=None,
             tau=0.12, jac_floor=1.0, n_restarts=4, adam_steps=1500, adam_lr=0.05,
-            lbfgs_steps=50, grad_clip=10.0, seed=0, verbose=False, device=None):
+            lbfgs_steps=50, grad_clip=10.0, seed=0, verbose=False, device=None,
+            init="default"):
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
+    init: 'default' | 'low_basal' -- model raw-parameter init strategy (see model.py).
+        Defaults to 'default' (OFF); callers opt in explicitly. Not yet wired through
+        train.py's cfg.model.init (out of this unit's scope) -- pass explicitly to use it.
     """
     ri = recovery_input
     dev = torch.device(device) if device is not None else torch.device("cpu")
@@ -70,7 +74,7 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
 
     best = None; restart_log = []
     for r in range(n_restarts):
-        model = RNGRN(N=N, form=form, seed=seed + r).to(dev)
+        model = RNGRN(N=N, form=form, seed=seed + r, init=init).to(dev)
         latent = None
         if m < N:
             base_field = frame.mean(0, keepdim=True)

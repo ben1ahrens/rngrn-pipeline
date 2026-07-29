@@ -83,3 +83,40 @@ def test_reference_answer_keys():
     sc = Schnakenberg().answer_key()
     assert abs(gm["kstar"] - 0.5224) < 0.05, gm["kstar"]
     assert abs(sc["kstar"] - 4.2059) < 0.2, sc["kstar"]
+
+
+def test_low_basal_init_turing_unstable_fraction():
+    """MEASURED MOTIVATION (docs/STATE_OF_THE_SCIENCE.md section 10): default-init
+    Jacobian diagonals are always negative (0/200 converged inits Turing-unstable),
+    vs 88/88 true systems that have a positive diagonal. model.init='low_basal' is a
+    firewall-safe prior measured at 82% Turing-unstable at init. Fast check: init
+    draw + Newton steady state + Jacobian sign, no fit."""
+    from rngrn.losses.terms import steady_state
+    from rngrn.eval.analysis import turing_ok
+
+    def turing_unstable_fraction(init, n_seeds=400):
+        # denominator is CONVERGED inits, matching docs/STATE_OF_THE_SCIENCE.md section 10
+        # ("0/200 converged inits have any positive diagonal") and its 82% ladder.
+        n_unstable = 0
+        n_converged = 0
+        for seed in range(n_seeds):
+            m = RNGRN(N=3, seed=seed, init=init)
+            xstar, converged = steady_state(m)
+            if not converged:
+                continue
+            n_converged += 1
+            J = m.jacobian(xstar, create_graph=False).detach().numpy()
+            if not np.all(np.isfinite(J)):
+                continue
+            D = m.D.detach().numpy()
+            ok, _ = turing_ok(J, D)
+            if ok:
+                n_unstable += 1
+        return n_unstable / n_converged
+
+    default_frac = turing_unstable_fraction("default")
+    low_basal_frac = turing_unstable_fraction("low_basal")
+    # decisive separation: measured ladder puts default near 0% and low_basal near 82%.
+    assert default_frac < 0.05, default_frac
+    assert low_basal_frac > 0.5, low_basal_frac
+    assert low_basal_frac - default_frac > 0.3, (default_frac, low_basal_frac)

@@ -41,6 +41,37 @@ def _softplus(x):
     return torch.nn.functional.softplus(x)
 
 
+def _low_basal_raw_params(N: int, g: "torch.Generator | None"):
+    """Draw raw (unconstrained) theta for the low-basal init (ported from
+    scripts/exp03_turing_first.py::low_basal_init, lines 45-59). Log-uniform ranges:
+    beta in 1e-4..1e-2, s(binding budget) in 1e-2..10^-0.3, alpha in 10^0.3..10^1.5
+    (~2..32), delta in 0.1..10^0.3, D ratio (species 1..N-1 vs species 0) in
+    10^0.9..10^2.4. gate logit is a wide zero-mean normal (sub-saturated binding).
+    Fixed numeric ranges only -- FIREWALL-safe, not derived from any target system.
+    Draws from the given (possibly None) torch.Generator, matching RNGRN.__init__'s
+    `randn` helper, so it is reproducible independently of global RNG state.
+
+    Returns (theta_beta, theta_s, theta_alpha, theta_delta, theta_g, theta_D).
+    """
+    def loguniform(low, high, *shape):
+        u = torch.empty(*shape).uniform_(low, high, generator=g)
+        return 10.0 ** u
+
+    def inv_softplus(x):
+        return torch.log(torch.expm1(x))
+
+    theta_beta = inv_softplus(loguniform(-4, -2, N))
+    theta_s = inv_softplus(loguniform(-2, -0.3, N, N))
+    theta_alpha = inv_softplus(loguniform(0.3, 1.5, N, N))
+    theta_delta = inv_softplus(loguniform(-1, 0.3, N))
+    theta_g = torch.empty(N, N).normal_(0.0, 2.5, generator=g)
+    D = torch.ones(N)
+    if N > 1:
+        D[1:] = torch.sort(loguniform(0.9, 2.4, N - 1)).values
+    theta_D = torch.log(D)
+    return theta_beta, theta_s, theta_alpha, theta_delta, theta_g, theta_D
+
+
 @MODELS.register("gated_promoter")
 class RNGRN(nn.Module):
     """Gene-regulatory reaction model with learnable, biologically-meaningful params.
@@ -54,13 +85,16 @@ class RNGRN(nn.Module):
     """
 
     def __init__(self, N: int, form: str = "competitive", n_hill: int = 2,
-                 seed: int | None = None, dispersion_backend: str = "eig"):
+                 seed: int | None = None, dispersion_backend: str = "eig",
+                 init: str = "default"):
         super().__init__()
         assert form in ("competitive", "nc1"), form
         assert dispersion_backend in ("eig", "cubic"), dispersion_backend
+        assert init in ("default", "low_basal"), init
         self.N = int(N)
         self.form = form
         self.n_hill = int(n_hill)
+        self.init = init
         # "eig": torch.linalg.eigvals, any N, the reference. "cubic": exact closed-form
         # roots, N=3 ONLY, 162x faster on CUDA (see _sigma_max_cubic). Default stays "eig"
         # so nothing silently changes; set "cubic" for GPU runs.
@@ -69,6 +103,19 @@ class RNGRN(nn.Module):
 
         def randn(*shape):
             return torch.randn(*shape, generator=g) if g is not None else torch.randn(*shape)
+
+        if init == "low_basal":
+            # FIREWALL-SAFE low-basal prior (docs/STATE_OF_THE_SCIENCE.md section 10):
+            # measured 0/200 default-init Jacobian diagonals are positive vs 88/88 true
+            # systems' diagonals, the root cause of 0/300 Turing-unstable inits. This
+            # prior measured 82% Turing-unstable at init. Fixed numeric ranges only, not
+            # derived from any target system. DEFAULT STAYS "default" (see config.py) --
+            # adopting this changes which solutions recovery finds, so it must stay a
+            # measured choice, not a silent bias.
+            (self.theta_beta, self.theta_s, self.theta_alpha,
+             self.theta_delta, self.theta_g, self.theta_D) = (
+                nn.Parameter(t) for t in _low_basal_raw_params(N, g))
+            return
 
         # raw (unconstrained) parameters theta. Small random init keeps early KA*x^n moderate.
         # -- TUNING: these init scales set the recovery starting distribution.
@@ -227,4 +274,5 @@ def _sigma_max_cubic(M: torch.Tensor, eps: float = 1e-14) -> torch.Tensor:
 def build_model(cfg) -> RNGRN:
     """Construct a model from a ModelConfig (registry-dispatched by architecture)."""
     cls = MODELS.get(cfg.architecture)
-    return cls(N=cfg.N, form=cfg.form, n_hill=cfg.n_hill, seed=cfg.seed)
+    return cls(N=cfg.N, form=cfg.form, n_hill=cfg.n_hill, seed=cfg.seed,
+               init=getattr(cfg, "init", "default"))

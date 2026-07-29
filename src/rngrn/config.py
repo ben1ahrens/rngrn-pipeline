@@ -59,6 +59,7 @@ class ModelConfig:
     n_hill: int = 2
     seed: int = 0
     observed_idx: Optional[list] = None     # which model indices the m rows map to
+    init: str = "default"                   # 'default' | 'low_basal' -- see model.py (unit 2)
 
 
 @dataclass

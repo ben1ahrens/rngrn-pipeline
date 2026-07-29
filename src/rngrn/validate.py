@@ -23,6 +23,9 @@ parameters):
   2. regime      : does recovered J satisfy the Turing conditions?
   3. sign        : recovered J sign-structure vs answer-key J sign-structure
   4. robustness  : left to the analysis stage (eval.robustness_cloud), summarised here
+  5. plausibility: recovered model's own parameters (alpha, delta, beta, D-ratio)
+                   against configs/bio_box.yaml. Unconditional (no answer-key
+                   dependence). See scoring/plausibility.py.
 
 This function is called by the harness AFTER recovery; it is the ONLY place the
 answer key is read, and it is never imported by recovery-side modules. Parameter-
@@ -36,6 +39,8 @@ from .scoring import morphology as MORPH
 from .scoring import permutation as PERM
 from .scoring import overparam as OVER
 from .scoring import reproducibility as REPRO
+
+from .scoring import plausibility as PLAUS
 
 
 def _sign_structure(J):
@@ -230,6 +235,12 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
     # unconditionally — it needs no answer key — so it must land here, before the
     # no_true_J early return below, not after it.
     out.update(REPRO.per_run_fields(J_rec, D_rec, out["kstar_model"]))
+
+    # 2.5 biological plausibility (unit 5) — the RECOVERED model's own parameters against
+    #     configs/bio_box.yaml. Unconditional: reads no answer-key quantity, so it is
+    #     recorded even when the run has no true J (the no_true_J early return below).
+    out.update(PLAUS.plausibility_report(result.model.alpha, result.model.delta,
+                                         result.model.beta, result.model.D))
 
     # 3. sign structure vs answer key — routed by ARM, never a silent NaN.
     #

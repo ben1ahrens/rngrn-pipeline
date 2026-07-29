@@ -504,9 +504,10 @@ def test_score_recovery_omits_morphology_without_frames():
 def test_score_recovery_scores_the_target_alone_without_a_rollout():
     """target_frame alone is FREE and must be scored; the COMPARISON keys must be absent.
 
-    A model field costs a rollout (measured ~4.2 ms/step at 96x96, step count derived from
-    the model's own sigma_max — ~128k steps, i.e. ~9 min, for an untrained N=3 model), so
-    fit() supplies only the target. That must still record the target's morphology.
+    A caller that has not simulated the recovered model passes only the target. That must
+    still record the target's morphology and must NOT invent the comparison keys.
+    score_recovery never simulates anything itself — fit() does the rollout and hands the
+    field in (see test_fit_records_morphology_end_to_end).
     """
     from rngrn.validate import score_recovery
     out = score_recovery(_Result(), _Key(np.ones((3, 3)), 3), observed_idx=[0, 1],
@@ -547,9 +548,15 @@ def test_score_recovery_accepts_a_channel_stack():
 
 
 def test_fit_records_morphology_end_to_end(tmp_path):
-    """The wiring that matters: a real fit() run must come back with morphology recorded.
+    """The wiring that matters: a real fit() run must come back with morphology COMPARED.
 
     Tiny scale — this checks the WIRE, not recovery quality (a dry run is never a finding).
+
+    Until unit 7 this asserted morphology_scored == "target_only" and that
+    morphology_distance was ABSENT, because a rollout cost 6.5-10 min per field. That cost
+    was a horizon bug (eval/rollout.py); fit() now pays 0.9-1.7 s and the comparison is
+    recorded on every run. The assertion is inverted deliberately: "target_only" is now the
+    failure this test exists to catch.
     """
     import os
     from rngrn.config import load_config, apply_overrides
@@ -564,14 +571,19 @@ def test_fit_records_morphology_end_to_end(tmp_path):
         f"data.cache_root={tmp_path / 'cache'}",
     ])
     metric = fit(cfg, runs_root=str(tmp_path / "experiments"))
-    assert metric["morphology_scored"] == "target_only", (
-        "fit() no longer threads the observed frame into scoring, so morphology — the "
-        "primary criterion — would go unrecorded")
     assert metric["morphology_pred_target"] in ("spots", "stripes", "labyrinth")
     for key in M.FEATURE_ORDER:
         assert f"morphology_{key}_target" in metric
-    # fit() must NOT silently pay for a rollout
-    assert "morphology_distance" not in metric
+    assert metric["rollout_status"] in ("ok", "blew_up", "non_finite", "unpatterned")
+    if metric["rollout_status"] != "ok":
+        pytest.skip(f"the recovered model's rollout was {metric['rollout_status']}, which "
+                    f"is a legitimate outcome for an 8-step fit; nothing to compare")
+    assert metric["morphology_scored"] == "compared", (
+        "fit() no longer supplies a simulated model field, so morphology_match — the "
+        "primary criterion — would go uncomputed on every run again")
+    assert "morphology_distance" in metric
+    assert isinstance(metric["morphology_match"], bool)
+    assert metric["rollout_grid"] == 32, "the model field must be on the TARGET's grid"
 
 
 def test_score_recovery_raises_on_a_bad_frame_rank():

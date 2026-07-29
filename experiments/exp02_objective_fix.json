@@ -1,0 +1,35 @@
+{
+ "original_anchor0.0": {
+  "converged": 2,
+  "self_activating": 0,
+  "turing": 0,
+  "seeds": 40,
+  "turing_frac": 0.0
+ },
+ "original_anchor2.0": {
+  "converged": 37,
+  "self_activating": 0,
+  "turing": 0,
+  "seeds": 40,
+  "turing_frac": 0.0
+ },
+ "split_anchor0.0": {
+  "converged": 2,
+  "self_activating": 0,
+  "turing": 0,
+  "seeds": 40,
+  "turing_frac": 0.0
+ },
+ "split_anchor2.0": {
+  "converged": 38,
+  "self_activating": 11,
+  "turing": 14,
+  "seeds": 40,
+  "turing_frac": 0.3684210526315789
+ },
+ "_meta": {
+  "obs_scale": 0.7752485871315002,
+  "steps": 400,
+  "wall_s": 216.1
+ }
+}

@@ -211,9 +211,27 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     IO.save_checkpoint(rdir, result.model,
                        extra=dict(kstar_obs=result.kstar_obs,
                                   nondim=result.nondim, L=result.L))
+    # THE RECOVERED NETWORK, AS PLAIN TEXT. Until now the recovered parameters existed only
+    # inside checkpoints/model.pt — a binary blob that needs a matching torch to read. The
+    # recovered J and D *are* the result of this project, so they belong in a diffable,
+    # human-readable record that survives a torch upgrade and can be cited directly. These
+    # are the CONSTRAINED (physical) parameters, not raw theta, because those are the
+    # quantities every claim is expressed in.
+    recovered = {k: (v.tolist() if hasattr(v, "tolist") else v)
+                 for k, v in (result.params or {}).items()}
+    recovered["x_star"] = (result.xstar.tolist() if hasattr(result.xstar, "tolist")
+                           else result.xstar)
+    # The JACOBIAN is the recovered gene regulatory network — the object this whole project
+    # exists to recover, and the thing every topology and sign-structure claim is computed
+    # from. It is derivable from the parameters above, but "derivable" is not "recorded":
+    # reconstructing it needs a matching torch and the right x*. Written out explicitly.
+    import torch as _torch
+    recovered["J"] = result.model.jacobian(
+        _torch.as_tensor(result.xstar), create_graph=False).detach().cpu().numpy().tolist()
     IO.save_results(rdir, "train_results.json",
                     dict(loss=result.loss, kstar_model=result.kstar_model,
                          kstar_obs=result.kstar_obs, restarts=result.restarts,
+                         recovered=recovered,
                          metric=metric, provenance=provenance()))
     # Record the TRUE data identity per source. `system` (a reference-kinetics name) is
     # only meaningful when we generated from one; for registry/hdf5 it is unused config

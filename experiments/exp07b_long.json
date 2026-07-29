@@ -1,0 +1,41 @@
+{
+ "rows": [
+  {
+   "steps": 4000,
+   "residual": "none",
+   "converged": 16,
+   "turing": 15,
+   "seeds": 16,
+   "kstar_rel_err_median": 0.03407406598256158,
+   "wall_s_per_seed": 25.9
+  },
+  {
+   "steps": 4000,
+   "residual": "batch128 w=1",
+   "converged": 12,
+   "turing": 8,
+   "seeds": 16,
+   "kstar_rel_err_median": 0.03407406598256158,
+   "wall_s_per_seed": 24.9
+  },
+  {
+   "steps": 8000,
+   "residual": "none",
+   "converged": 15,
+   "turing": 15,
+   "seeds": 16,
+   "kstar_rel_err_median": 0.03407406598256158,
+   "wall_s_per_seed": 50.1
+  },
+  {
+   "steps": 8000,
+   "residual": "batch128 w=1",
+   "converged": 8,
+   "turing": 5,
+   "seeds": 16,
+   "kstar_rel_err_median": 0.03407406598256158,
+   "wall_s_per_seed": 52.15
+  }
+ ],
+ "kstar_true": 0.4120573065902579
+}

@@ -1,0 +1,37 @@
+{
+ "_meta": {
+  "L": 91.48997297253318,
+  "kstar_true": 0.4120573065902579,
+  "kstar_obs": 0.4320211109798837,
+  "steps": 400,
+  "wall_s": 136.5
+ },
+ "physics_first_resid0.0": {
+  "converged": 12,
+  "turing": 6,
+  "seeds": 12,
+  "kstar_rel_err_median": 0.10246747771861747,
+  "kstar_rel_err_min": 0.026611064551295794
+ },
+ "physics_first_resid0.3": {
+  "converged": 12,
+  "turing": 2,
+  "seeds": 12,
+  "kstar_rel_err_median": 0.3300367172205824,
+  "kstar_rel_err_min": 0.08729619508515317
+ },
+ "data_first_resid0.0": {
+  "converged": 11,
+  "turing": 6,
+  "seeds": 12,
+  "kstar_rel_err_median": 0.01517128263346431,
+  "kstar_rel_err_min": 0.0037315007156328264
+ },
+ "data_first_resid0.3": {
+  "converged": 11,
+  "turing": 4,
+  "seeds": 12,
+  "kstar_rel_err_median": 0.29969415195365373,
+  "kstar_rel_err_min": 0.0037315007156328264
+ }
+}

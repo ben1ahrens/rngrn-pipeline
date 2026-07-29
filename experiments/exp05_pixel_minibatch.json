@@ -1,0 +1,51 @@
+{
+ "_meta": {
+  "L": 91.48997297253318,
+  "kstar_true": 0.4120573065902579,
+  "kstar_obs": 0.4320211109798837,
+  "steps": 400,
+  "wall_s": 158.7
+ },
+ "no residual": {
+  "converged": 9,
+  "turing": 5,
+  "seeds": 10,
+  "kstar_rel_err_median": 0.0037315007156328264,
+  "kstar_rel_err_min": 0.0037315007156328264
+ },
+ "full-pixel residual": {
+  "converged": 10,
+  "turing": 4,
+  "seeds": 10,
+  "kstar_rel_err_median": 0.29969415195365373,
+  "kstar_rel_err_min": 0.0037315007156328264
+ },
+ "batch 64": {
+  "converged": 8,
+  "turing": 3,
+  "seeds": 10,
+  "kstar_rel_err_median": 0.2996941519536538,
+  "kstar_rel_err_min": 0.0037315007156328264
+ },
+ "batch 128": {
+  "converged": 10,
+  "turing": 5,
+  "seeds": 10,
+  "kstar_rel_err_median": 0.2390090214197964,
+  "kstar_rel_err_min": 0.0037315007156328264
+ },
+ "batch 512": {
+  "converged": 10,
+  "turing": 4,
+  "seeds": 10,
+  "kstar_rel_err_median": 0.28452286932018944,
+  "kstar_rel_err_min": 0.0037315007156328264
+ },
+ "batch 128 w=1.0": {
+  "converged": 10,
+  "turing": 3,
+  "seeds": 10,
+  "kstar_rel_err_median": 0.03407406598256158,
+  "kstar_rel_err_min": 0.03407406598256158
+ }
+}

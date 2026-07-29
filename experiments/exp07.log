@@ -1,0 +1,7 @@
+sample_0000  k*_true=0.4121   seeds=16  workers=18
+
+  steps         residual    conv  turing   k* median  wall/seed
+    400             none    15/16       8        2.7%       4.5s
+    400     batch128 w=1    16/16       4        4.6%       4.1s
+   2000             none    15/16      13        3.4%      11.3s
+   2000     batch128 w=1    13/16       8        3.0%      15.5s

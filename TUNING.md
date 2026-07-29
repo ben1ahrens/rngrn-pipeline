@@ -128,3 +128,32 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
 - **[NOTE] OpenMP affinity** — `tests/conftest.py` sets `KMP_AFFINITY=disabled`,
   `OMP_NUM_THREADS=1` to dodge an `OMP: Error #179` seen in sandboxed containers on `import torch`.
   Harmless on a normal workstation/GPU box; remove if not needed.
+
+## L-generalisation (unit 12 — `recover.py::recover(nondim=...)`, `scoring/lgen.py`)
+
+- **[TUNE] `model.nondim`** — `False` (DEFAULT, the pre-existing dimensional path) recovers in
+  physical coordinates; `True` recovers on the unit box `x_hat = x/L`, so the learned object is
+  `(J, D/L**2)` and the optimisation never reads L at all. Both paths report PHYSICAL
+  `kstar_model` and `params["D"]`, so scoring is unchanged. UNMEASURED on real data: which path
+  recovers better at a fixed step budget is not known — and see the confound below before trying
+  to answer it.
+- **[VALIDATE] the nondim D init is off by ~200x** — `model.py` inits `D = exp(theta_D)` at median
+  1.00 (measured over 2000 seeds). On three_gene_val (19 samples, L = 40..139) the generator's D
+  has median 28.8 and `D/L**2` median 4.97e-3, so the dimensional init starts ~29x too SMALL and
+  the unit-box init ~202x too LARGE — opposite directions. Any dimensional-vs-nondim comparison at
+  a fixed budget is confounded by this. The L-free repair is to set the D init from the frame's
+  own `k*_obs` (`D ~ |J| / k*_obs**2`, firewall-clean), which would change BOTH paths and so
+  invalidate every recorded number — it belongs with the priors/init work, not here.
+- **[VALIDATE] `_kgrid_for`'s absolute 2.0 floor is an L-generalisation bug in the DIMENSIONAL
+  path** — `kmax = max(2.0, 8 * kstar_obs)` is in rad/length, so once `kstar_obs < 0.25` the
+  k-grid stops tracking the observed wavenumber and becomes a fixed absolute window. On this data
+  that is `L > 150.8`: 11 of the 287 registered samples (3.8%). The nondim path cannot hit it
+  (`k_hat*` is 37.7 for every three_gene sample). NOT fixed here — changing it alters the
+  dimensional path and every number recorded against it.
+- **[TUNE] the cross-L agreement statistic** — `scoring/lgen.py::modal_sign_agreement` is entrywise
+  modal agreement and the control is within-L across-seed agreement. Both are choices, both are
+  documented in that module, and NO pass threshold is defined. Settle them against real
+  `three_gene_multiL` runs, not in the abstract.
+- **[NOTE] cross-L grouping needs `system_id`** — the gate reads an optional per-sample `system_id`
+  attribute into `AnswerKey.system_id` (scoring side only). Datasets without it cannot be grouped
+  across L; `lgen_consistency` excludes them rather than scoring them as failures.

@@ -70,6 +70,30 @@ class AnswerKey:
     D: Optional[np.ndarray]
     coefficients: Optional[dict]
     n_species_true: int
+    # unit 12 (L-generalisation). The label that says WHICH generator system a sample came
+    # from, read verbatim from the sample's optional `system_id` attribute. It exists so
+    # scoring can group the SAME system observed at SEVERAL domain sizes (the
+    # three_gene_multiL layout) and ask whether recovery agreed with itself across them.
+    # It is truth-side metadata and therefore quarantined here with the rest of the key --
+    # recovery never sees it. None when the dataset carries no such attribute, which is the
+    # case for every dataset registered before three_gene_multiL; absence is legitimate and
+    # simply means no cross-L grouping is possible for that sample.
+    system_id: Optional[str] = None
+
+
+def _system_id(attrs):
+    """Read the optional cross-L grouping label off a sample's attributes.
+
+    HDF5 hands string attributes back as bytes or numpy str depending on how they were
+    written, so normalise to a plain str. Returns None when absent -- see
+    ``AnswerKey.system_id`` for why absence is legitimate rather than an error.
+    """
+    v = attrs.get("system_id")
+    if v is None:
+        return None
+    if isinstance(v, bytes):
+        return v.decode("utf-8")
+    return str(v)
 
 
 def _observe(frame_full, observed_idx):
@@ -141,6 +165,9 @@ def from_cache(cache_root, dataset_hash, N, observed_idx):
             D=ak["D"][:] if "D" in ak else None,
             coefficients=json.loads(ak.attrs["coefficients"]) if "coefficients" in ak.attrs else None,
             n_species_true=n_true,
+            # the reference cache has no multi-L layout, so this is None in practice; read
+            # it anyway so a future cache that grows the attribute is picked up for free.
+            system_id=_system_id(dict(f.attrs)),
         )
     ri = RecoveryInput(frame=_observe(frame_full, observed_idx), L=L,
                        observed_idx=tuple(observed_idx), N=N)
@@ -195,7 +222,8 @@ def from_registry(datasets_root, dataset_id, sample_key, N, observed_idx, L=None
     coeffs = {"interaction_matrix": inter.tolist()} if inter is not None else None
     key = AnswerKey(x_star=xstar, J=J, kstar=kstar, kstar_fft=kstar_fft,
                     sigma_max=sigma_max, D=D,
-                    coefficients=coeffs, n_species_true=n_true)
+                    coefficients=coeffs, n_species_true=n_true,
+                    system_id=_system_id(attrs))
     ri = RecoveryInput(frame=_observe(frame_full, observed_idx), L=L_used,
                        observed_idx=tuple(observed_idx), N=N)
     return ri, key
@@ -229,7 +257,7 @@ def from_3gene_hdf5(path, sample_key, N, observed_idx, L=None):
     key = AnswerKey(x_star=xstar, J=J, kstar=kstar, kstar_fft=kstar_fft,
                     sigma_max=sigma_max, D=D,
                     coefficients={"interaction_matrix": inter.tolist()} if inter is not None else None,
-                    n_species_true=n_true)
+                    n_species_true=n_true, system_id=_system_id(attrs))
     ri = RecoveryInput(frame=_observe(frame_full, observed_idx), L=L_used,
                        observed_idx=tuple(observed_idx), N=N)
     return ri, key

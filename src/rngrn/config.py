@@ -59,6 +59,7 @@ class ModelConfig:
     n_hill: int = 2
     seed: int = 0
     observed_idx: Optional[list] = None     # which model indices the m rows map to
+    nondim: bool = False                    # recover on the unit box x/L; see recover.py  # unit 12
 
 
 @dataclass

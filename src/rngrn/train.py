@@ -63,7 +63,8 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        jac_floor=cfg.loss.jac_floor, n_restarts=cfg.train.n_restarts,
                        adam_steps=cfg.train.adam_steps, adam_lr=cfg.train.adam_lr,
                        lbfgs_steps=cfg.train.lbfgs_steps, grad_clip=cfg.train.grad_clip,
-                       seed=cfg.train.seed, verbose=verbose)
+                       seed=cfg.train.seed, verbose=verbose,
+                       nondim=cfg.model.nondim)   # unit 12: default False = unchanged path
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is
@@ -99,7 +100,12 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     metric["n_model"] = cfg.model.N
     metric["observed_idx"] = str(obs_idx_used)   # single source of truth for this key
 
-    IO.save_checkpoint(rdir, result.model, extra=dict(kstar_obs=result.kstar_obs))
+    # `nondim`/`L` ride along because the checkpointed model's D is in the units recovery
+    # ran in: dimensionless (D/L**2) on the non-dimensional path. Anyone reloading it for a
+    # rollout must know which, or they will simulate the wrong diffusivity silently. # unit 12
+    IO.save_checkpoint(rdir, result.model,
+                       extra=dict(kstar_obs=result.kstar_obs,
+                                  nondim=result.nondim, L=result.L))
     IO.save_results(rdir, "train_results.json",
                     dict(loss=result.loss, kstar_model=result.kstar_model,
                          kstar_obs=result.kstar_obs, restarts=result.restarts,

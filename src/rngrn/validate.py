@@ -23,6 +23,10 @@ parameters):
   2. regime      : does recovered J satisfy the Turing conditions?
   3. sign        : recovered J sign-structure vs answer-key J sign-structure
   4. robustness  : left to the analysis stage (eval.robustness_cloud), summarised here
+  5. L-generalis.: per-run pieces of the cross-L consistency metric (scoring/lgen.py).
+                   Recorded on every run; the CROSS-L statistic itself only exists once
+                   several runs of the same system at different L are in the index, so it
+                   is aggregated there (scoring.lgen.lgen_table), not here.
 
 This function is called by the harness AFTER recovery; it is the ONLY place the
 answer key is read, and it is never imported by recovery-side modules. Parameter-
@@ -35,6 +39,7 @@ from .eval.analysis import turing_ok
 from .scoring import morphology as MORPH
 from .scoring import permutation as PERM
 from .scoring import overparam as OVER
+from .scoring import lgen as LGEN
 
 
 def _sign_structure(J):
@@ -212,11 +217,24 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
     # 2. regime — Turing conditions on the RECOVERED model
     J_rec = result.model.jacobian(
         __import__("torch").as_tensor(result.xstar), create_graph=False).detach().cpu().numpy()
-    D_rec = result.model.D.detach().cpu().numpy()
+    # PHYSICAL diffusivities. On the non-dimensional recovery path (recover(nondim=True))
+    # `result.model.D` is D/L**2, which would put the Turing verdict on a different k scale
+    # from every dimensional run; `result.D_phys` is the converted value and is bit-equal to
+    # model.D on the dimensional path. getattr, because the scoring tests pass duck-typed
+    # stand-ins that carry only (model, xstar, kstar_model).
+    D_rec = getattr(result, "D_phys", None)
+    D_rec = (result.model.D.detach().cpu().numpy() if D_rec is None
+             else np.asarray(D_rec, dtype=float))
     ok, info = turing_ok(J_rec, D_rec)
     out["recovered_turing"] = bool(ok)
     out["recovered_sig_max"] = float(info["sig_max"])
     out["recovered_tr0"] = float(info["tr0"])
+
+    # 2b. L-generalisation per-run pieces (unit 12). Placed here, not after the sign block,
+    #     because that block returns early in the `no_true_J` arm and these metrics do not
+    #     depend on the true J — a dataset with no answer-key J still gets them.
+    out.update(LGEN.per_run_lgen_metrics(result, J_rec, D_rec,
+                                         getattr(answer_key, "system_id", None)))
 
     # 3. sign structure vs answer key — routed by ARM, never a silent NaN.
     #

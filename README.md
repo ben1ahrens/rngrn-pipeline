@@ -85,6 +85,21 @@ own controls — see [docs/IDENTIFIABILITY_EXPERIMENTS.md](docs/IDENTIFIABILITY_
 `rngrn benchmark --degradation` prints the per-arm comparison. Agent/collaborator handoff:
 [docs/HANDOFF_identifiability.md](docs/HANDOFF_identifiability.md).
 
+## Handoff: the target goal and the state of the science
+
+Four documents written for a zero-context reader picking this up (information, not
+instructions — every number is either measured here or cited):
+
+| doc | contents |
+|---|---|
+| [docs/GOAL_tica_equivalent.md](docs/GOAL_tica_equivalent.md) | What Tica et al. built, what "equivalent but more robust" could mean (four incompatible readings), and the measured gap between here and there |
+| [docs/STATE_OF_THE_SCIENCE.md](docs/STATE_OF_THE_SCIENCE.md) | Every measured result, every rejected approach, and the numbers that superseded earlier over-optimistic ones. **Read before running anything.** |
+| [docs/ROBUSTNESS_MEASUREMENT.md](docs/ROBUSTNESS_MEASUREMENT.md) | The robustness baseline of the 127 generator systems, four measured defects in `robustness_cloud`, and what a Tica-comparable claim needs |
+| [docs/CODE_REALITY.md](docs/CODE_REALITY.md) | What is wired vs stubbed, where docs disagree with source, the cost model, and the open decisions |
+
+The shared working contract (`CLAUDE.md`) lives on branch `docs/agent-conventions`, not
+on this branch.
+
 ## The three milestones
 
 | milestone | config | what it isolates |

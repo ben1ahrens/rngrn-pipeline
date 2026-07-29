@@ -243,10 +243,11 @@ science decision.
 ## 11. Open decisions currently blocking progress
 
 Collected from across the docs so they are in one place. Struck-through entries have
-been settled; the rest have not.
+been settled; the rest have not. **Full evidence and who decided each item, including
+what was rejected, is in `docs/DECISIONS.md`** — this section stays a short index.
 
 1. **Which reading of "more robust"** — `GOAL_tica_equivalent.md` §2, four incompatible
-   options.
+   options. **Still OPEN** — `DECISIONS.md` Part 3 item 1.
 2. ~~**Domain-size design for regenerated data**~~ — **SETTLED (unit 11): option (b),
    vary L with random periods-per-box.** The user's later clarification that the model
    must generalise across domain sizes forecloses option (a) (fixed L), which makes L
@@ -254,13 +255,24 @@ been settled; the rest have not.
    new datasets (`three_gene_qvar`, `three_gene_multiL`): `DATASETS_L.md`. Measured: the
    image-blind predictor `6·2π/L` goes from 0.0 % median error on the old 127 samples to
    45.5 % on `three_gene_qvar` (34 samples). The old sets are NOT deleted; they remain the
-   comparison baseline.
+   comparison baseline. Full record: `DECISIONS.md` D6.
 3. **The morphology pass condition** — stripes classifies at 33.3 % on held-out data
    (3 samples). Balanced accuracy excluding stripes / continuous `morphology_distance` /
-   generate more stripes first.
-4. **D-ratio prior centre** — ~7.5 (measured Nodal/Lefty) vs ~100 (matches the
-   generators). `STATE_OF_THE_SCIENCE.md` §11.
-5. **Whether to adopt the low-basal init** (0 % → 82 % Turing-reachable) given that it
-   biases which solutions are found.
-6. **Whether `split_hinges` and the frame-scale anchor are promoted into the library**,
-   making the library and script objectives one thing again.
+   generate more stripes first. **Still OPEN** — `DECISIONS.md` Part 3 item 3.
+4. ~~**D-ratio prior centre**~~ — **DECIDED for the bio_box prior: 7.5** (measured
+   Nodal/Lefty), reversing an earlier same-session choice of ~100 (matches the
+   generators). The ~15x gap between 7.5 and the generators' own ~135 median is
+   recorded as a deliberate, unresolved tension, not a contradiction —
+   `STATE_OF_THE_SCIENCE.md` §11, `configs/bio_box.yaml`. Full record: `DECISIONS.md`
+   D1 and Part 3 item 4.
+5. **Whether to adopt the low-basal init** (0 % → 82 % Turing-reachable at init) given
+   that it biases which solutions are found. **Still OPEN as a default-flip decision**,
+   but now with training-time evidence against it: PR 9 measured 0/40 restarts
+   converging under actual training with `low_basal` vs a matched `default` run
+   succeeding. Default stays `"default"`, unwired from the CLI path. `DECISIONS.md` D9
+   and Part 3 item 5.
+6. ~~**Whether `split_hinges` and the frame-scale anchor are promoted into the
+   library**~~ — **SETTLED (unit 1): promoted.** Bit-identical to the validated
+   originals (max diff 0.000e+00 over 20 seeds); library Turing fraction confirmed at
+   38/40 converged, 14 Turing, turing_frac 0.3684 over 40 seeds x 400 steps. Full
+   record: `DECISIONS.md` D8 and Part 3 item 6.

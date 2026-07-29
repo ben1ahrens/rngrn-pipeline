@@ -134,8 +134,17 @@ def _reference_dimensional_fit(ri, steps, seed=0, form="competitive"):
     """
     from rngrn.losses import total as LT
     from rngrn.losses.weighting import FixedWeighting, DataFirstStaging
-    from rngrn.recover import _kgrid_for
+    from rngrn.recover import _kgrid_for, _restart_seed
 
+    # RE-SYNCED for unit B1 (2026-07-29). recover() now derives each restart's model
+    # init seed from a stable hash of (model_seed, restart_index) instead of
+    # model_seed + restart_index, so that restart inits are independent draws across
+    # run seeds (see recover.py _restart_seed / docs/STATE_OF_THE_SCIENCE.md). That is
+    # an INTENTIONAL change to the seed used at restart 0 too, so this reference now
+    # goes through the same helper. CONSEQUENCE FOR THE RECORD: this changes the exact
+    # bit-for-bit init used at a given seed (though not its determinism), which is
+    # exactly the kind of change this reference exists to catch.
+    #
     # RE-SYNCED at the 13-unit merge (2026-07-29). Unit 1 promoted the validated objective
     # from scripts/exp05 into the library — disjoint-support Turing hinges, the frame-scale
     # anchor at weight 2.0, data-first staging, and resid defaulted to 0.0 (exp06: SETTLED
@@ -154,7 +163,7 @@ def _reference_dimensional_fit(ri, steps, seed=0, form="competitive"):
                    compute_resid=False)
     kstar_obs = obs.kstar_of(frame[0].numpy(), L=ri.L)
     kgrid = _kgrid_for(kstar_obs)
-    model = RNGRN(N=ri.N, form=form, seed=seed)
+    model = RNGRN(N=ri.N, form=form, seed=_restart_seed(seed, 0))
     params = list(model.parameters())
     opt = torch.optim.Adam(params, lr=0.05)
     for step in range(steps):

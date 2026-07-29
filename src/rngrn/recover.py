@@ -50,6 +50,7 @@ therefore invalidate every recorded number, so it belongs with the priors/init w
 not here. Left explicitly open. See TUNING.md.
 """
 from __future__ import annotations
+import hashlib
 import math
 from dataclasses import dataclass, field
 
@@ -111,6 +112,17 @@ class RecoveryResult:
     q_model: float = float("nan")              # k*_model * L / 2pi (PERIODS per box)
 
 
+def _restart_seed(model_seed, r):
+    """Deterministic per-(model_seed, restart) init seed, independent of neighbouring
+    model_seeds (unit B1). Prior scheme was `model_seed + r`, a sliding window: run
+    seed s and run seed s+1 shared n_restarts-1 of their n_restarts model inits.
+    Reuse the stable-hash approach from scripts/exp11_robustness_baseline.py's
+    stable_seed() -- NOT builtin hash(), which Python salts per process
+    (PYTHONHASHSEED) and would make this non-reproducible across processes."""
+    h = hashlib.blake2b(f"{model_seed!r}|{r!r}".encode(), digest_size=8)
+    return int.from_bytes(h.digest(), "big") % 2 ** 32
+
+
 def _kgrid_for(kstar_obs, n=400, span=8.0, device=None, dtype=torch.float64):
     kmax = max(2.0, span * kstar_obs)
     return torch.linspace(kstar_obs / 50.0 + 1e-3, kmax, n, device=device, dtype=dtype)
@@ -148,7 +160,9 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
               the whole content of the claim "the recovered network generalises across L".
               Reported quantities are converted back to physical either way.
 
-    model_seed: seeds the model's random raw-parameter init (per-restart offset by r).
+    model_seed: seeds the model's random raw-parameter init. Each restart r draws its
+        init seed from the stable hash of (model_seed, r) -- see _restart_seed() --
+        so distinct (model_seed, r) pairs give independent draws and repeats are exact.
         Defaults to `seed` when not given, for backward compatibility.
 
     dispersion_backend: 'eig' (any N, the reference) | 'cubic' (exact for N<=3 ONLY).
@@ -207,7 +221,7 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
 
     best = None; restart_log = []
     for r in range(n_restarts):
-        model = RNGRN(N=N, form=form, seed=model_seed + r, init=init,
+        model = RNGRN(N=N, form=form, seed=_restart_seed(model_seed, r), init=init,
                       dispersion_backend=dispersion_backend).to(dev)
         latent_module = None
         latent = None

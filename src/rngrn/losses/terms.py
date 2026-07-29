@@ -33,19 +33,11 @@ torch.set_default_dtype(torch.float64)
 # --------------------------------------------------------------------------------------
 # 5.5  model-derived homogeneous steady state
 # --------------------------------------------------------------------------------------
-def steady_state(model, x0=None, tol=1e-10, max_iter=100, relax_steps=2000, relax_dt=1e-2):
-    """Solve f(x*) = 0 for the model's OWN homogeneous steady state.
-
-    Damped Newton on the reaction; if it fails (early training / wild theta) fall back to a short
-    forward relaxation of dx/dt = f(x) from a positive init. NEVER returns the frame mean.
-
-    Returns (xstar detached-safe tensor of shape (N,), converged: bool).
-    The returned xstar carries grad (Newton is differentiable through the reaction), so physics
-    terms evaluated at xstar are differentiable w.r.t. theta.
-    """
-    N = model.N
-    if x0 is None:
-        x0 = torch.ones(N, device=model.device, dtype=model.dtype)
+def _damped_newton(model, x0, tol, max_iter):
+    """The damped-Newton core with the positivity guard. ARITHMETIC IS THE LEGACY ONE,
+    lifted verbatim out of `steady_state` so it can be re-run from more than one seed;
+    do not "improve" the line search here — `steady_state`'s bit-identity guarantee
+    rests on this being unchanged. Returns (last iterate, converged)."""
     x = x0.clone()
     for _ in range(max_iter):
         fx = model.reaction(x)
@@ -55,7 +47,7 @@ def steady_state(model, x0=None, tol=1e-10, max_iter=100, relax_steps=2000, rela
         try:
             step = torch.linalg.solve(J, fx)
         except RuntimeError:
-            break
+            return x, False
         # damped Newton with positivity guard
         lam = 1.0
         for _ in range(30):
@@ -64,13 +56,88 @@ def steady_state(model, x0=None, tol=1e-10, max_iter=100, relax_steps=2000, rela
                 break
             lam *= 0.5
         x = torch.clamp(x - lam * step, min=1e-9)
+    return x, False
+
+
+def steady_state_bracket(model):
+    """Componentwise bracket [lo, hi] containing EVERY positive root of f (both forms).
+
+    At any root, x_i = (beta_i + prod_i(x)) / delta_i, and the production term is bounded
+    0 <= prod_i <= sum_j alpha_ij:
+
+      nc1          prod_i = (sum_j alpha_ij thetaA_ij) * prod_j (1 - thetaR_ij), and both
+                   thetaA_ij in [0,1) and the veto product in (0,1].
+      competitive  prod_i = sum_j alpha_ij KA_ij x_j^n / (1 + sum_j (KA_ij+KR_ij) x_j^n),
+                   a weighted average of the alpha_ij with weights summing to < 1.
+
+    Hence lo_i = beta_i/delta_i <= x*_i <= (beta_i + sum_j alpha_ij)/delta_i = hi_i.
+    lo is exactly the steady state with production switched OFF, hi with it SATURATED.
+
+    Reads only the model's own parameters -- no frame, no answer key. Returns (lo, hi).
+    """
+    lo = model.beta / model.delta
+    hi = (model.beta + model.alpha.sum(dim=-1)) / model.delta
+    return lo.detach(), hi.detach()
+
+
+def steady_state(model, x0=None, tol=1e-10, max_iter=100, relax_steps=2000, relax_dt=1e-2,
+                 multistart=True):
+    """Solve f(x*) = 0 for the model's OWN homogeneous steady state.
+
+    Damped Newton on the reaction; if it fails (early training / wild theta) fall back to a short
+    forward relaxation of dx/dt = f(x) from a positive init. NEVER returns the frame mean.
+
+    Returns (xstar detached-safe tensor of shape (N,), converged: bool).
+    The returned xstar carries grad (Newton is differentiable through the reaction), so physics
+    terms evaluated at xstar are differentiable w.r.t. theta.
+
+    MULTISTART (unit B3, default True) -- a SOLVER fix, not a model or objective change.
+    The single fixed seed x0 = ones is a GLOBALISATION failure: measured on a real nc1
+    training trajectory (two_gene_classical_val/sample_0000, seed 0, restart 0, Adam step
+    880), the Newton iterate from ones is trapped on the fold det J = 0 at
+    x = [0.7456, 0.7464], where |f| = 1.68e-2, sigma_min(J) = 1.70e-6 and cond(J) = 1.28e6,
+    so the Newton direction explodes (|step| 100 -> 5e3) and the line search collapses to
+    lam ~ 1e-9. The relaxation fallback restarts from the SAME seed and crawls in the same
+    near-fold bottleneck, ending at |f| = 1.3e-2 >> 1e-4. Yet the reaction has EXACTLY ONE
+    positive root, x* = [0.06111, 0.22282], which is well-conditioned (cond 1.98) and stable
+    (eig J = -0.703, -1.355): Newton from beta/delta reaches it to |f| = 2.0e-15. The old
+    code therefore reported "no steady state" for a model whose steady state exists and is
+    benign, and recover.py's fail-loud then threw the whole restart away.
+
+    So: attempt 1 is the LEGACY path verbatim (Newton from x0, then the relaxation fallback
+    from x0). Only if that fails do we re-run Newton from the bracket seeds of
+    `steady_state_bracket` (lo, hi and their geometric mean). Consequence, and the reason
+    this is safe to have on by default: ANY call that converged before converges to the
+    BIT-IDENTICAL xstar now, because the first attempt is byte-for-byte the old algorithm
+    and short-circuits on success (pinned by tests/test_science.py). What changes is only
+    the previously-unconverged cases, which used to raise SteadyStateError and lose the
+    restart. `multistart=False` restores the exact legacy behaviour for reproducing
+    pre-B3 numbers.
+    """
+    N = model.N
+    if x0 is None:
+        x0 = torch.ones(N, device=model.device, dtype=model.dtype)
+    # ---- attempt 1: the legacy path, unchanged ----------------------------------------
+    x, converged = _damped_newton(model, x0, tol, max_iter)
+    if converged:
+        return x, True
     # relaxation fallback
     x = (x0.clone() if (x0 > 0).all() else torch.ones(N, device=model.device, dtype=model.dtype))
     dt = relax_dt
     for _ in range(relax_steps):
         x = torch.clamp(x + dt * model.reaction(x), min=1e-9)
     converged = torch.linalg.norm(model.reaction(x)).item() < 1e-4
-    return x, converged
+    if converged or not multistart:
+        return x, converged
+    # ---- attempt 2..4: Newton from the analytic bracket (unit B3) ----------------------
+    lo, hi = steady_state_bracket(model)
+    for seed in (lo, hi, torch.sqrt(lo * hi)):
+        xs, ok = _damped_newton(model, seed, tol, max_iter)
+        if ok:
+            return xs, True
+    # nothing found: return the legacy fallback state and its (False) verdict, so a caller
+    # that inspects the state sees exactly what the pre-B3 code would have handed it.
+    return x, False
 
 
 def steady_state_diff(model, xstar_init):

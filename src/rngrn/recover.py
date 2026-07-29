@@ -243,7 +243,13 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                       f"kstar_m={parts.get('kstar_model', float('nan')):.2f} "
                       f"sig_max={parts.get('sig_max', float('nan')):.3f}")
         if failed:
-            restart_log.append(dict(restart=r, total=float("inf"), steady_state_failed=True))
+            # `failed_at_step` (unit B3): WHICH Adam step lost the steady state. Diagnosing
+            # the nc1 instability needed exactly this and the log did not have it — the
+            # failures cluster late (step 779-1188 on the measured nc1 trajectories), so a
+            # run that dies at step 900 of 2000 is a different animal from one that dies at
+            # init, and the pre-B3 log could not tell them apart.
+            restart_log.append(dict(restart=r, total=float("inf"), steady_state_failed=True,
+                                    failed_at="train", failed_at_step=step))
             continue
 
         if lbfgs_steps:

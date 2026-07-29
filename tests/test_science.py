@@ -168,3 +168,135 @@ def test_low_basal_init_turing_unstable_fraction():
     assert default_frac < 0.05, default_frac
     assert low_basal_frac > 0.5, low_basal_frac
     assert low_basal_frac - default_frac > 0.3, (default_frac, low_basal_frac)
+
+
+# ======================================================================================
+# unit B3 — steady-state multistart. See docs/STATE_OF_THE_SCIENCE.md section 12.
+# ======================================================================================
+# Raw theta of the EXACT model at which nc1 training first lost its steady state:
+# two_gene_classical_val/sample_0000, form=nc1, recover seed 0, restart 0, Adam step 880
+# (adam_steps=2000, lbfgs off, base.yaml weights). Pinned to full float64 precision so
+# the trap is reproducible without re-running 880 optimiser steps.
+_B3_FOLD_TRAP_THETA = dict(
+    theta_s=[[-0.8579053127688827, -0.14159688303303303],
+             [-0.8489986984171967, -2.5543531779230033]],
+    theta_g=[[4.195863311957089, -2.400018593667104],
+             [3.670857357483652, 0.7057125421643792]],
+    theta_alpha=[[4.970613527968563, -2.8231293440533394],
+                 [4.464141747772455, -0.7576471383612259]],
+    theta_delta=[0.3922929532313248, 1.0686497089179792],
+    theta_beta=[-2.989599001251903, -1.0612067383851242],
+    theta_D=[-3.910108871704899, 1.2235323634059783],
+)
+
+
+def _b3_fold_trap_model():
+    m = RNGRN(N=2, form="nc1", seed=0)
+    with torch.no_grad():
+        for name, value in _B3_FOLD_TRAP_THETA.items():
+            getattr(m, name).copy_(torch.tensor(value, dtype=torch.float64))
+    return m
+
+
+_B3_SWEEP_CACHE = {}
+
+
+def _b3_sweep():
+    """Walk a deterministic ensemble ONCE (the failing solves are the expensive ones) and
+    record what all three B3 tests below need. Cached because the file is meant to run in
+    seconds.
+
+    The ensemble reaches the parameter region training actually visits: the random init has
+    alpha ~ O(1), but by the time nc1 loses its steady state alpha has grown to ~5, so
+    theta_alpha is boosted by 5. In that region the SINGLE-SEED solve fails often enough
+    for the bit-identity pin to be non-vacuous."""
+    if _B3_SWEEP_CACHE:
+        return _B3_SWEEP_CACHE
+    from rngrn.losses.terms import steady_state, steady_state_bracket
+    rows = []
+    for form in FORMS:
+        for N in (2, 3):
+            for seed in range(12):
+                m = RNGRN(N=N, form=form, seed=seed)
+                with torch.no_grad():
+                    g = torch.Generator().manual_seed(1000 + seed)
+                    m.theta_alpha += 5.0 + torch.randn(N, N, generator=g) * 0.3
+                    m.theta_s += torch.randn(N, N, generator=g) * 0.5
+                    m.theta_beta -= 1.0
+                x_legacy, conv_legacy = steady_state(m, multistart=False)
+                x_multi, conv_multi = steady_state(m, multistart=True)
+                lo, hi = steady_state_bracket(m)
+                rows.append(dict(
+                    form=form, N=N, seed=seed,
+                    conv_legacy=bool(conv_legacy), conv_multi=bool(conv_multi),
+                    max_abs_diff=float((x_legacy - x_multi).detach().abs().max()),
+                    in_bracket=bool(torch.all(x_multi.detach() >= lo - 1e-9)
+                                    and torch.all(x_multi.detach() <= hi + 1e-9)),
+                    resid=float(torch.linalg.norm(m.reaction(x_multi))),
+                ))
+    _B3_SWEEP_CACHE["rows"] = rows
+    return _B3_SWEEP_CACHE
+
+
+def test_b3_multistart_is_bit_identical_wherever_the_legacy_solve_converged():
+    """THE REGRESSION PIN. terms.steady_state's multistart is a pure rescue path: its first
+    attempt is the pre-B3 algorithm verbatim and short-circuits on success, so every call
+    that converged before must return a BIT-IDENTICAL x* (difference exactly 0.0, not
+    'small'). This is what makes the fix safe to have on by default and what keeps every
+    competitive number recorded before B3 comparable."""
+    rows = _b3_sweep()["rows"]
+    legacy = [r for r in rows if r["conv_legacy"]]
+    bad = [r for r in legacy if not (r["conv_multi"] and r["max_abs_diff"] == 0.0)]
+    assert not bad, f"multistart changed a converged x*: {bad[:4]}"
+    assert len(legacy) > 0
+    # non-vacuous: the ensemble must actually contain legacy failures for the pin to mean
+    # anything, and multistart must actually rescue them.
+    rescued = [r for r in rows if not r["conv_legacy"] and r["conv_multi"]]
+    assert rescued, "ensemble contains no legacy failure — the pin is vacuous"
+
+
+def test_b3_multistart_rescues_every_stressed_model():
+    """Companion to the pin above: on the same ensemble the multistart solve converges
+    everywhere, i.e. the legacy failures were a globalisation artefact of the single
+    x0 = ones seed and not an absence of a steady state."""
+    rows = _b3_sweep()["rows"]
+    failures = [(r["form"], r["N"], r["seed"], r["resid"]) for r in rows if not r["conv_multi"]]
+    assert not failures, f"multistart still failed on {len(failures)} models: {failures[:8]}"
+
+
+def test_b3_nc1_newton_fold_trap_is_rescued():
+    """The measured nc1 defect, pinned. At this exact theta the single-seed damped Newton
+    is trapped on the fold det J = 0 at x = [0.7456, 0.7464]: |f| = 1.68e-2 while
+    sigma_min(J) = 1.7e-6, so the Newton step explodes and the line search collapses to
+    lam ~ 1e-9; the relaxation fallback re-starts from the same seed and stalls at
+    |f| = 1.3e-2. The reaction nevertheless has one well-conditioned positive root."""
+    from rngrn.losses.terms import steady_state
+    m = _b3_fold_trap_model()
+
+    trap = torch.tensor([0.745589, 0.746393], dtype=torch.float64)
+    J_trap = m.jacobian(trap, create_graph=False).detach()
+    sv = torch.linalg.svdvals(J_trap)
+    assert float(torch.linalg.norm(m.reaction(trap))) < 2e-2      # a near-zero of f ...
+    assert float(sv[-1]) < 1e-5                                    # ... on a near-fold of J
+
+    _, conv_legacy = steady_state(m, multistart=False)
+    assert not conv_legacy, "the pinned trap no longer reproduces the legacy failure"
+
+    x, conv = steady_state(m, multistart=True)
+    assert conv
+    assert float(torch.linalg.norm(m.reaction(x))) < 1e-8
+    assert np.allclose(x.detach().numpy(), [0.06111129, 0.2228224], atol=1e-6)
+    J = m.jacobian(x, create_graph=False).detach().numpy()
+    assert np.linalg.cond(J) < 10.0            # the recovered root is benign, not singular
+
+
+@pytest.mark.parametrize("form", FORMS)
+def test_b3_steady_state_bracket_contains_the_root(form):
+    """terms.steady_state_bracket claims lo_i = beta_i/delta_i <= x*_i <=
+    (beta_i + sum_j alpha_ij)/delta_i for BOTH forms, because 0 <= prod_i <= sum_j alpha_ij.
+    The multistart seeds are those two bounds and their geometric mean, so the claim has to
+    hold or the seeds are not a bracket."""
+    rows = [r for r in _b3_sweep()["rows"] if r["form"] == form and r["conv_multi"]]
+    assert len(rows) >= 20, len(rows)
+    outside = [(r["N"], r["seed"]) for r in rows if not r["in_bracket"]]
+    assert not outside, f"root outside the claimed bracket for {form}: {outside}"

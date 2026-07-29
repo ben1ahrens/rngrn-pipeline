@@ -255,6 +255,14 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
         w_anchor=float(cfg.loss.weights.get("anchor", 0.0)),
         w_resid=float(cfg.loss.weights.get("resid", 0.0)),
     )
+    # unit B3: how many restarts this run LOST to a diverged steady state. Before B3 this was
+    # 31/32 for nc1 at adam_steps=2000 and INVISIBLE in the index — a row could report a
+    # 4-restart run that in truth kept one. Recorded so the multistart fix stays auditable
+    # and any regression shows up as a non-zero count, not as a quietly worse loss.
+    row.update(
+        n_restarts_run=len(result.restarts),
+        n_restarts_ss_failed=sum(1 for e in result.restarts if e.get("steady_state_failed")),
+    )
     IO.append_run_index(runs_root, row, backend=cfg.tracking.index_backend)
     metric["run_id"] = run_id
     metric["loss"] = result.loss

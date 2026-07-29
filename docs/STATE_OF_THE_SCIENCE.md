@@ -744,3 +744,127 @@ Prior sessions' findings are in this repo's docs and in the Claude Science proje
 memory (133 rows). Anything in `CLAUDE.md` is authoritative for conventions. Where a
 doc and the source disagree, **the source wins** — two such discrepancies were found
 while writing `CLAUDE.md` and are logged in it as known gaps.
+
+---
+
+## 13. nc1 training instability — diagnosed, and it was the SOLVER (unit B3)
+
+`nc1` (non-competitive) recovery was numerically correct at init but lost its steady state
+part-way through Adam training, which blocked half of "both models must work". The cause is
+now measured, and **it is not a property of the nc1 reaction**: it is a globalisation
+failure of the single fixed Newton seed `x0 = ones` in `losses/terms.steady_state`.
+
+### 13.1 Reproduction (real data, `recover()` path, 8 independent seeds)
+
+`lbfgs_steps=0`, `n_restarts=4`, `base.yaml` weights. Counted per RESTART: how many of the
+4×8 = 32 restarts `recover()` abandoned because `compute_terms` raised `SteadyStateError`.
+
+| sample | N | adam_steps | nc1 seeds ok | nc1 restarts lost | comp. seeds ok | comp. restarts lost |
+|---|---|---|---|---|---|---|
+| `two_gene_classical_val/sample_0000`  | 2 | 250  | 8/8 | 4/32  | 8/8 | 1/32 |
+| `two_gene_classical_val/sample_0000`  | 2 | 2000 | **1/8** | **31/32** | 8/8 | 6/32 |
+| `three_gene_val/sample_0000`          | 3 | 250  | 8/8 | 3/32  | 8/8 | 3/32 |
+| `three_gene_val/sample_0000`          | 3 | 2000 | 8/8 | **17/32** | 8/8 | 5/32 |
+
+Two corrections to the phase-A framing fall out of this table. First, the defect is
+**step-budget dependent**: at 250 steps nc1 and competitive are indistinguishable on the
+N=3 sample (3/32 vs 3/32); the collapse only appears at the configured 2000-step budget.
+Second, it is nc1-specific **in rate, not in kind** — competitive fails the same way, 5–6
+times in 32, and that had not been noticed.
+
+**Reproduction caveat, stated because it changes what was measurable.** The phase-A defect
+was reported on `configs/nc1_milestone1_schnak.yaml`. That config CANNOT run at this commit:
+with `data.source=reference`, `resolution=128`, `L=100`, `data/solver.py`'s explicit
+spectral diffusion is unstable (Schnakenberg `Dv=40` needs `dt < 2/(D·k²max) ≈ 1.6e-3`, but
+`dt_eff = 0.2/max|eig J| = 2.0e-3`), so `simulate_to_attractor` raises
+`FloatingPointError: solver diverged at step 29` — before any model is built.
+`nc1_milestone1_gm.yaml` fails the same way at step 133. That is a **pre-existing
+generator defect, untouched by B3** (its `dt` cap accounts only for the reaction rate, never
+for the diffusion CFL), and it is why the numbers above are on registered real data rather
+than on the reference systems.
+
+### 13.2 Mechanism — the hypothesised veto collapse is REFUTED
+
+The standing hypothesis was that nc1's multiplicative repression veto `prod_j (1 - thetaR_ij)`
+collapses toward 0, flattening the reaction and making `J` ill-conditioned. At the first
+failure (nc1, N=2, `two_gene_classical_val/sample_0000`, seed 0, restart 0, Adam step 880):
+
+* veto product = **[0.971, 0.9987]** — nowhere near collapse (`KR ≤ 0.573`).
+* `cond(J)` at the state the solver returned = **2.19**; at the true root, **1.98**. The
+  steady state is not ill-conditioned.
+
+What actually happens is a **fold**. The Newton iterate from `ones` walks to
+`x = [0.745589, 0.746393]` and sticks there:
+
+* `|f| = 1.6755e-2`, `svd(J) = [2.179, 1.699e-6]`, `det J = 3.70e-6`, `cond(J) = 1.28e6`
+  — the iterate is on the `det J = 0` manifold.
+* the Newton step therefore explodes (`|step|` 0.18 → 100 → 5.0e3) while the damping
+  collapses (`lam` 1.0 → 9.3e-10). The line-search accept test is "any decrease in |f|", so
+  these no-op steps are ACCEPTED and all 100 iterations are consumed with `|f|` pinned at
+  `1.675518e-2`.
+* the relaxation fallback then restarts from the **same** `x0 = ones` and crawls in the same
+  near-fold bottleneck, ending at `|f| = 1.31e-2` ≫ the `1e-4` bar → `converged=False`.
+
+And yet the reaction has **exactly one** positive root (67 `least_squares` starts spanning
+1e-3..10 per component all land on it): `x* = [0.0611113, 0.2228224]`, `|f| = 5.6e-17`,
+`eig J = (-0.703, -1.355)`, `cond 1.98`. Newton reaches it from `beta/delta` at
+`|f| = 2.0e-15`, from `0.1·ones` at `8.4e-17`, from `10·ones` at `5.7e-17`. The old code was
+reporting "no steady state" for a model whose steady state exists, is unique and is benign —
+and `recover.py`'s fail-loud then threw the whole restart away.
+
+So this is **option (i)** in the unit brief — fix the solve — and no model change (option
+(ii)) is needed or adopted. Nothing about the objective, the veto, or the nc1 form was
+altered.
+
+### 13.3 The fix, and why it is safe on by default
+
+`terms.steady_state(..., multistart=True)`:
+
+* **attempt 1 is the pre-B3 algorithm verbatim** (damped Newton from `x0`, then the
+  relaxation fallback from `x0`) and short-circuits on success;
+* only on failure is Newton re-run from the analytic bracket
+  `terms.steady_state_bracket`: `lo_i = beta_i/delta_i` (production OFF),
+  `hi_i = (beta_i + Σ_j alpha_ij)/delta_i` (production SATURATED), and `sqrt(lo·hi)`.
+  The bracket is exact for **both** forms because at any root
+  `x_i = (beta_i + prod_i)/delta_i` with `0 ≤ prod_i ≤ Σ_j alpha_ij` (nc1: `thetaA ≤ 1` and
+  veto `≤ 1`; competitive: `prod_i` is a weighted average of the `alpha_ij` with weights
+  summing to `< 1`). The seeds read only the model's own parameters — firewall-clean, no
+  frame, no answer key, no randomness.
+
+Because attempt 1 is unchanged and wins whenever it used to, **every call that converged
+before returns a bit-identical `x*`**. Measured, difference exactly `0.0` (not "small"):
+
+* along real 400-step training trajectories, `multistart` off vs on at every step:
+  competitive N=2 400/400 legacy-converged steps identical; nc1 N=2 396/396 identical with
+  4 steps rescued; competitive N=3 400/400; nc1 N=3 400/400. **1596/1596, max|Δx| = 0.0.**
+* `tests/test_science.py::test_b3_multistart_is_bit_identical_wherever_the_legacy_solve_converged`
+  pins this on a 48-model stressed ensemble; the trap itself is pinned at full float64
+  precision in `test_b3_nc1_newton_fold_trap_is_rescued`.
+
+`multistart=False` restores the exact legacy solve for reproducing pre-B3 numbers.
+
+### 13.4 Outcome, on the same samples and seeds as 13.1 (adam_steps=2000)
+
+| sample | N | form | restarts lost BEFORE | AFTER |
+|---|---|---|---|---|
+| `two_gene_classical_val/sample_0000` | 2 | nc1         | 31/32 | **0/32** |
+| `two_gene_classical_val/sample_0000` | 2 | competitive |  6/32 | **0/32** |
+| `three_gene_val/sample_0000`         | 3 | nc1         | 17/32 | **0/32** |
+| `three_gene_val/sample_0000`         | 3 | competitive |  5/32 | **0/32** |
+
+Seed-level completion is 8/8 for both forms at both N. **nc1 is no longer the blocker.**
+
+### 13.5 What this does NOT establish, and one measurement hazard
+
+* This is a **completion** rate, not a recovery-quality result. Whether nc1 recovers the
+  same topology as competitive, or the right one, is untouched here — no topology,
+  robustness or reproducibility claim is made or implied.
+* Numbers recorded before B3 that involved a FAILED steady state are not comparable: those
+  restarts existed and were discarded, and now they participate. Converged-path numbers are
+  bit-identical and remain comparable.
+* **Seed independence hazard, found while measuring this and relevant to every multi-seed
+  claim in this project.** `recover(seed=s)` builds restart `r` with `model_seed = s + r`,
+  so consecutive seeds with `n_restarts=4` SHARE 3 of their 4 initialisations — seeds 0..3
+  are not 4 independent samples. All 13.1/13.4 numbers use `seed = 4·i` (disjoint blocks).
+  The N=3 / 250-step row is the one exception: it was measured before this was noticed and
+  uses consecutive seeds, so treat its 3/32 vs 3/32 as ~2 effective seeds, not 8.

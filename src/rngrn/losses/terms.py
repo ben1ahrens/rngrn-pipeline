@@ -14,6 +14,9 @@ inequalities on the model's own J and D. This is the Section-12 firewall in code
   stationarity_residual full RHS D lap(x) + f(x) = 0 on observed channels (latent inferred if m<N)
   anticollapse          margin penalty excluding the f==0, D==0 trivial minimum
   morphology_consistency weak regulariser matching simulated to observed morphology (optional)
+  param_prior           soft biological-plausibility prior (D-ratio log-normal + box hinges,
+                         unit 5) — reads only configs/bio_box.yaml and the model's own
+                         parameters, never an answer key
   composite_loss        weighted sum + a dict of the individual parts for logging
 """
 from __future__ import annotations
@@ -213,18 +216,104 @@ def morphology_consistency(sim_field_np, obs_field_np):
 
 
 # --------------------------------------------------------------------------------------
+# 5.7  biological-plausibility soft prior (unit 5)
+# --------------------------------------------------------------------------------------
+# NOTE ON THE DUPLICATED BOX LOADER: rngrn.scoring.plausibility (the SCORING-side
+# module, which offers `load_box`/`BoxRow`/`d_ratio_of`) cannot be imported here.
+# tests/test_permutation_scoring.py, test_morphology_scoring.py and
+# test_overparam_scoring.py each assert that NO recovery-side module (this file
+# included) imports `rngrn.scoring` at all — the scoring package as a whole is
+# treated as answer-key-adjacent, not just the specific forbidden names in
+# tests/test_firewall.py. So this file loads configs/bio_box.yaml independently
+# below, rather than sharing scoring/plausibility.py's loader. The definitions are
+# kept intentionally tiny and are exercised by tests/test_plausibility.py against
+# BOTH this loader and the scoring-side one to catch drift between the two.
+def _load_box_bounds(path):
+    """Read configs/bio_box.yaml -> {name: (low, high) or None}. None means the row is
+    UNCITED or carries no bounds — never a fabricated (low, high) pair."""
+    import yaml
+    with open(path) as fh:
+        raw = yaml.safe_load(fh) or {}
+    out = {}
+    for name, row in raw.items():
+        if not isinstance(row, dict) or "source" not in row:
+            raise ValueError(f"{path}: row {name!r} must be a mapping with a `source`")
+        low, high = row.get("low"), row.get("high")
+        cited = row["source"] != "UNCITED"
+        out[name] = (float(low), float(high)) if (cited and low is not None and high is not None) else None
+    return out
+
+
+def param_prior(model, dratio_centre=7.5, dratio_spread=1.0, box=None,
+                box_path="configs/bio_box.yaml"):
+    """Soft biological-plausibility prior on the model's OWN parameters. Recovery-side
+    (reads no answer-key quantity; tests/test_firewall.py covers this file).
+
+    Two summed components:
+
+    1. Log-normal D-ratio term: w * (log D_ratio - log dratio_centre)**2 / (2 *
+       dratio_spread**2), where D_ratio is the two MOST-MOBILE species' diffusivity
+       ratio (largest / second-largest — see scoring/plausibility.py::d_ratio_of for
+       the same definition used at scoring time: it excludes the single smallest D by
+       construction, so a near-immobile node, docs/ROBUSTNESS_MEASUREMENT.md §4.4, is
+       never penalised).
+       `dratio_centre` default 7.5 is the LITERATURE value (measured Nodal/Lefty
+       ratio) per the user decision on record: priors are centred on biologically
+       viable literature values, NOT on the synthetic generators' own draws (~8-250,
+       median ~135) — see configs/bio_box.yaml and docs/STATE_OF_THE_SCIENCE.md §11.
+    2. Soft box hinges (one-sided softplus) pulling `alpha` and `delta` back toward
+       [low, high] from configs/bio_box.yaml whenever an entry strays outside. `beta`
+       has no cited box there (UNCITED) and is deliberately NOT hinged — hinging an
+       invented bound would fabricate a provenance the box explicitly refuses to claim.
+
+    The RETURNED loss is UNWEIGHTED; the caller applies loss.weights.param_prior
+    (config.py, default 0.0 — this term is opt-in, its effect measurable rather than
+    assumed).
+
+    Returns (loss: 0-d torch tensor, parts: dict of floats for logging).
+    """
+    box = _load_box_bounds(box_path) if box is None else box
+
+    D = model.D
+    sorted_D, _ = torch.sort(D)
+    if sorted_D.numel() < 2:
+        raise ValueError(f"param_prior needs N>=2 species, got {sorted_D.numel()}")
+    lo, hi = sorted_D[-2], sorted_D[-1]
+    log_ratio = torch.log(hi) - torch.log(lo)
+    log_centre = float(np.log(dratio_centre))
+    L_dratio = (log_ratio - log_centre) ** 2 / (2.0 * dratio_spread ** 2)
+
+    L_box = torch.zeros((), dtype=D.dtype, device=D.device)
+    parts = dict(d_ratio=float((hi / lo).detach()), L_dratio=float(L_dratio.detach()))
+    for name, value in (("alpha", model.alpha), ("delta", model.delta)):
+        bounds = box.get(name)
+        if bounds is None:
+            continue  # UNCITED or unbounded row: no fabricated hinge (bio_box.yaml)
+        low, high = bounds
+        term = (_softplus_hinge(low - value) + _softplus_hinge(value - high)).sum()
+        L_box = L_box + term
+        parts[f"L_box_{name}"] = float(term.detach())
+
+    loss = L_dratio + L_box
+    parts["L_param_prior"] = float(loss.detach())
+    return loss, parts
+
+
+# --------------------------------------------------------------------------------------
 # composite
 # --------------------------------------------------------------------------------------
-DEFAULT_WEIGHTS = dict(kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.0)
+DEFAULT_WEIGHTS = dict(kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.0,
+                       param_prior=0.0)   # param_prior default 0.0: opt-in (unit 5)
 
 
 def composite_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
-                   weights=None, latent_fields=None, tau=0.12, jac_floor=1.0):
+                   weights=None, latent_fields=None, tau=0.12, jac_floor=1.0,
+                   dratio_centre=7.5, dratio_spread=1.0, bio_box_path="configs/bio_box.yaml"):
     """The weighted objective. Returns (scalar loss, parts dict).
 
     frame: (m,H,W) observed channels (torch). kstar_obs: measured FFT k* of the frame (float).
     """
-    w = dict(DEFAULT_WEIGHTS); 
+    w = dict(DEFAULT_WEIGHTS);
     if weights: w.update(weights)
     xstar, conv = steady_state(model)
     xstar = steady_state_diff(model, xstar)                # differentiable polish
@@ -232,8 +321,11 @@ def composite_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
     L_t, p_t = turing_hinges(model, xstar, kgrid)
     L_r, p_r = stationarity_residual(model, frame, L, observed_idx, latent_fields)
     L_a, p_a = anticollapse(model, xstar, jac_floor=jac_floor)
-    loss = w['kstar']*L_k + w['turing']*L_t + w['resid']*L_r + w['anticollapse']*L_a
+    L_p, p_p = param_prior(model, dratio_centre=dratio_centre, dratio_spread=dratio_spread,
+                           box_path=bio_box_path)
+    loss = (w['kstar']*L_k + w['turing']*L_t + w['resid']*L_r + w['anticollapse']*L_a
+           + w['param_prior']*L_p)
     parts = dict(total=float(loss), ss_converged=conv,
                  L_kstar=float(L_k), L_turing=float(L_t), L_resid=float(L_r), L_anti=float(L_a),
-                 **p_k, **p_t, **p_r, **p_a)
+                 **p_k, **p_t, **p_r, **p_a, **p_p)
     return loss, parts

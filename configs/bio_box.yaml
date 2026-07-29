@@ -1,0 +1,67 @@
+# bio_box.yaml — biological plausibility box for the RNGRN's OWN recovered parameters.
+#
+# Read only by src/rngrn/scoring/plausibility.py and src/rngrn/losses/terms.py::param_prior.
+# EVERY number below carries a `source` row. A row that cannot be cited is marked
+# `source: UNCITED` rather than given an invented provenance — an UNCITED row is
+# reported but never scored in/out-of-box and never hinged in the prior loss.
+#
+# USER DECISION ON RECORD (see the unit 5 task brief): priors are centred on
+# BIOLOGICALLY VIABLE LITERATURE VALUES, not on the values the synthetic training data
+# happens to use. The synthetic `three_gene` generators sample D-ratio as
+# 10**U(0.9, 2.4) (population median ~135), which sits well outside this box's D-ratio
+# range. That mismatch is the EXPECTED, INTENDED consequence of the user decision — see
+# docs/STATE_OF_THE_SCIENCE.md §11 for the full tension and docs/ROBUSTNESS_MEASUREMENT.md
+# §4.4 for why a near-immobile node keeps a ~7.5 D-ratio Turing-viable at all.
+
+alpha:
+  # RNGRN production-weight scale (softplus(theta_alpha), dimensionless Hill-kinetics
+  # weight — not a directly-measured molecular rate).
+  low: 0.5
+  high: 10.0
+  source: >
+    docs/GOAL_tica_equivalent.md §2.2 — "The generator priors recorded earlier in the
+    project (alpha 0.5-10, delta 0.4-5, D-ratio ~8-250) are the working plausibility
+    box for the RNGRN's own parameters." This is the project's own recorded working
+    box, not an external wet-lab measurement; there is no independent literature
+    citation for this dimensionless model-internal scale.
+
+delta:
+  # RNGRN degradation rate scale (softplus(theta_delta)).
+  low: 0.4
+  high: 5.0
+  source: >
+    docs/GOAL_tica_equivalent.md §2.2 — same working-box record as `alpha` above.
+
+beta:
+  # RNGRN basal (leak) production rate (softplus(theta_beta)).
+  low: null
+  high: null
+  source: UNCITED
+  note: >
+    No literature-grounded box has been recorded for basal production anywhere in
+    docs/ as of this branch. STATE_OF_THE_SCIENCE.md §10 records a beta ~1e-4-1e-2
+    range, but that is an INIT-DISTRIBUTION search result explicitly marked "a
+    modelling assumption rather than a neutral prior" and "deliberately not adopted"
+    for training — it is not being repurposed here as a biological-plausibility claim.
+    Left UNCITED rather than inventing a bound.
+
+d_ratio:
+  # D_ratio = ratio of the two MOST MOBILE species' diffusivities (largest /
+  # second-largest D), so a near-immobile node never enters the ratio — see
+  # scoring/plausibility.py::d_ratio_of and losses/terms.py::param_prior.
+  low: 1.0
+  high: 60.0
+  centre: 7.5
+  spread: 1.0   # natural-log units; [TUNE] — width, not itself independently calibrated
+  source: >
+    Centre 7.5 and the "measured ratio" framing: docs/STATE_OF_THE_SCIENCE.md §11 —
+    "The canonical measured ratio is Nodal/Lefty in live zebrafish: the activator
+    Nodal diffuses ~7.5x slower than the inhibitor Lefty." low=1.0 is the classical
+    Turing (1952) requirement that the inhibitor diffuse faster than the activator
+    (D_ratio > 1) for a two-species reaction-diffusion instability — Turing, A.M.
+    (1952) Phil. Trans. R. Soc. Lond. B 237:37-72. high=60.0 is a REASONED PROXY
+    (not itself a measured ratio bound, flagged as such) taken from the same
+    STATE_OF_THE_SCIENCE.md §11 paragraph's cited absolute-diffusivity spread across
+    measurement regimes ("~60 um^2/s FCS-local to ~1-2 um^2/s FRAP-global", i.e.
+    roughly two orders of magnitude) as a ceiling on how much differential diffusion
+    is physiologically plausible.

@@ -266,6 +266,22 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
         n_restarts_run=len(result.restarts),
         n_restarts_ss_failed=sum(1 for e in result.restarts if e.get("steady_state_failed")),
     )
+    # EXECUTION PATH identity. The frozen config records these, but the run index is what
+    # gets aggregated and compared, and without them a row cannot say whether it came from
+    # the serial or the batched optimiser, on CPU or CUDA, through which dispersion
+    # backend, or with which init. Those are not cosmetic: batched and serial are the same
+    # METHOD but not the same random draw (float associativity diverges them over a long
+    # run), the cubic backend is exact only for N<=3, and d_init_from_kstar / low_basal
+    # change where recovery starts. Pooling rows that differ on any of them would be
+    # comparing different experiments.
+    row.update(
+        batched=bool(cfg.train.batched), device=str(cfg.train.device),
+        dispersion_backend=str(cfg.model.dispersion_backend),
+        model_init=str(cfg.model.init), nondim=bool(cfg.model.nondim),
+        d_init_from_kstar=bool(cfg.model.d_init_from_kstar),
+        deterministic=bool(cfg.train.deterministic),
+        adam_steps=int(cfg.train.adam_steps), n_restarts_requested=int(cfg.train.n_restarts),
+    )
     IO.append_run_index(runs_root, row, backend=cfg.tracking.index_backend)
     metric["run_id"] = run_id
     metric["loss"] = result.loss

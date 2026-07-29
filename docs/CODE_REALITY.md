@@ -242,12 +242,19 @@ science decision.
 
 ## 11. Open decisions currently blocking progress
 
-Collected from across the docs so they are in one place. None have been made.
+Collected from across the docs so they are in one place. Struck-through entries have
+been settled; the rest have not.
 
 1. **Which reading of "more robust"** — `GOAL_tica_equivalent.md` §2, four incompatible
    options.
-2. **Domain-size design for regenerated data** — `STATE_OF_THE_SCIENCE.md` §7.1, three
-   measured options; the current data contradicts the user's stated intent.
+2. ~~**Domain-size design for regenerated data**~~ — **SETTLED (unit 11): option (b),
+   vary L with random periods-per-box.** The user's later clarification that the model
+   must generalise across domain sizes forecloses option (a) (fixed L), which makes L
+   carry zero information and the generalisation claim untestable. Evidence and the two
+   new datasets (`three_gene_qvar`, `three_gene_multiL`): `DATASETS_L.md`. Measured: the
+   image-blind predictor `6·2π/L` goes from 0.0 % median error on the old 127 samples to
+   45.5 % on `three_gene_qvar` (34 samples). The old sets are NOT deleted; they remain the
+   comparison baseline.
 3. **The morphology pass condition** — stripes classifies at 33.3 % on held-out data
    (3 samples). Balanced accuracy excluding stripes / continuous `morphology_distance` /
    generate more stripes first.

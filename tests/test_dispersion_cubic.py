@@ -54,23 +54,27 @@ def test_cubic_matches_eigvals_on_real_jacobians():
     assert worst_sig < 1e-8, f"sigma_max max abs error {worst_sig:.3e}"
 
 
-def test_cubic_matches_eigvals_on_random_models():
-    """Random model states, not just the answer keys — covers wilder theta."""
+@pytest.mark.parametrize("form", ["competitive", "nc1"])
+def test_cubic_matches_eigvals_on_random_models(form):
+    """Random model states, not just the answer keys — covers wilder theta. Parametrized
+    over form (unit 6): the cubic backend operates only on J - k^2 D, so it is form-
+    agnostic in principle, but that was never checked for nc1's Jacobian before."""
     kg = torch.linspace(0.0, 3.0, 128, dtype=torch.float64)
     for seed in range(12):
-        a = RNGRN(N=3, seed=seed, dispersion_backend="eig")
-        b = RNGRN(N=3, seed=seed, dispersion_backend="cubic")
+        a = RNGRN(N=3, form=form, seed=seed, dispersion_backend="eig")
+        b = RNGRN(N=3, form=form, seed=seed, dispersion_backend="cubic")
         x = torch.full((3,), 0.7, dtype=torch.float64)
         assert torch.allclose(a.dispersion(x, kg), b.dispersion(x, kg), atol=1e-9)
 
 
-def test_cubic_gradients_match():
+@pytest.mark.parametrize("form", ["competitive", "nc1"])
+def test_cubic_gradients_match(form):
     """The backend is used inside a differentiable loss, so gradients must agree too."""
     kg = torch.linspace(0.0, 3.0, 128, dtype=torch.float64)
     x = torch.full((3,), 0.7, dtype=torch.float64)
     grads = []
     for backend in ("eig", "cubic"):
-        m = RNGRN(N=3, seed=3, dispersion_backend=backend)
+        m = RNGRN(N=3, form=form, seed=3, dispersion_backend=backend)
         m.dispersion(x, kg).max().backward()
         grads.append(m.theta_D.grad.clone())
     assert torch.allclose(grads[0], grads[1], atol=1e-10), (grads[0] - grads[1]).abs().max()

@@ -8,23 +8,32 @@ These check the science invariants the pipeline depends on, not recovery success
   * the mu->0 lift reproduces the QSS reaction
   * ETDRK4 stays finite where split-step IMEX collapses under stiff diffusion
   * the reference answer keys reproduce the documented k*
+
+Most invariants are parametrized over both regulation forms (competitive, nc1) — unit 6
+enablement: nc1 is implemented (model.py, eval/rollout.py, eval/dynamical.py) but was
+never exercised by a test before this file was updated.
 """
 import numpy as np
+import pytest
 import torch
 
 from rngrn.model import RNGRN
 
+FORMS = ["competitive", "nc1"]
 
-def test_positivity_and_param_count():
-    m = RNGRN(N=2, form="competitive", seed=0)
+
+@pytest.mark.parametrize("form", FORMS)
+def test_positivity_and_param_count(form):
+    m = RNGRN(N=2, form=form, seed=0)
     assert torch.all(m.KA >= 0) and torch.all(m.KR >= 0) and torch.all(m.D > 0)
     assert torch.allclose(m.KA + m.KR, m.s, atol=1e-6)
     n_params = sum(p.numel() for p in m.parameters())
     assert n_params == 3 * m.N**2 + 3 * m.N
 
 
-def test_autodiff_jacobian_matches_fd():
-    m = RNGRN(N=2, seed=1)
+@pytest.mark.parametrize("form", FORMS)
+def test_autodiff_jacobian_matches_fd(form):
+    m = RNGRN(N=2, form=form, seed=1)
     x = torch.tensor([1.0, 0.9])
     J = m.jacobian(x, create_graph=False).detach().numpy()
     eps = 1e-6; f0 = m.reaction(x).detach().numpy(); Jfd = np.zeros((2, 2))
@@ -34,8 +43,9 @@ def test_autodiff_jacobian_matches_fd():
     assert np.max(np.abs(J - Jfd)) < 1e-5
 
 
-def test_general_vs_2x2_dispersion():
-    m = RNGRN(N=2, seed=2)
+@pytest.mark.parametrize("form", FORMS)
+def test_general_vs_2x2_dispersion(form):
+    m = RNGRN(N=2, form=form, seed=2)
     x = torch.tensor([1.0, 0.9])
     J = m.jacobian(x)
     kg = torch.linspace(0.05, 5.0, 60)
@@ -46,8 +56,9 @@ def test_general_vs_2x2_dispersion():
     assert ok.mean() > 0.7
 
 
-def test_gradients_flow_to_theta():
-    m = RNGRN(N=2, seed=3)
+@pytest.mark.parametrize("form", FORMS)
+def test_gradients_flow_to_theta(form):
+    m = RNGRN(N=2, form=form, seed=3)
     x = torch.tensor([1.0, 0.9])
     sig = m.dispersion(x, torch.linspace(0.05, 5.0, 40))
     loss = sig.max()
@@ -55,11 +66,48 @@ def test_gradients_flow_to_theta():
     assert m.theta_D.grad is not None and torch.any(m.theta_D.grad != 0)
 
 
-def test_mu_zero_lift_reduces_to_qss():
+@pytest.mark.parametrize("form", FORMS)
+def test_mu_zero_lift_reduces_to_qss(form):
     from rngrn.eval.dynamical import lift_check
-    m = RNGRN(N=2, seed=4)
+    m = RNGRN(N=2, form=form, seed=4)
     diff = lift_check(m, [1.0, 0.9], mu=1e-4, n=6000)
     assert diff < 1e-2, f"lift did not reduce to QSS: {diff}"
+
+
+@pytest.mark.parametrize("form", FORMS)
+def test_rollout_reaction_np_matches_model_reaction(form):
+    """eval/rollout.py builds a SEPARATE numpy reaction for the lifted-PDE integrator
+    (model.reaction is torch-only, pointwise). A silent divergence between the two would
+    corrupt every rollout without a training-time signal (unit 6: nc1's numpy branch,
+    eval/rollout.py lines ~29-34, had never been checked against the torch branch)."""
+    from rngrn.eval.rollout import _reaction_np_builder
+    m = RNGRN(N=3, form=form, seed=7)
+    x = torch.tensor([1.0, 0.8, 1.2])
+    f_torch = m.reaction(x).detach().numpy()
+    reaction_np = _reaction_np_builder(m)
+    X = np.broadcast_to(x.numpy()[:, None, None], (3, 4, 4)).copy()
+    f_np = reaction_np(X)[:, 0, 0]
+    assert np.max(np.abs(f_np - f_torch)) < 1e-10
+
+
+@pytest.mark.parametrize("N", [2, 3])
+def test_nc1_steady_state_converges(N):
+    """nc1's multiplicative repression veto prod_j (1 - theta_R_ij) can in principle drive
+    production to zero, which could stall the damped-Newton steady-state solve. Measure
+    convergence at default random init across seeds rather than assume it (unit 6: this
+    path was never exercised — a grep for nc1 previously returned 0 hits outside
+    model.py/config.py)."""
+    from rngrn.losses.terms import steady_state
+    n_seeds = 20
+    failures = []
+    for seed in range(n_seeds):
+        m = RNGRN(N=N, form="nc1", seed=seed)
+        _, converged = steady_state(m)
+        if not converged:
+            failures.append(seed)
+    assert not failures, (
+        f"nc1 steady_state failed to converge on N={N} seeds {failures} "
+        f"({len(failures)}/{n_seeds})")
 
 
 def test_etdrk4_finite_under_stiff_diffusion():

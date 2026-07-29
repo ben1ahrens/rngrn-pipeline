@@ -60,7 +60,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from .model import RNGRN
+from .model import RNGRN, BatchedRNGRN
 from . import observables as obs
 from .losses import total as LT
 from .losses.total import SteadyStateError
@@ -147,13 +147,130 @@ def _topology(model):
     return dict(sign=sign, magnitude=s, gate=g, KA=KA, KR=KR)
 
 
+def _clip_grad_norm_per_member(params, max_norm, B):
+    """Clip each BATCH MEMBER's gradient norm independently, in place. Returns the (B,)
+    pre-clip norms.
+
+    THIS IS NOT COSMETIC. torch.nn.utils.clip_grad_norm_ on stacked (B, ...) parameters
+    clips the JOINT norm over all B members, so one member with a large gradient would shrink
+    every other member's step — the batched members would stop being independent and a
+    batched result would not be comparable to a serial one. This reproduces torch's own rule
+    (coef = max_norm / (norm + 1e-6), clamped to <= 1) per member, which makes one Adam step
+    over the stack exactly B independent Adam steps.
+    """
+    sq = None
+    for p in params:
+        if p.grad is None:
+            continue
+        g = p.grad.reshape(B, -1)
+        s = (g * g).sum(dim=-1)
+        sq = s if sq is None else sq + s
+    if sq is None:
+        return None
+    nrm = torch.sqrt(sq)
+    coef = torch.clamp(max_norm / (nrm + 1e-6), max=1.0)
+    for p in params:
+        if p.grad is None:
+            continue
+        p.grad.mul_(coef.reshape(B, *([1] * (p.grad.dim() - 1))))
+    return nrm
+
+
+def _batched_restarts(N, form, model_seed, init, dispersion_backend, n_restarts,
+                      frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
+                      adam_steps, adam_lr, grad_clip, tau, jac_floor, dev, verbose,
+                      term_kw):
+    """Run all `n_restarts` restarts SIMULTANEOUSLY as one batched optimisation (unit b2).
+
+    Returns (best, restart_log) in exactly the shape recover()'s serial loop produces, so the
+    tail of recover() (unit conversion, RecoveryResult assembly) is shared and cannot drift.
+    `best` is (loss, serial RNGRN of the winning member, member parts dict, x* array, None).
+
+    EQUIVALENCE, and where it stops. The loss is a sum over members of per-member terms, so
+    each member's gradient is exactly its own; Adam is elementwise; clipping is per member.
+    One batched step is therefore B independent serial steps up to floating-point
+    associativity. It is NOT bit-identical over a long run: a ~1e-16 difference in a step is
+    amplified by the optimiser, so a 1500-step batched restart lands near, not on, its serial
+    twin. tests/test_batched.py measures both the single-step agreement and the multi-step
+    drift; treat batched and serial as the SAME METHOD but not the same random draw.
+
+    DEAD MEMBERS. A member whose steady state stops converging is killed for good (the serial
+    path abandons that restart on the first SteadyStateError) and excluded from the summed
+    loss from then on, so it contributes no gradient. It keeps occupying its lane in the batch
+    -- reindexing the batch mid-run would change nothing about the answer and would make the
+    seed-to-lane mapping unauditable -- so a run where most members die costs the same as one
+    where none do.
+    """
+    B = int(n_restarts)
+    bmodel = BatchedRNGRN.from_seeds(N=N, B=B, form=form, seed0=model_seed,
+                                    dispersion_backend=dispersion_backend, init=init).to(dev)
+    params = list(bmodel.parameters())
+    opt = torch.optim.Adam(params, lr=adam_lr)
+    alive = torch.ones(B, dtype=torch.bool, device=dev)
+    died_at = [None] * B
+    loss_kw = dict(tau=tau, jac_floor=jac_floor, **term_kw)
+
+    for step in range(adam_steps):
+        opt.zero_grad()
+        loss_vec, parts, conv = LT.total_loss_batched(
+            bmodel, frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
+            step=step, **loss_kw)
+        newly_dead = alive & ~conv
+        if bool(newly_dead.any()):
+            for b in newly_dead.nonzero().flatten().tolist():
+                died_at[b] = step
+                if verbose:
+                    print(f"  member {b} step {step}: steady state diverged; member abandoned")
+            alive = alive & conv
+        if not bool(alive.any()):
+            break
+        total = torch.where(alive, loss_vec, torch.zeros_like(loss_vec)).sum()
+        total.backward()
+        _clip_grad_norm_per_member(params, grad_clip, B)
+        opt.step()
+        if verbose and step % 300 == 0:
+            print(f"  batched step {step}: alive={int(alive.sum())}/{B} "
+                  f"mean_total={float(loss_vec[alive].mean()):.3f}")
+
+    with torch.no_grad():
+        loss_vec, parts, conv = LT.total_loss_batched(
+            bmodel, frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
+            step=adam_steps, **loss_kw)
+    final_alive = alive & conv
+
+    best, restart_log = None, []
+    for b in range(B):
+        if not bool(final_alive[b]):
+            entry = dict(restart=b, total=float("inf"), steady_state_failed=True)
+            if bool(alive[b]):
+                entry["failed_at"] = "final_eval"
+            restart_log.append(entry)
+            continue
+        pm = LT.parts_member(parts, b)
+        lb = float(loss_vec[b])
+        restart_log.append(dict(restart=b, total=lb, sig_max=pm.get("sig_max"),
+                                sig_max_pos=pm.get("sig_max_pos"),
+                                kstar_model=pm.get("kstar_model"),
+                                rel_err=pm.get("rel_err")))
+        if best is None or lb < best[0]:
+            member = bmodel.member(b)
+            from .losses.terms import steady_state
+            xs, _ = steady_state(member)     # SERIAL reference x* for the reported winner
+            best = (lb, member, pm, xs.detach().cpu().numpy(), None)
+    return best, restart_log
+
+
 def recover(recovery_input, form="competitive", strategy=None, weights=None,
             tau=0.12, jac_floor=1.0, n_restarts=4, adam_steps=1500, adam_lr=0.05,
             lbfgs_steps=50, grad_clip=10.0, seed=0, verbose=False, device=None,
             split_hinges=True, hinge_k_min_frac=0.1, staging_keys=("turing",),
             staging_off_frac=0.25, staging_ramp_frac=0.25, detach_xstar=False,
             nondim=False, model_seed=None, dispersion_backend="eig", init="default",
+<<<<<<< HEAD
             d_init_from_kstar=False):
+=======
+            batched=False):   # unit b2
+>>>>>>> feature/rngrn-gpubatch
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
@@ -182,10 +299,21 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     init: 'default' | 'low_basal' -- model raw-parameter init strategy (see model.py).
         Defaults to 'default' (OFF); callers opt in explicitly.
 
+<<<<<<< HEAD
     d_init_from_kstar: unit B4 (defect 2), OFF by default. When True and init='default',
         theta_D is shifted so D starts at median 1/k*_obs**2 (in the objective's own units)
         instead of median 1.0, on BOTH paths -- see the module docstring. Changes recorded
         D / D-ratio numbers for any run that opts in; leaves everything else bit-identical.
+=======
+    batched: False (DEFAULT, unchanged serial behaviour) runs the restarts one at a time.
+        True optimises ALL `n_restarts` restarts simultaneously as one batched computation
+        (unit b2, model.BatchedRNGRN), which is what makes a high step budget on GPU
+        affordable -- a serial step is B tiny kernel launches, a batched step is one B-wide
+        launch. SAME OBJECTIVE, SAME METHOD, NOT THE SAME ARITHMETIC ORDER: agreement with
+        the serial path is ~1e-12 for one step, not bit-exact over a whole run (see
+        _batched_restarts). Requires lbfgs_steps=0, m==N, and a static weighting strategy
+        with resid weight 0; each of those raises rather than quietly degrading.
+>>>>>>> feature/rngrn-gpubatch
     """
     ri = recovery_input
     model_seed = seed if model_seed is None else model_seed
@@ -237,9 +365,46 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     kgrid = _kgrid_for(kstar_obs, device=dev)
 
     best = None; restart_log = []
+<<<<<<< HEAD
     for r in range(n_restarts):
 <<<<<<< HEAD
         model = RNGRN(N=N, form=form, seed=_restart_seed(model_seed, r), init=init,
+=======
+    if batched:
+        # unit b2. Every restriction below is refused loudly because each one would otherwise
+        # make a batched number quietly non-comparable to a serial one:
+        #   * LBFGS keeps ONE history and ONE line search, so over stacked parameters it is a
+        #     single joint quasi-Newton solve, NOT B independent polishes. There is no way to
+        #     batch it that preserves the serial meaning.
+        #   * the stationarity residual has no batched form (per-pixel states; see
+        #     losses/total.compute_terms_batched), which also rules out m<N -- the latent
+        #     fields enter the objective through the residual and nothing else.
+        #   * value-reading strategies (RatioWeighting) reduce a term to a float and cannot
+        #     see B of them.
+        if lbfgs_steps:
+            raise ValueError(
+                f"batched=True requires lbfgs_steps=0 (got {lbfgs_steps}). LBFGS over the "
+                "stacked parameters is one joint solve sharing a line search and a curvature "
+                "history across members, not B independent polishes, so its result would not "
+                "be comparable to a serial restart's. Run Adam batched and polish serially.")
+        if compute_resid:
+            raise ValueError(
+                "batched=True requires the stationarity residual to be off (weights.resid=0 "
+                "with a static strategy). The batched reaction takes one state vector per "
+                "member, not per-pixel states, so there is no batched residual.")
+        if m < N:
+            raise ValueError(
+                f"batched=True does not support hidden channels (m={m} < N={N}): the latent "
+                "fields enter only the stationarity residual, which has no batched form.")
+        best, restart_log = _batched_restarts(
+            N, form, model_seed, init, dispersion_backend, n_restarts, frame, L_model,
+            observed_idx, kgrid, kstar_obs, strategy, adam_steps, adam_lr, grad_clip,
+            tau, jac_floor, dev, verbose, term_kw)
+    # the serial loop is skipped entirely when the batched path ran; it stays the REFERENCE
+    # implementation and the default, so no pre-existing number changes method.
+    for r in range(0 if batched else n_restarts):
+        model = RNGRN(N=N, form=form, seed=model_seed + r, init=init,
+>>>>>>> feature/rngrn-gpubatch
                       dispersion_backend=dispersion_backend).to(dev)
 =======
         model = RNGRN(N=N, form=form, seed=model_seed + r, init=init,
@@ -337,6 +502,14 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             f"all {n_restarts} restarts failed to converge to a valid steady state; "
             "no recovery produced. Widen model init scales or check the frame/observed_idx.")
     loss, model, parts, xstar, latent_np = best
+    # ---- back to the host ------------------------------------------------------------
+    # `device` is a knob for the OPTIMISATION only; RecoveryResult is a host-side object.
+    # Every consumer works in numpy on the CPU, and validate.score_recovery in particular
+    # probes the Jacobian with `torch.as_tensor(result.xstar)` -- a CPU tensor -- which
+    # raised "Expected all tensors to be on the same device" against a CUDA model. That was
+    # unreachable before unit b2 only because nothing ever passed recover(device=...). The
+    # copy is exact and a no-op on the default CPU path, so no recorded number changes.
+    model = model.to("cpu")
 
     # ---- back to physical units ------------------------------------------------------
     # Under x_hat = x/L the learned quantities are k_hat = k*L and D_hat = D/L**2, so the

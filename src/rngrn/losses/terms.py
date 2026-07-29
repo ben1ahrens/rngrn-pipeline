@@ -271,8 +271,17 @@ def frame_scale_anchor(xstar, obs_scale, floor=1e-6):
 # 5.1  k* soft-anchor (tolerance band)
 # --------------------------------------------------------------------------------------
 def _sigma_at(sig, kgrid, k):
-    """Differentiable linear interpolation of sigma(kgrid) at scalar k."""
-    idx = torch.searchsorted(kgrid, torch.as_tensor(float(k))).clamp(1, len(kgrid) - 1)
+    """Differentiable linear interpolation of sigma(kgrid) at scalar k.
+
+    `device=kgrid.device` is load-bearing, not defensive (unit b2): without it this line
+    built the search key on the CPU while `kgrid` was on the GPU, and torch.searchsorted
+    raised "Expected all tensors to be on the same device". That made the ENTIRE recovery
+    objective unrunnable on CUDA -- measured: recover(device='cuda') crashed here on the
+    first step, on the serial path, before unit b2 existed. Fixing it changes no CPU value
+    (the index and the interpolation are identical); it only removes a hard crash.
+    """
+    idx = torch.searchsorted(kgrid, torch.as_tensor(float(k), device=kgrid.device)
+                             ).clamp(1, len(kgrid) - 1)
     k0, k1 = kgrid[idx - 1], kgrid[idx]
     s0, s1 = sig[idx - 1], sig[idx]
     t = (k - k0) / (k1 - k0 + 1e-12)
@@ -456,6 +465,193 @@ def param_prior(model, dratio_centre=7.5, dratio_spread=1.0, box=None,
     loss = L_dratio + L_box
     parts["L_param_prior"] = float(loss.detach())
     return loss, parts
+
+
+# ======================================================================================
+# unit b2 — BATCHED term variants: B independent members, one set of tensor ops
+# ======================================================================================
+# Every function below is the SAME arithmetic as its serial namesake with a leading batch
+# dimension B, and returns a (B,) tensor instead of a 0-d one. Diagnostics come back as
+# (B,) numpy arrays under the SAME key names, so losses/total.parts_member(parts, b) can
+# reconstruct exactly the per-member dict the serial path logs.
+#
+# NOT batched, deliberately: `stationarity_residual` (needs per-pixel states, which would
+# require broadcasting the parameters to (B,1,N,N); its default weight is 0 and
+# total.compute_terms_batched raises rather than pretend), `morphology_consistency`
+# (non-differentiable numpy diagnostic) and `param_prior` (not in compute_terms at all).
+
+def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
+                         relax_steps=2000, relax_dt=1e-2):
+    """Batched damped Newton for f(x*)=0 on B independent members. Returns (x*, converged).
+
+    x*: (B, N) DETACHED. converged: (B,) bool.
+
+    A LINE-BY-LINE translation of the serial `steady_state`, not a re-derivation:
+
+      * convergence is tested at the TOP of each iteration, exactly as serially, and a
+        member that passes is FROZEN (masked out) rather than returned early. Its x* is the
+        x it held at that check -- the same tensor the serial call would have returned.
+      * the damped line search halves lambda per member and stops at the FIRST accepted
+        lambda; a member that never accepts in 30 halvings ends on lambda = 0.5**30, which
+        is what the serial loop does when its inner `for` runs to completion.
+      * a singular Jacobian is caught per member via torch.linalg.solve_ex's info code
+        (torch.linalg.solve would raise for the WHOLE batch because one member went bad),
+        mirroring the serial `except RuntimeError: break` -> relaxation fallback.
+      * FAIL-LOUD BECOMES PER MEMBER. The serial contract is that losses/total raises
+        SteadyStateError when x* does not converge. Here one diverged member must not abort
+        the other B-1, so non-convergence is returned as a per-member FLAG. It is still
+        never silently ignored: recover's batched loop kills that member for good and logs
+        it as steady_state_failed, exactly as a serial restart would have been abandoned.
+
+    TWO HONEST DIFFERENCES, both value-preserving:
+      * the whole solve runs under no_grad. Serially x* carries a graph that
+        `steady_state_diff` immediately throws away by detaching, so the graph is pure cost.
+      * the relaxation fallback runs on the FULL batch whenever ANY member needs it, and the
+        results are then selected by mask. 2000 relaxation steps for one straggler is the
+        price of not indexing a sub-batch; it only happens on inits Newton could not solve.
+    """
+    B, N = model.B, model.N
+    dev, dt_ = model.device, model.dtype
+    if x0 is None:
+        x0 = torch.ones(B, N, device=dev, dtype=dt_)
+    with torch.no_grad():
+        x = x0.clone()
+        active = torch.ones(B, dtype=torch.bool, device=dev)
+        broke = torch.zeros(B, dtype=torch.bool, device=dev)
+        for _ in range(max_iter):
+            fx = model.reaction(x)
+            nrm = torch.linalg.norm(fx, dim=-1)                  # (B,)
+            active = active & (nrm >= tol)
+            if not bool(active.any()):
+                break
+            J = model.jacobian(x, create_graph=False)
+            step, info = torch.linalg.solve_ex(J, fx.unsqueeze(-1))
+            step = step.squeeze(-1)
+            bad = (info != 0) & active
+            if bool(bad.any()):
+                broke = broke | bad
+                active = active & ~bad
+                step = torch.where(bad.unsqueeze(-1), torch.zeros_like(step), step)
+                if not bool(active.any()):
+                    break
+            lam = torch.ones(B, device=dev, dtype=dt_)
+            accept = torch.zeros(B, dtype=torch.bool, device=dev)
+            for _ in range(30):
+                xn = x - lam.unsqueeze(-1) * step
+                ok = (xn > 0).all(dim=-1) & (
+                    torch.linalg.norm(model.reaction(xn), dim=-1) < nrm)
+                accept = accept | ok
+                lam = torch.where(accept, lam, lam * 0.5)
+                if bool((accept | ~active).all()):
+                    break
+            x_new = torch.clamp(x - lam.unsqueeze(-1) * step, min=1e-9)
+            x = torch.where(active.unsqueeze(-1), x_new, x)
+
+        needs_relax = active | broke
+        converged = ~needs_relax
+        if bool(needs_relax.any()):
+            xr = torch.where((x0 > 0).all(dim=-1, keepdim=True), x0, torch.ones_like(x0))
+            for _ in range(relax_steps):
+                xr = torch.clamp(xr + relax_dt * model.reaction(xr), min=1e-9)
+            conv_r = torch.linalg.norm(model.reaction(xr), dim=-1) < 1e-4
+            x = torch.where(needs_relax.unsqueeze(-1), xr, x)
+            converged = torch.where(needs_relax, conv_r, converged)
+    return x, converged
+
+
+def steady_state_diff_batched(model, xstar_init):
+    """Batched one-step differentiable Newton polish. Returns (x* (B,N), ok (B,) bool).
+
+    Same arithmetic as the serial `steady_state_diff`, with one addition forced by batching:
+    the serial version calls torch.linalg.solve, which RAISES on a singular J. Batched, that
+    raise would take down every member because of one. `solve_ex` gives a per-member info
+    code instead; a member whose J is singular gets a ZERO polish step and ok=False, and the
+    caller must fold that into its non-convergence mask. It is not a silent fallback: a
+    member with no invertible Jacobian at its own root has no usable differentiable steady
+    state, which is precisely the condition the serial path raises on."""
+    x = xstar_init.detach()
+    fx = model.reaction(x)
+    J = model.jacobian(x, create_graph=True)
+    step, info = torch.linalg.solve_ex(J, fx.unsqueeze(-1))
+    ok = info == 0
+    step = torch.where(ok.reshape(-1, 1, 1), step, torch.zeros_like(step))
+    return x - step.squeeze(-1), ok
+
+
+def turing_hinges_batched(model, xstar, kgrid, margin=1e-3):
+    """Batched SUPERSEDED shared-support hinges (control arm). Returns ((B,), parts)."""
+    J = model.jacobian(xstar, create_graph=True)
+    sig = model.dispersion(xstar, kgrid, J=J)                # (B,K)
+    sig0 = sig[:, 0]
+    sig_max_pos = sig.max(dim=1).values
+    L = _softplus_hinge(sig0 + margin) + _softplus_hinge(-(sig_max_pos - margin))
+    return L, dict(sig0=_np(sig0), sig_max=_np(sig_max_pos))
+
+
+def turing_hinges_split_batched(model, xstar, kgrid, margin=1e-3, k_min_frac=0.1):
+    """Batched disjoint-support Turing hinges (the promoted default). Returns ((B,), parts).
+
+    Identical to `turing_hinges_split` term for term; `i_min` depends only on the k-grid,
+    which is shared across members, so it is one integer for the whole batch."""
+    K = len(kgrid)
+    i_min = max(1, int(k_min_frac * K))
+    if i_min >= K:
+        raise ValueError(
+            f"k_min_frac={k_min_frac} leaves no k>=k_min grid points (i_min={i_min}, K={K}); "
+            "the instability hinge would have empty support")
+    J = model.jacobian(xstar, create_graph=True)
+    sig = model.dispersion(xstar, kgrid, J=J)                # (B,K)
+    sig0 = sig[:, 0]
+    sig_pos = sig[:, i_min:].max(dim=1).values
+    L = _softplus_hinge(sig0 + margin) + _softplus_hinge(-(sig_pos - margin))
+    return L, dict(sig0=_np(sig0), sig_max=_np(sig.max(dim=1).values),
+                   sig_max_pos=_np(sig_pos), hinge_i_min=int(i_min))
+
+
+def frame_scale_anchor_batched(xstar, obs_scale, floor=1e-6):
+    """Batched log-scale anchor. xstar (B,N), obs_scale a SCALAR frame statistic shared by
+    every member (all members fit the same frame). Returns ((B,), parts)."""
+    s = float(obs_scale)
+    if not (s > 0.0) or not np.isfinite(s):
+        raise ValueError(f"frame_scale_anchor: obs_scale must be finite and > 0, got {obs_scale!r}")
+    d = np.log(s) - torch.log(xstar.clamp_min(floor))
+    L = (d ** 2).mean(dim=-1)
+    return L, dict(obs_scale=s, xstar_mean=_np(xstar.detach().mean(dim=-1)))
+
+
+def kstar_anchor_batched(model, xstar, kgrid, kstar_obs, tau=0.12, temp=60.0):
+    """Batched k* soft-anchor. Returns ((B,), parts).
+
+    `searchsorted` runs on the shared k-grid, so the interpolation index is one scalar for
+    the batch -- the same index the serial `_sigma_at` computes."""
+    sig = model.dispersion(xstar, kgrid, J=None)              # (B,K)
+    lse = torch.logsumexp(sig * temp, dim=1) / temp
+    idx = int(torch.searchsorted(kgrid, torch.as_tensor(float(kstar_obs), device=kgrid.device))
+              .clamp(1, len(kgrid) - 1))
+    k0, k1 = kgrid[idx - 1], kgrid[idx]
+    s0, s1 = sig[:, idx - 1], sig[:, idx]
+    t = (kstar_obs - k0) / (k1 - k0 + 1e-12)
+    sig_obs = s0 + t * (s1 - s0)
+    L = torch.clamp(lse - sig_obs, min=0.0)
+    kstar_model = kgrid[torch.argmax(sig, dim=1)].detach()
+    r = (kstar_model - float(kstar_obs)).abs() / (float(kstar_obs) + 1e-9)
+    return L, dict(kstar_model=_np(kstar_model), kstar_obs=float(kstar_obs), rel_err=_np(r))
+
+
+def anticollapse_batched(model, xstar, jac_floor=1.0):
+    """Batched anti-collapse Jacobian-norm floor. Returns ((B,), parts).
+
+    The optional `sim_field` amplitude floor of the serial term is NOT carried: no caller in
+    the library passes it (recover.py never does), so batching it would be dead code."""
+    J = model.jacobian(xstar, create_graph=True)
+    jn = torch.linalg.matrix_norm(J, ord="fro")               # (B,) — Frobenius, per member
+    L = _softplus_hinge(jac_floor - jn)
+    return L, dict(jac_norm=_np(jn))
+
+
+def _np(t):
+    """Detach a (B,) tensor to a numpy array for the per-member diagnostics dict."""
+    return t.detach().cpu().numpy()
 
 
 # --------------------------------------------------------------------------------------

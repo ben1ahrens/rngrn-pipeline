@@ -111,6 +111,16 @@ class TrainConfig:
     seed: int = 0
     deterministic: bool = True              # unit 10: torch deterministic-algorithms mode
 
+    # ---- unit b2: GPU-batched recovery -------------------------------------------------
+    # batched=False is the CURRENT serial behaviour and stays the default, so no recorded
+    # number changes method. True optimises all n_restarts restarts as one batched
+    # computation (recover._batched_restarts); it needs lbfgs_steps=0, m==N and resid
+    # weight 0, and it agrees with serial to ~1e-12 per step but is NOT bit-identical over a
+    # full run. device is the torch device recovery runs on; 'cuda' is only worth using
+    # batched, and (measured) only with model.dispersion_backend='cubic' at N=3.
+    batched: bool = False                   # unit b2
+    device: str = "cpu"                     # unit b2
+
 
 @dataclass
 class SolverConfig:

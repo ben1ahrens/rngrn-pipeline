@@ -95,3 +95,109 @@ def total_loss(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
     for k, v in term_vals.items():
         parts[f"L_{k}"] = float(v.detach())
     return loss, parts
+
+
+# ======================================================================================
+# unit b2 — BATCHED assembler: B independent members, one forward/backward
+# ======================================================================================
+def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
+                          tau=0.12, jac_floor=1.0, split_hinges=True,
+                          hinge_k_min_frac=0.1, detach_xstar=False,
+                          compute_resid=False) -> tuple:
+    """Batched twin of `compute_terms`. Returns (term_vals, parts, converged).
+
+    `model` is a model.BatchedRNGRN of B members; every term_vals entry is a (B,) tensor and
+    every per-member diagnostic in `parts` is a (B,) numpy array under the SAME key the
+    serial path uses (see `parts_member`).
+
+    THE FAIL-LOUD CONTRACT IS RELOCATED, NOT WEAKENED. The serial `compute_terms(strict=True)`
+    RAISES SteadyStateError when x* does not converge, because scoring physics terms against
+    a meaningless x* is the failure mode the contract exists to prevent. Here a raise would
+    destroy B-1 healthy members for one bad init, so non-convergence is returned as the third
+    element, a (B,) bool mask. The caller MUST act on it: recover's batched loop kills a
+    non-converged member permanently and logs it as steady_state_failed, which is exactly
+    what a serial restart's SteadyStateError does. A caller that ignores the mask has broken
+    the contract; nothing here can fix that for it, so there is no strict= flag pretending to.
+
+    Non-converged members' x* is REPLACED BY ONES before the terms are evaluated. This is not
+    a fallback value being scored: their loss is excluded from the optimised sum. It exists
+    so a diverged member cannot inject NaN/inf into the shared graph and poison the other
+    members' gradients. `parts['ss_converged']` records which members are real.
+
+    `compute_resid` must be False. The stationarity residual needs per-pixel states, which
+    the batched reaction does not broadcast to (model.BatchedRNGRN.reaction), so there is no
+    batched residual to compute. Its default weight is 0 (exp06, settled off), so this costs
+    the default path nothing -- but it is refused loudly rather than silently skipped.
+    """
+    if compute_resid:
+        raise ValueError(
+            "compute_terms_batched cannot compute the stationarity residual: the batched "
+            "reaction takes one state vector per member, not per-pixel states. Its default "
+            "weight is 0 (exp06 settled it off), so batched recovery is available only for "
+            "loss.weights.resid == 0. Use the serial path for residual runs.")
+    xstar, conv = T.steady_state_batched(model)
+    # ones for the failed members: a poison guard for the SHARED graph, not a scored value.
+    x_ok = torch.where(conv.unsqueeze(-1), xstar, torch.ones_like(xstar))
+    xstar, polish_ok = T.steady_state_diff_batched(model, x_ok)
+    # a singular J at the polish step is the same failure the serial path raises on
+    conv = conv & polish_ok
+    x_disp = xstar.detach() if detach_xstar else xstar
+    L_k, p_k = T.kstar_anchor_batched(model, x_disp, kgrid, kstar_obs, tau=tau)
+    if split_hinges:
+        L_t, p_t = T.turing_hinges_split_batched(model, x_disp, kgrid,
+                                                 k_min_frac=hinge_k_min_frac)
+    else:
+        L_t, p_t = T.turing_hinges_batched(model, x_disp, kgrid)
+    L_a, p_a = T.anticollapse_batched(model, x_disp, jac_floor=jac_floor)
+    # FIREWALL: frame.mean() is a statistic of the observed image, nothing else.
+    L_s, p_s = T.frame_scale_anchor_batched(xstar, float(frame.mean()))
+    term_vals = dict(kstar=L_k, turing=L_t, anticollapse=L_a, anchor=L_s)
+    parts = dict(ss_converged=conv.detach().cpu().numpy(), resid_skipped=True,
+                 **p_k, **p_t, **p_a, **p_s)
+    return term_vals, parts, conv
+
+
+def total_loss_batched(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
+                       step=0, tau=0.12, jac_floor=1.0, split_hinges=True,
+                       hinge_k_min_frac=0.1, detach_xstar=False,
+                       compute_resid=False) -> tuple:
+    """Batched twin of `total_loss`. Returns (loss_vec (B,), parts, converged (B,)).
+
+    The weighting strategy is applied UNCHANGED: `combine` only ever does
+    sum(weight * term), which is shape-agnostic, so a (B,) term vector yields a (B,) total
+    with exactly the weights the serial path would have used. Strategies that read a term's
+    VALUE (RatioWeighting calls float() on it) cannot work batched and will raise on the
+    vector -- recover's batched path rejects non-static strategies up front so the failure
+    is a clear message rather than a torch cast error.
+
+    The returned loss is a VECTOR, deliberately not pre-summed: only the caller knows which
+    members are still alive, and summing a dead member's loss in would give it gradient.
+    """
+    term_vals, parts, conv = compute_terms_batched(
+        model, frame, L, observed_idx, kgrid, kstar_obs, tau=tau, jac_floor=jac_floor,
+        split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
+        detach_xstar=detach_xstar, compute_resid=compute_resid)
+    loss, weights_used = strategy.combine(term_vals, step, model=model)
+    parts["total"] = loss.detach().cpu().numpy()
+    parts["weights_used"] = weights_used
+    for k, v in term_vals.items():
+        parts[f"L_{k}"] = v.detach().cpu().numpy()
+    return loss, parts, conv
+
+
+def parts_member(parts: dict, b: int) -> dict:
+    """One member's slice of a batched `parts` dict, in the SHAPE the serial path returns.
+
+    Per-member entries are (B,) arrays; shared entries (obs_scale, hinge_i_min, kstar_obs,
+    weights_used, resid_skipped) are scalars and pass through. This is what lets recover.py
+    hand a batched restart's diagnostics to the same consumers -- run-index rows are flat
+    scalars, so `bool`/`float`/`int` conversion happens here, once.
+    """
+    out = {}
+    for k, v in parts.items():
+        if hasattr(v, "shape") and getattr(v, "ndim", 0) == 1:
+            x = v[b]
+            out[k] = bool(x) if x.dtype == bool else float(x)
+        else:
+            out[k] = v
+    return out

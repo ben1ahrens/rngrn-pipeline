@@ -158,7 +158,9 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        detach_xstar=cfg.loss.detach_xstar,
                        nondim=cfg.model.nondim,   # unit 12: default False = unchanged path
                        model_seed=cfg.model.seed,                       # unit 10
-                       dispersion_backend=cfg.model.dispersion_backend)  # unit 10
+                       dispersion_backend=cfg.model.dispersion_backend,  # unit 10
+                       batched=cfg.train.batched,                        # unit b2
+                       device=cfg.train.device)                          # unit b2
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is

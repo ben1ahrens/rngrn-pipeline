@@ -45,10 +45,33 @@ median error** on all 127 samples — better than recovery. On `three_gene_qvar`
 predictor costs **45.5 %**, and an *oracle* best-fixed-p chosen after seeing the answers
 still costs **28.6 %**. k\* on legacy data measures the leak, not the model.
 
-**Held-out discipline.** Targets are drawn from the val/test portions. Any sample used
-while tuning is burned and is reported as such; final numbers come from samples untouched
-during tuning. `three_gene_multiL` is grouped by `system_id`, and a system never straddles
-a split.
+**Held-out discipline.** Any sample used while tuning is burned; final numbers come from
+samples untouched during tuning. `three_gene_multiL` is grouped by `system_id`, and a
+system never straddles a split.
+
+### 1a. The `three_gene_qvar` split — declared 2026-07-29, before any convergence run
+
+`three_gene_qvar` was registered with `splits: {}` (unit 11 deliberately left splitting
+open). It therefore has no train/val/test structure, and choosing which samples are
+"held out" *after* seeing results would destroy the meaning of the word. The split is
+fixed here instead, by position, before the first run:
+
+| role | samples | n |
+|---|---|---|
+| **TUNING (burned)** | `sample_0000` … `sample_0007` | 8 |
+| **HELD OUT** | `sample_0008` … `sample_0033` | 26 |
+
+The six held-out targets carrying the §3 claim are pre-named so they cannot be selected
+after the fact: **`sample_0008`, `sample_0012`, `sample_0016`, `sample_0020`,
+`sample_0024`, `sample_0028`** — every fourth sample from the start of the held-out range.
+No other rule was tried; this one was chosen for being mechanical rather than favourable.
+
+`sample_0000`–`0007` may be used freely for tuning, and any number from them is reported
+as a tuning number, never as evidence for §3.
+
+*Decided by me under the delegated authority recorded in §0, and logged in
+`docs/DECISIONS.md`. This is a split definition, not a weakening of any pass condition —
+the §3 thresholds are untouched.*
 
 ---
 

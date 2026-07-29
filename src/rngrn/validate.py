@@ -31,7 +31,7 @@ value agreement is deliberately NOT scored.
 from __future__ import annotations
 import numpy as np
 
-from .eval.analysis import turing_ok
+from .eval.analysis import turing_ok, robustness_volumes
 from .scoring import morphology as MORPH
 from .scoring import permutation as PERM
 from .scoring import overparam as OVER
@@ -217,6 +217,12 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
     out["recovered_turing"] = bool(ok)
     out["recovered_sig_max"] = float(info["sig_max"])
     out["recovered_tr0"] = float(info["tr0"])
+
+    # 4. robustness — local Turing-volume fraction of the RECOVERED (J, D) under a
+    #    log-normal parameter cloud, at Tica's four noise levels. See
+    #    eval.analysis.robustness_volumes and docs/ROBUSTNESS_MEASUREMENT.md section 4
+    #    for the perturbation model and the baseline to read this against.
+    out.update(robustness_volumes(result.model, xstar=result.xstar))
 
     # 3. sign structure vs answer key — routed by ARM, never a silent NaN.
     #

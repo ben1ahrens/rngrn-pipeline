@@ -61,6 +61,8 @@ class ModelConfig:
     observed_idx: Optional[list] = None     # which model indices the m rows map to
     nondim: bool = False                    # recover on the unit box x/L; see recover.py  # unit 12
 
+    dispersion_backend: str = "eig"         # 'eig'|'cubic' ('cubic' exact for N==3 only) # unit 10
+
 
 @dataclass
 class LossConfig:
@@ -98,6 +100,12 @@ class LossConfig:
                                              # [TUNE], see configs/bio_box.yaml # unit 5
     bio_box_path: str = "configs/bio_box.yaml"  # source of every plausibility number # unit 5
 
+        kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.1))
+    strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'ratio' | 'gradnorm' | 'ntk'
+    tau: float = 0.12                        # k* tolerance band
+    jac_floor: float = 1.0                   # anti-collapse ||J|| floor
+    ratio_update_every: int = 50            # 'ratio' strategy: recompute cadence, in steps  # unit 13
+
 
 @dataclass
 class TrainConfig:
@@ -107,6 +115,7 @@ class TrainConfig:
     lbfgs_steps: int = 50
     grad_clip: float = 10.0
     seed: int = 0
+    deterministic: bool = True              # unit 10: torch deterministic-algorithms mode
 
 
 @dataclass

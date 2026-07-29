@@ -22,7 +22,7 @@ from .eval.rollout import simulate
 from . import recover as R
 from .losses.weighting import build_strategy
 from . import io as IO
-from .utils import seed_everything, provenance
+from .utils import seed_everything, provenance, set_deterministic
 from .validate import score_recovery
 
 
@@ -135,6 +135,7 @@ def _morphology_rollout(cfg: Config, result, ri):
 def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
         verbose: bool = False) -> dict:
     """Run one recovery + scoring. Returns the metric dict (and writes a run row)."""
+    set_deterministic(cfg.train.deterministic)
     seed_everything(cfg.train.seed)
     run_id = run_id or IO.new_run_id(cfg.tracking.run_name)
     rdir = IO.run_dir(runs_root, run_id)
@@ -157,6 +158,9 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        detach_xstar=cfg.loss.detach_xstar)
 
                        nondim=cfg.model.nondim)   # unit 12: default False = unchanged path
+
+                       seed=cfg.train.seed, model_seed=cfg.model.seed,
+                       dispersion_backend=cfg.model.dispersion_backend, verbose=verbose)
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is

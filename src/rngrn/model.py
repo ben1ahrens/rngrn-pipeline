@@ -227,4 +227,5 @@ def _sigma_max_cubic(M: torch.Tensor, eps: float = 1e-14) -> torch.Tensor:
 def build_model(cfg) -> RNGRN:
     """Construct a model from a ModelConfig (registry-dispatched by architecture)."""
     cls = MODELS.get(cfg.architecture)
-    return cls(N=cfg.N, form=cfg.form, n_hill=cfg.n_hill, seed=cfg.seed)
+    return cls(N=cfg.N, form=cfg.form, n_hill=cfg.n_hill, seed=cfg.seed,
+               dispersion_backend=cfg.dispersion_backend)

@@ -21,6 +21,26 @@ def seed_everything(seed: int):
         pass
 
 
+def set_deterministic(enabled: bool):
+    """Turn on (or off) torch's strict determinism controls.
+
+    CUBLAS_WORKSPACE_CONFIG must be set before CUDA is initialised to take effect; setting
+    it here is a best-effort no-op once a CUDA context already exists, which is fine since
+    this project defaults to CPU (see worker brief: CUDA is 3x slower per training step).
+    PYTHONHASHSEED cannot be applied retroactively to an already-running interpreter; it is
+    set here only so subprocesses inherit it.
+    """
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    os.environ["PYTHONHASHSEED"] = "0"
+    try:
+        import torch
+        torch.use_deterministic_algorithms(enabled)
+        torch.backends.cudnn.deterministic = enabled
+        torch.backends.cudnn.benchmark = not enabled
+    except ImportError:
+        pass
+
+
 def git_revision() -> str:
     try:
         return subprocess.check_output(

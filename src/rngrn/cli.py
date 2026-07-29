@@ -3,7 +3,8 @@
 Subcommands:
   generate-data  resolve a config's dataset spec -> content-addressed cache (idempotent)
   train          run fit() for one config
-  evaluate       lift-and-simulate a saved run's model, report patterning + k*
+  evaluate       lift-and-simulate a saved run's model at the CHECKPOINT's own L, report
+                 patterning + k*; with --eval-L/--l-factors, evaluate across domain sizes
   analyze        linear stability + topology + robustness cloud for a saved run
   sweep          run a sweep from a sweep YAML (base config + axes + seeds)
   benchmark      aggregate the run index into a comparison table (markdown/CSV)
@@ -16,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import warnings
 
 from .config import load_config, apply_overrides
 from . import io as IO
@@ -47,14 +49,55 @@ def cmd_train(args):
 
 
 def cmd_evaluate(args):
+    """Re-simulate a saved run's model, at its OWN domain size by default.
+
+    THE DEFECT THIS FIXES. This used to call `simulate(model, L=cfg.data.L, ...)`, and
+    `cfg.data.L` is a GENERATOR parameter that file-backed configs deliberately do not set
+    (config.DataConfig.L: "Do not add `L:` to a file-backed config expecting it to apply") —
+    so for every registry config it was the base.yaml default 100.0 while the sample's real
+    L, recorded in the checkpoint, was something else entirely (78.014 for one measured
+    m3_registry run: a 28% error in the length scale). Re-running an archived model therefore
+    reproduced nothing. The checkpoint's stored L is now the default and `cfg.data.L` is
+    only a cross-check that warns.
+
+    --eval-L / --l-factors evaluate the SAME model on DIFFERENT domain sizes via
+    eval.lgen_eval.evaluate_across_L, which is the cross-domain-size generalisation test.
+    Both forms are mutually exclusive; --l-factors are multiples of the checkpoint's L.
+    """
     from .eval import simulate
+    from .eval.lgen_eval import evaluate_across_L, physical_model_from_checkpoint
     model, payload = IO.load_checkpoint(os.path.join(args.runs_root, "runs", args.run_id))
     cfg = _load(args)
-    res = simulate(model, L=cfg.data.L, n=cfg.solver.n_grid,
+    # The checkpointed theta_D is in the units recovery ran in; on the non-dimensional path
+    # that is D/L**2. Converting here is not optional — simulating the raw reloaded model
+    # would integrate the wrong diffusivity silently.
+    model, L_train = physical_model_from_checkpoint(model, payload)
+    if abs(float(cfg.data.L) - L_train) > 1e-6 * max(abs(L_train), 1.0):
+        warnings.warn(
+            f"config data.L={cfg.data.L!r} disagrees with the checkpoint's stored "
+            f"L={L_train!r}; USING THE CHECKPOINT'S. data.L is a generator parameter and is "
+            f"the base.yaml default for file-backed configs, so it is not the domain size "
+            f"this run was recovered on.", RuntimeWarning, stacklevel=2)
+
+    if args.eval_L and args.l_factors:
+        raise ValueError("pass either --eval-L (absolute domain sizes) or --l-factors "
+                         "(multiples of the checkpoint's L), not both")
+    L_values = args.eval_L or ([f * L_train for f in args.l_factors]
+                               if args.l_factors else None)
+    if L_values is not None:
+        out = evaluate_across_L(model, L_train, L_values, n_grid=cfg.solver.n_grid,
+                                seed=cfg.train.seed, integrator=cfg.solver.integrator,
+                                horizon_growth_times=cfg.solver.horizon_growth_times,
+                                noise=cfg.solver.noise)
+        print(json.dumps(out, indent=2, default=str))
+        return
+
+    res = simulate(model, L=L_train, n=cfg.solver.n_grid,
                    integrator=cfg.solver.integrator,
                    horizon_growth_times=cfg.solver.horizon_growth_times,
                    noise=cfg.solver.noise)
     res.pop("fields", None)
+    res["L"] = L_train
     print(json.dumps(res, indent=2, default=str))
 
 
@@ -161,7 +204,13 @@ def build_parser():
 
     sp = sub.add_parser("generate-data"); add_cfg(sp); sp.add_argument("--overwrite", action="store_true"); sp.set_defaults(func=cmd_generate_data)
     sp = sub.add_parser("train"); add_cfg(sp); sp.set_defaults(func=cmd_train)
-    sp = sub.add_parser("evaluate"); add_cfg(sp); sp.add_argument("--run-id", required=True); sp.set_defaults(func=cmd_evaluate)
+    sp = sub.add_parser("evaluate"); add_cfg(sp); sp.add_argument("--run-id", required=True)
+    sp.add_argument("--eval-L", type=float, nargs="+", default=None,
+                    help="absolute domain sizes to evaluate the recovered model at "
+                         "(cross-L generalisation; the checkpoint's own L is always added)")
+    sp.add_argument("--l-factors", type=float, nargs="+", default=None,
+                    help="the same, as MULTIPLES of the checkpoint's L, e.g. 0.5 1 2 4")
+    sp.set_defaults(func=cmd_evaluate)
     sp = sub.add_parser("analyze"); add_cfg(sp); sp.add_argument("--run-id", required=True); sp.set_defaults(func=cmd_analyze)
     sp = sub.add_parser("sweep"); sp.add_argument("--sweep", required=True); sp.set_defaults(func=cmd_sweep)
     sp = sub.add_parser("benchmark"); sp.add_argument("--format", choices=["markdown", "csv"], default="markdown"); sp.add_argument("--index-backend", choices=["jsonl", "sqlite"], default="jsonl"); sp.add_argument("--degradation", action="store_true", help="identifiability degradation table (experiment arms)"); sp.set_defaults(func=cmd_benchmark)

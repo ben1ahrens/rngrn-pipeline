@@ -80,6 +80,39 @@ gate; anything before it relied entirely on the acting agent's self-report.
 **Where it lives:** `.githooks/pre-push`, `docs/CODE_REALITY.md` §8 ("The
 authoritative test run is local").
 
+### D-EVID-3 — `rngrn evaluate` re-ran every archived model at the WRONG domain size
+
+**Date found / fixed:** 2026-07-30 (cross-domain-size evaluation unit). **Status:**
+SUPERSEDED (defect; now fixed).
+
+`cli.py::cmd_evaluate` called `simulate(model, L=cfg.data.L, ...)`. `cfg.data.L` is a
+**generator** parameter that file-backed configs deliberately do not set — `config.py`
+`DataConfig.L` says so in its own comment ("Do not add `L:` to a file-backed config
+expecting it to apply"), because each registry sample carries its own `L`. So for every
+registry config `cmd_evaluate` used the `base.yaml` default **100.0** while the model had
+been recovered on the sample's real domain size. Re-running an archived model therefore
+reproduced nothing: k\*, the pattern and the morphology were all computed on a box of the
+wrong size.
+
+**Measured, on the one archived run in this worktree carrying both files**
+(`m3_registry_20260729_221743`, `three_gene_qvar/sample_0000`):
+`config/frozen_config.yaml` → `data.L = 100.0`; `checkpoints/model.pt` → `L =
+78.01357861389891`. A **28.2 % error in the length scale**, silent.
+
+**Fix:** `cmd_evaluate` now defaults `L` to the **checkpoint's stored `L`**
+(`io.save_checkpoint` has recorded it since unit 12) and warns at `RuntimeWarning` when
+`cfg.data.L` disagrees. It also routes the model through
+`eval.lgen_eval.physical_model_from_checkpoint` first, so a non-dimensional checkpoint's
+`theta_D` is converted before anything is integrated (D16).
+
+**Consequence for earlier results:** no number in the run index came from `cmd_evaluate` —
+the `rollout_*` columns in `runs.jsonl` are written by `train._morphology_rollout`, which
+has always used the target sample's own `ri.L` and is unaffected. The damage is limited to
+any `rngrn evaluate` output quoted by hand from a terminal; such a figure is not
+reproducible and must be re-measured.
+
+**Where it lives:** `src/rngrn/cli.py` (`cmd_evaluate`).
+
 ---
 
 ## Part 2 — Decisions
@@ -550,6 +583,119 @@ a future reader does not attempt to re-derive those 127 samples byte-for-byte fr
 their nominal seed and conclude the pipeline is non-deterministic in general; the
 non-determinism was specific to `abs(hash(str))` and is fixed in
 `scripts/gen_tg3.py` (SHA-256-derived seeding) for every dataset generated after it.
+
+### D15 — cross-L rollouts hold **dx** fixed (n scales with L), with a MEASURED floor of 6 pixels per wavelength
+
+**Date:** 2026-07-30. **Status:** DECIDED. **Decided by:** the implementing agent, as an
+explicitly delegated technical choice.
+
+**The decision:** `eval/lgen_eval.evaluate_across_L` simulates the recovered model at each
+domain size on a grid `n(L) = nearest even int to n_grid * L / L_train`, i.e. it holds the
+grid spacing `dx = L/n` fixed rather than the grid size. Every row additionally records
+`pixels_per_wavelength`, and a row that produces a pattern below **6.0** px/wavelength
+**raises** instead of reporting the number.
+
+**Why this way round:** at fixed `n`, a 4× box has a quarter of the pixels per wavelength,
+so the k\* estimate degrades with L — and the degradation would land in `kstar_phys_cv`,
+the headline invariance statistic, looking exactly like physics. Holding `dx` fixed makes
+`pixels_per_wavelength` constant across L to within the even-rounding, so the comparison
+across L is a comparison of the *pattern* and not of the discretisation.
+
+**The floor is measured, not asserted.** Scanning `n` at fixed L on the Turing fixture of
+`tests/test_rollout.py` (L = 60, q ≈ 6.2, `etdrk4_rfft`, seed 0), k\* referenced to the
+n = 192 run:
+
+| n | 16 | 24 | 32 | 48 | 64 | 96 | 128 | 192 |
+|---|---|---|---|---|---|---|---|---|
+| px/wavelength | 2.76 | 3.94 | 5.12 | 7.64 | 10.10 | 14.98 | 20.32 | 30.79 |
+| \|Δk\*\|/k\* | 6.9 % | 2.4 % | 0.3 % | 0.8 % | 1.6 % | 2.8 % | 1.0 % | — |
+| morphology class | spots | laby | laby | laby | laby | laby | laby | laby |
+
+k\* survives to 3.94 px/wavelength within ~3 %; at 2.76 it moves 6.9 % **and** the class
+call flips. 6.0 sits above that breakdown with margin and coincides with the coarsest
+resolution the generators ever produced (`three_gene_qvar`/`multiL` draw up to p = 14
+periods on a 96 grid → 96/14 = 6.86 px/wavelength), so the floor refuses exactly the
+resolutions the data never contained. The ±3 % grid-to-grid spread in that table is also
+the **noise floor of `kstar_phys_cv`**: no CV below it is meaningful.
+
+**What was rejected and why:** (a) holding `n` fixed and merely reporting
+`pixels_per_wavelength` — allowed by the brief, rejected because it puts a resolution
+artefact into the headline statistic and relies on the reader to subtract it; (b) *clamping*
+`n` at an `n_max` — rejected as a silent change to the one quantity the rule exists to hold
+fixed, so `grid_for_L` raises at both ends instead; (c) tuning the floor down to the
+measured 4 px/wavelength — rejected as over-fitting one fixture.
+
+**A second resolution limit that this rule does NOT fix, recorded so it is not mistaken for
+one:** `observables.raps` bins on the fundamental `dk = 2π/L`, so k\* is quantised at a
+*relative* width of `1/q`. A small box holds few periods and its k\* is coarsely measured
+however fine the grid (at q = 3, the bin is 31 % wide). Every row therefore records
+`kstar_bin_width` and `kstar_bin_width_rel`, and `kstar_phys_cv` must be read next to the
+largest of them. No q threshold was invented on top of the px/wavelength floor.
+
+**Where it lives:** `src/rngrn/eval/lgen_eval.py` (`grid_for_L`, `PPW_FLOOR`,
+`PPW_FLOOR_PROVENANCE`); `tests/test_lgen_eval.py`.
+
+### D16 — the cross-L statistics: population CV of k\*, an origin-fixed q-vs-L slope, and NO pass threshold
+
+**Date:** 2026-07-30. **Status:** DECIDED (the statistics); the **thresholds remain OPEN by
+design**. **Decided by:** the implementing agent for the definitions; the thresholds are
+deliberately left to `docs/PREREGISTRATION.md` and the caller.
+
+**The decision, and the theory it tests.** k\* is the argmax of `σ(k) = eig(J − k²D)`;
+neither J nor D contains the domain size, so for one recovered network simulated at several
+L, Turing theory predicts an invariant **physical** k\*, a periods-per-box count
+`q(L) = L·k*/2π` **linear in L**, and a preserved morphology class. The failure mode being
+excluded is the opposite: q pinned to the box while k\* moves as 1/L, which is a model that
+memorised a box. `summarise_across_L` reports:
+
+- **`kstar_phys_cv`** — *population* (ddof = 0) SD of `kstar_phys` over patterned rows,
+  divided by the mean. Population, not sample, SD so the number does not inflate at the 3–4
+  L values this is ever used over.
+- **`periods_slope_rel_err`** — q fitted against L **through the origin**
+  (`slope = Σ L·q / Σ L²`), compared to the theory slope `mean(k*)/2π`. Because
+  `q_i ≡ L_i k_i/2π` identically, the fit is the L²-weighted mean of `k_i/2π` and the
+  prediction is the unweighted one: they agree exactly under invariance and diverge when k\*
+  trends with L. It is therefore a differently-weighted **second view** of the same
+  invariance, not an independent measurement, and both slopes are reported so that is
+  visible.
+- **`morphology_class_preserved`** — fraction of patterned non-reference rows matching the
+  class at L_train, always alongside `n_class_compared` (rows that did not pattern have no
+  class and are excluded rather than scored as mismatches; excluding them flatters the
+  fraction).
+
+**Separation, measured — the metric can fail.** Positive control (the Turing fixture at
+L/L_train = 0.5, 1, 2, 4): `kstar_phys_cv` **0.021**, `periods_slope_rel_err` **0.017**.
+Negative control (a synthetic frame carrying a fixed 6.5 periods per box at every L, pushed
+through the same row and summary arithmetic): **0.715** and **0.624** — 33× and 37× larger.
+
+**Morphology is explicitly the weakest of the three.** On the positive control the two
+*intensity* features are invariant (skew 0.43–0.51, kurtosis −0.74 to −0.81 across an 8×
+span of L) while the two *angular* features drift monotonically with q (ang_conc
+0.190 → 0.074), because they are computed on a ring of radius q in pixel-frequency units —
+a property of the measurement, not of the pattern. The class consequently reads
+labyrinth → spots and `morphology_class_preserved` = 1/3, on borderline margins (0.17–0.62),
+against a centroid bank fitted at q ≈ 6. And it fails the other way too: the box-pinned
+negative control preserves its class **perfectly (1.0)** while k\* moves as 1/L. Class
+agreement alone is evidence of nothing; the raw `morph_vector` is recorded on every row so a
+reader can see which features moved.
+
+**NO PASS/FAIL LIVES IN THE MODULE.** `summarise_across_L` returns a `verdict_components`
+dict of raw quantities and no boolean — `tests/test_lgen_eval.py` asserts that, so a
+threshold cannot be smuggled in later without the test noticing. This follows
+`scoring/lgen.py`'s decision (3) ("NO PASS THRESHOLD is defined") rather than re-opening it.
+
+**The nondim trap, closed.** `recover()` reports `params["D"]` physically on both paths, but
+the **checkpoint** keeps `theta_D` in the units the objective ran in — `D/L_train²` when
+`nondim=True` (`recover.py` lines 518–528 convert the *reported* params only). Simulating a
+reloaded nondim checkpoint without converting integrates the wrong diffusivity and yields a
+k\* wrong by a factor of L_train, silently. `physical_model_from_checkpoint` rewrites
+`theta_D` on a deep copy, verifies `model.D` afterwards, and **raises** on a checkpoint
+lacking the `nondim`/`L` extras: the two paths are indistinguishable after the fact, so an
+older checkpoint is refused rather than assumed dimensional.
+
+**Where it lives:** `src/rngrn/eval/lgen_eval.py` (`evaluate_across_L`,
+`summarise_across_L`, `physical_model_from_checkpoint`); `src/rngrn/cli.py`
+(`--eval-L` / `--l-factors`); `tests/test_lgen_eval.py`.
 
 ---
 

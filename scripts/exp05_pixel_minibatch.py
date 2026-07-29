@@ -38,6 +38,7 @@ from rngrn.model import RNGRN
 from rngrn.losses import terms as T
 from rngrn.eval.analysis import turing_ok
 from rngrn import observables as obs
+import _runlog
 
 
 def split_hinges(model, xstar, kgrid, margin=1e-3, k_min_frac=0.1):
@@ -119,6 +120,7 @@ if __name__ == "__main__":
     ap.add_argument("--steps", type=int, default=400)
     ap.add_argument("--out", default="experiments/exp05_pixel_minibatch.json")
     a = ap.parse_args()
+    run = _runlog.start("exp05_pixel_minibatch", vars(a))
     with h5py.File(f"data/datasets/{a.dataset}/payload.h5") as f:
         g = f[a.sample]
         frame = g["final_frame"][:]
@@ -143,3 +145,6 @@ if __name__ == "__main__":
         print(f"{name:22s} conv {len(ok):2d}/{a.seeds}  TURING {len(tur):2d}  k*err {e}")
     out["_meta"]["wall_s"] = round(time.time() - t0, 1)
     json.dump(out, open(a.out, "w"), indent=1)
+    _runlog.write_meta(a.out, run)
+    _runlog.record("experiments", run, dict(dataset=a.dataset, sample=a.sample,
+                   seeds=a.seeds, steps=a.steps, wall_s=out["_meta"]["wall_s"]))

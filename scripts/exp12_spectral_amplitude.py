@@ -38,6 +38,7 @@ Output: experiments/exp12_spectral_amplitude.csv
 """
 import argparse, glob, os
 import h5py, numpy as np, pandas as pd
+import _runlog
 
 
 def parseval_channels(field):
@@ -56,6 +57,7 @@ def main():
     ap.add_argument("--channel", type=int, default=0)
     ap.add_argument("--out", default="experiments/exp12_spectral_amplitude.csv")
     args = ap.parse_args()
+    run = _runlog.start("exp12_spectral_amplitude", vars(args))
 
     rows = []
     for path in sorted(glob.glob(f"{args.datasets_root}/{args.family}_*/payload.h5")):
@@ -82,6 +84,9 @@ def main():
     df = pd.DataFrame(rows)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     df.to_csv(args.out, index=False)
+    _runlog.write_meta(args.out, run)
+    _runlog.record(os.path.dirname(args.out) or "experiments", run,
+                   dict(family=args.family, channel=args.channel, n_samples=len(df)))
 
     print(f"n = {len(df)} samples, channel {args.channel}")
     print("PART 1 -- Parseval identities (should be ~1e-7 or better):")

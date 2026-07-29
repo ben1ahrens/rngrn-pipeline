@@ -22,6 +22,7 @@ THE CONTROLS
 import argparse, json
 import numpy as np, torch, h5py
 from rngrn import observables as obs
+import _runlog
 import importlib.util, pathlib
 spec = importlib.util.spec_from_file_location(
     "exp05", pathlib.Path(__file__).parent / "exp05_pixel_minibatch.py")
@@ -40,6 +41,7 @@ if __name__ == "__main__":
     ap.add_argument("--steps", type=int, default=2000)
     ap.add_argument("--out", default="experiments/exp08_trivial_baseline.json")
     a = ap.parse_args()
+    run = _runlog.start("exp08_trivial_baseline", vars(a))
     path = f"data/datasets/{a.dataset}/payload.h5"
     with h5py.File(path) as f:
         keys = list(f.keys())[:a.samples]
@@ -81,3 +83,7 @@ if __name__ == "__main__":
     for kk, vv in summary.items():
         print(f"   {kk:26s} {vv:.2f}%" if vv is not None else f"   {kk:26s} n/a")
     json.dump(dict(rows=rows, summary=summary), open(a.out, "w"), indent=1)
+    _runlog.write_meta(a.out, run)
+    row = dict(summary); row.update(dataset=a.dataset, samples=a.samples,
+                                     seeds=a.seeds, steps=a.steps)
+    _runlog.record("experiments", run, row)

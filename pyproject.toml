@@ -15,6 +15,7 @@ dependencies = [
     "matplotlib",
     "pyyaml",
     "networkx",
+    "pandas",
 ]
 
 [project.optional-dependencies]

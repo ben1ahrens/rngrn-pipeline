@@ -21,6 +21,7 @@ FIREWALL: frame, L, observed_idx only.
 import argparse, json, os, time
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np, torch, h5py
+import _runlog
 
 torch.set_num_threads(1)   # one core per worker; parallelism is across seeds
 
@@ -53,6 +54,7 @@ if __name__ == "__main__":
     ap.add_argument("--budgets", type=int, nargs="+", default=[400, 2000, 8000])
     ap.add_argument("--out", default="experiments/exp07_long_training.json")
     a = ap.parse_args()
+    run = _runlog.start("exp07_long_training", vars(a))
     path = f"data/datasets/{a.dataset}/payload.h5"
     with h5py.File(path) as f:
         kstar_true = float(f[a.sample].attrs["k_star"])
@@ -75,3 +77,6 @@ if __name__ == "__main__":
                   + (f"{100*med:10.1f}%" if med is not None else "       n/a")
                   + f" {wall if wall else 0:9.1f}s")
             json.dump(dict(rows=rows, kstar_true=kstar_true), open(a.out, "w"), indent=1)
+    _runlog.write_meta(a.out, run)
+    _runlog.record("experiments", run, dict(dataset=a.dataset, sample=a.sample,
+                   seeds=a.seeds, n_rows=len(rows)))

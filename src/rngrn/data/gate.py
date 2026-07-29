@@ -44,11 +44,11 @@ class AnswerKey:
 
     Two distinct wavenumbers are carried, and they are NOT interchangeable:
 
-    * ``kstar``     — the LINEAR k*: argmax_k of sigma(k) from the generator's J and D.
-                      This is the headline scoring target (``kstar_rel_err``), because it
-                      is the like-for-like comparison against the recovered model's own
-                      dispersion-relation argmax.
-    * ``kstar_fft`` — the wavenumber MEASURED from the generated frame by FFT. A
+    * ``kstar_fft`` — the wavenumber MEASURED from the generated frame by FFT. This is the
+                      headline scoring target (``kstar_fft_rel_err``) as of the owner
+                      decision 2026-07-29 (docs/STATE_OF_THE_SCIENCE.md line 499, which
+                      reversed the 2026-07-26 decision) — it is the quantity an inverse
+                      problem given only the image can actually be graded against. A
                       finite-grid measurement of the realised pattern, so it disagrees with
                       ``kstar`` by a QUANTISATION offset of EITHER SIGN, not a systematic
                       bias: across the 287 registered samples ``k_star_fft * L / 2pi``
@@ -57,7 +57,16 @@ class AnswerKey:
                       0.417-1.583, median 1.083; 68% of samples above 1, but
                       ``three_gene_val`` has a median of 0.918, i.e. below). Per-sample
                       |ratio - 1| has median 0.084 and 90th percentile 0.250.
-                      SECONDARY diagnostic only (``kstar_fft_rel_err``).
+    * ``kstar``     — the LINEAR k*: argmax_k of sigma(k) from the generator's J and D. A
+                      property of the generating equations, not of the image — no
+                      experiment can observe it directly. SECONDARY diagnostic only
+                      (``kstar_rel_err``).
+
+    LEAK: every generator sets ``L = clip(6*2*pi/k*, 18, 220)``, so ``kstar`` is
+    identically ``6*2*pi/L`` to 1e-6 for 94.8% of all 287 registered samples. Neither
+    column above is interpretable without comparing it to ``validate.score_recovery``'s
+    ``trivial_kstar_err`` (an image-blind predictor using L alone) — see that module's
+    docstring.
 
     Both are read verbatim from the sample's stored attributes (``k_star`` /
     ``k_star_fft``); neither is recomputed here.
@@ -163,11 +172,12 @@ def from_registry(datasets_root, dataset_id, sample_key, N, observed_idx, L=None
                        call warns and prefers the file (see ``_resolve_L``). Every sample
                        in these datasets has its own domain size, so a single config value
                        cannot be right for more than one of them.
-    * ``k_star``     — the linear answer-key wavenumber -> ``AnswerKey.kstar``.
-    * ``k_star_fft`` — the FFT-measured wavenumber -> ``AnswerKey.kstar_fft`` (secondary).
+    * ``k_star_fft`` — the FFT-measured wavenumber -> ``AnswerKey.kstar_fft`` (headline).
+    * ``k_star``     — the linear answer-key wavenumber -> ``AnswerKey.kstar`` (secondary).
 
-    A sample missing ``L`` or ``k_star`` RAISES. ``k_star_fft`` is optional (it is a
-    diagnostic, not the headline) and is None when absent.
+    A sample missing ``L`` or ``k_star`` RAISES. ``k_star_fft`` is optional (it is the
+    headline scoring target when present, but its absence does not block scoring on the
+    secondary linear reference) and is None when absent.
     """
     from . import registry as reg
     man = reg.load_manifest(datasets_root, dataset_id)

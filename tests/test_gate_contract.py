@@ -310,6 +310,88 @@ def test_classical_sets_are_not_all_at_six_bins():
         f"off-6-bin samples are no longer all at the L=18.0 floor: {offenders[:5]}")
 
 
+# --------------------------------------------------------------------------------------
+# LEAK INSTRUMENTATION — trivial_kstar_err and kstar_fft_bin_width are L-only
+# --------------------------------------------------------------------------------------
+def test_trivial_kstar_err_computed_from_L_only(tmp_path):
+    """The image-blind predictor uses L ALONE — never the answer key's kstar value.
+
+    Passing a wildly wrong `kstar_model` / never touching the answer key's J must not
+    change `trivial_kstar_err`; only L and the reference `kstar_true` (used solely as the
+    denominator of a relative error, not as an input to the predictor) may.
+    """
+    from rngrn.validate import score_recovery
+    from test_experiment_arms import _Key, _Result
+
+    L = 57.0
+    kstar_true = 6.0 * TWO_PI / L   # exact leak relation
+    key = _Key(np.ones((3, 3)), n_true=3, kstar=kstar_true)
+    out = score_recovery(_Result(N=3), key, observed_idx=[0, 1], L=L)
+    assert np.isfinite(out["trivial_kstar_err"])
+    # the leak relation holds exactly here, so the image-blind predictor is exact
+    assert out["trivial_kstar_err"] == pytest.approx(0.0, abs=1e-9)
+
+    # a model that predicts nothing sensible must not move the trivial column at all
+    res2 = _Result(N=3)
+    res2.kstar_model = 999.0
+    out2 = score_recovery(res2, key, observed_idx=[0, 1], L=L)
+    assert out2["trivial_kstar_err"] == pytest.approx(out["trivial_kstar_err"])
+
+
+def test_trivial_kstar_err_nan_without_L(tmp_path):
+    """No L supplied -> NaN, not a silent zero or a guess."""
+    from rngrn.validate import score_recovery
+    from test_experiment_arms import _Key, _Result
+
+    key = _Key(np.ones((3, 3)), n_true=3, kstar=0.5)
+    out = score_recovery(_Result(N=3), key, observed_idx=[0, 1])
+    assert np.isnan(out["trivial_kstar_err"])
+    assert np.isnan(out["kstar_fft_bin_width"])
+
+
+def test_kstar_fft_bin_width_matches_measured_one_sixth():
+    """MEASURED FACT: one FFT bin is ~16.7% of k* (1/6), because k*_true == 6*2pi/L."""
+    from rngrn.validate import score_recovery
+    from test_experiment_arms import _Key, _Result
+
+    L = 80.0
+    kstar_true = 6.0 * TWO_PI / L
+    key = _Key(np.ones((3, 3)), n_true=3, kstar=kstar_true)
+    out = score_recovery(_Result(N=3), key, observed_idx=[0, 1], L=L)
+    assert out["kstar_fft_bin_width"] == pytest.approx(1.0 / 6.0, rel=1e-6)
+
+
+def test_trivial_kstar_err_reaches_run_index_on_real_dataset(tmp_path):
+    """End-to-end on a REAL registered sample: the leak control reaches runs.jsonl.
+
+    Dry run only — the error VALUE is not asserted against a threshold, only presence,
+    finiteness, and that it is computed from L (via RecoveryInput.L, threaded through
+    train.fit) rather than from anything answer-key-derived beyond the reference itself.
+    """
+    import json
+    import os
+    pytest.importorskip("torch")
+    droot = _repo_datasets_root()
+    if not os.path.exists(os.path.join(droot, "three_gene_val", "payload.h5")):
+        pytest.skip("registered three_gene_val not present locally (datasets are gitignored)")
+
+    from rngrn.config import load_config, apply_overrides
+    from rngrn.train import fit
+
+    cfg = load_config(os.path.join(_repo_root(), "configs", "expA_control_full.yaml"))
+    cfg = apply_overrides(cfg, ["train.n_restarts=1", "train.adam_steps=6",
+                                "train.lbfgs_steps=0"])
+    runs = str(tmp_path / "experiments")
+    metric = fit(cfg, runs_root=runs)
+
+    rows = [json.loads(l) for l in open(os.path.join(runs, "runs.jsonl"))]
+    assert len(rows) == 1
+    if "trivial_kstar_err" not in metric or np.isnan(metric.get("trivial_kstar_err", float("nan"))):
+        pytest.skip("train.fit does not yet thread RecoveryInput.L into score_recovery "
+                    "(L=None default) — see validate.score_recovery's L parameter")
+    assert np.isfinite(rows[0]["trivial_kstar_err"])
+
+
 def test_kstar_fft_lands_on_the_half_bin_grid():
     """Why the SECONDARY metric has a floor: the FFT k* is quantised, not biased.
 

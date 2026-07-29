@@ -36,7 +36,13 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
   axis. k* and turing lead; resid is normalised to O(1); anticollapse floors ‖J‖.
 - **[TUNE] k\* tolerance band `tau`** — `loss.tau` (0.12). Absorbs the measured +5%–+13%
   selected-vs-linear-wavelength bias. Widen if recovery is fighting the bias, tighten to
-  sharpen k* selectivity.
+  sharpen k* selectivity. **[VALIDATE] flagged 2026-07-29 (unit 8, kstar-honesty):** one
+  FFT bin is measured at 16.7% of k* (`validate.py::_leak_instrumentation`'s
+  `kstar_fft_bin_width`), so `tau=0.12` is only 0.72 of one bin — BELOW the FFT
+  estimator's own resolution. Since scoring now heads on `kstar_fft_rel_err` (the
+  2026-07-29 headline swap, `docs/STATE_OF_THE_SCIENCE.md` line 499), a tolerance tighter
+  than the measurement's own quantisation may be discriminating noise, not signal. Not
+  re-tuned here — flagged for whoever owns the loss-weighting sweep.
 - **[TUNE] anti-collapse floor `jac_floor`** — `loss.jac_floor` (1.0). Too low → the f≡0
   trivial minimum leaks back in; too high → distorts the recovered J magnitude.
 - **[IMPL] a differentiable morphology term** — `loss.weights.morphology` is currently INERT:

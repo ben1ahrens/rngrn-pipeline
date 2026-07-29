@@ -22,6 +22,22 @@ from .losses.total import SteadyStateError
 from .losses.weighting import build_strategy, FixedWeighting
 
 
+class FreeScaleLatent(torch.nn.Module):
+    """Free-scale latent parameterisation for m<N unobserved channels, adopted from
+    Matas-Gil & Endres (arXiv:2309.06339 / iScience 2024, CDIMA experimental case): each
+    unobserved channel is a TRAINABLE affine map of the observed frame renormalised to
+    [0,1], u_c = W*kappa_c + gamma_c, with kappa/gamma optimised jointly with the model.
+    W is derived from the OBSERVED frame only (firewall-legal)."""
+    def __init__(self, W, n_channels, dtype):
+        super().__init__()
+        self.register_buffer("W", W)
+        self.kappa = torch.nn.Parameter(torch.ones(n_channels, 1, 1, dtype=dtype))
+        self.gamma = torch.nn.Parameter(torch.zeros(n_channels, 1, 1, dtype=dtype))
+
+    def forward(self):
+        return self.W * self.kappa + self.gamma
+
+
 @dataclass
 class RecoveryResult:
     model: object
@@ -71,17 +87,19 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     best = None; restart_log = []
     for r in range(n_restarts):
         model = RNGRN(N=N, form=form, seed=seed + r).to(dev)
-        latent = None
+        latent_module = None
         if m < N:
-            base_field = frame.mean(0, keepdim=True)
-            lat0 = base_field.repeat(N - m, 1, 1) * (0.8 + 0.4 * torch.rand(N - m, 1, 1, device=dev, dtype=frame.dtype))
-            latent = torch.nn.Parameter(lat0.clone())
-        params = list(model.parameters()) + ([latent] if latent is not None else [])
+            obs_mean = frame.mean(0)                     # (H, W), observed frame only
+            lo, hi = obs_mean.min(), obs_mean.max()
+            W = (obs_mean - lo) / (hi - lo + 1e-12)       # renormalised to [0,1]
+            latent_module = FreeScaleLatent(W.unsqueeze(0), N - m, frame.dtype).to(dev)
+        params = list(model.parameters()) + (list(latent_module.parameters()) if latent_module is not None else [])
 
         opt = torch.optim.Adam(params, lr=adam_lr)
         failed = False
         for step in range(adam_steps):
             opt.zero_grad()
+            latent = latent_module() if latent_module is not None else None
             try:
                 loss, parts = LT.total_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
                                             strategy, step=step, latent_fields=latent,
@@ -108,6 +126,7 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             lopt = torch.optim.LBFGS(params, max_iter=lbfgs_steps, line_search_fn="strong_wolfe")
             def closure():
                 lopt.zero_grad()
+                latent = latent_module() if latent_module is not None else None
                 loss, _ = LT.total_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
                                         strategy, step=adam_steps, latent_fields=latent,
                                         tau=tau, jac_floor=jac_floor)
@@ -118,6 +137,7 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                 pass
 
         with torch.no_grad():
+            latent = latent_module() if latent_module is not None else None
             loss, parts = LT.total_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
                                         strategy, step=adam_steps, latent_fields=latent,
                                         tau=tau, jac_floor=jac_floor)

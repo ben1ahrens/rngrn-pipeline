@@ -182,36 +182,66 @@ comparisons are like-for-like. Pattern *type* and *wavelength* are set by the mo
 **Their training loop.** Batches of **128 elements**, **200,000 Adam iterations**, under
 an hour of compute. The first **10,000–20,000 iterations minimise ONLY the approximation
 (data) loss**; then both losses, with weights chosen so the approximation is not
-destroyed by the new term. Reported errors <10 % on inferred parameters.
+destroyed by the new term. Matas-Gil & Endres never quote a percentage parameter error
+for the PINN at all — their only quantitative anchor is comparative ("10–20x more noise
+than LS", up to 40x for Brusselator). **"Reported errors <10 % on inferred parameters"
+was a misattribution in an earlier version of this section** — that figure belongs to
+Kho et al. (NTU/A\*STAR, *Design of Turing Systems with Physics-Informed Neural
+Networks*, reference [32] in Endres), not to Endres/Matas-Gil. The local file that was
+misread is `papers/endres_pinn_turing_design.pdf`, which is itself mis-named — it is
+Kho et al., not Endres (see PR notes; renaming is local hygiene, not part of this diff
+since `papers/` is gitignored).
 
 **CRITICAL READING CORRECTION — what "batches of 128" means.** They are **128 spatial
 pixel locations drawn from the ONE image** — not 128 images and not 128 samples. From the
 source: *"When training the approximation, we use information on the whole pattern, but
 when we switch to the LPDE, we only use interior points"*; their Fig. 3 shows N randomly
-selected points on a single Turing pattern, and a **3×3 pixel region is sufficient** to
-recover parameters, with relative error falling as a power law of exponent ≈ −1/2. An
-earlier reading in this project concluded no minibatch dimension existed; that was wrong.
-This is what `scripts/exp05_pixel_minibatch.py` implements and tests.
+selected points on a single Turing pattern. An earlier reading in this project concluded
+no minibatch dimension existed; that was wrong. This is what
+`scripts/exp05_pixel_minibatch.py` implements and tests. Confirmed and strengthened: this
+is now also proven from the actual code
+(`Endres-group/IPTP-paper-code`, `models/RBFPINNs_ChemPat.py` lines 531–538), which is
+stronger evidence than the paper text alone.
+
+**MISATTRIBUTION CORRECTED — the "3×3 pixel region is sufficient" / power-law claim was
+never a PINN result.** The paper contains **no PINN pixel-count study**. "A 3×3 pixel
+region is sufficient" and "error falls as a power law with exponent ≈ −1/2" are
+**least-squares (LS) results**, not PINN results — the −1/2 is ordinary sqrt(N)
+noise-averaging of a *linear* estimator, and it does not license any inference about PINN
+data efficiency. The paper is also self-inconsistent on this point (3×3 in the Fig. 3
+caption vs 4×4 in the body); the real minimum pixel count is a **rank condition** — 2
+pixels for Schnakenberg/Brusselator, 3 for FitzHugh–Nagumo. Do not cite "3×3 suffices" or
+the −1/2 exponent as evidence about PINN (or RNGRN) pixel efficiency.
 
 **So the "200,000 iterations from a single image" figure is real, and it is the reason
 this project ever tested long budgets** — but note §3: our own hit rate **saturates at
 4000 steps**, so their budget does not transfer. Two structural reasons it need not:
-they observe **all** species and assume the candidate model **is** the true model, so
-their PDE-residual loss can reach zero; neither holds here.
+they observe **all** species (in their synthetic benchmarks — see below) and assume the
+candidate model **is** the true model, so their PDE-residual loss can reach zero; neither
+holds here. One more nuance worth carrying: their 200,000 iterations are ~10,000
+**epochs** over a 2,500-pixel image with only ~900 trainable parameters — comparing raw
+step counts against a differently-sized model (ours) is not meaningful on its own.
 
 **Two more transferable points.**
 
 1. They hit the same **unknown intensity scale** problem (experimental image pixel values
    23–255) and solved it with a **free rescaling variable** — functionally the same device
    as our frame-scale anchor (§2.3, and §2.8 for what that scale actually encodes).
-2. They treat the method's **stochasticity as a feature**, providing multiple parameter
-   alternatives. That matches the "engine for biologically plausible values" framing
-   directly, and it is why results here are reported as a **seed distribution**, never
-   the best seed.
+2. **MISATTRIBUTION CORRECTED.** "They treat the method's stochasticity as a feature,
+   providing multiple parameter alternatives" is **also Kho et al.**, verbatim from their
+   abstract, not Endres/Matas-Gil. Endres treat estimator spread as **error**, not as a
+   feature. The "engine for biologically plausible values" framing was therefore resting
+   on the wrong citation; it is re-attributed to Kho et al. here, which genuinely does
+   support it. Results in this project are still reported as a **seed distribution**,
+   never the best seed — that practice stands on its own merits regardless of citation.
 
 **Differences from our setup, to keep in view:** 50×50 zero-flux vs our 96×96 periodic;
-all species observed vs our m ≤ N; candidate model == true model vs our gated-Hill RNGRN
-which *cannot* represent the generators' kinetics.
+candidate model == true model vs our gated-Hill RNGRN which *cannot* represent the
+generators' kinetics; **and, MISATTRIBUTION CORRECTED, "all species observed vs our
+m ≤ N" is true for their synthetic benchmarks but FALSE for their experimental CDIMA
+case**, where exactly one species is observed and the second is reconstructed via a
+trainable free-scale affine map of the observed image (adopted for RNGRN's own m<N case
+in `recover.py::FreeScaleLatent`, unit 13).
 
 ### 2.8 Does the power spectrum's amplitude encode the concentration field?
 

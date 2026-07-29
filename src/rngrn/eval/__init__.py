@@ -10,4 +10,4 @@ None of these import the answer-key side.
 """
 from .rollout import simulate                       # noqa: F401
 from .dynamical import lift_check                    # noqa: F401
-from .analysis import turing_ok, linear_stability, robustness_cloud  # noqa: F401
+from .analysis import turing_ok, linear_stability, robustness_cloud, robustness_volumes  # noqa: F401

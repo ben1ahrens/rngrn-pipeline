@@ -13,12 +13,15 @@ from statistics import mean, pstdev
 from .. import io as IO
 
 # columns surfaced in the comparison table (priority order + identifiability).
-# `kstar_rel_err_mean` is the HEADLINE wavelength column (vs the linear answer-key k*);
-# `kstar_fft_rel_err_mean` immediately follows it as the clearly-labelled SECONDARY
-# diagnostic (vs the FFT-measured k*). They are different references — never average or
-# substitute one for the other. See validate.score_recovery.
+# `kstar_fft_rel_err_mean` is the HEADLINE wavelength column (vs the FFT-measured
+# answer-key k* — owner decision 2026-07-29, reversing the 2026-07-26 decision, see
+# docs/STATE_OF_THE_SCIENCE.md line 499); `kstar_rel_err_mean` immediately follows it as
+# the clearly-labelled SECONDARY diagnostic (vs the linear answer-key k*). They are
+# different references — never average or substitute one for the other. Neither is
+# interpretable without `trivial_kstar_err_mean` next to it (see validate.score_recovery's
+# leak-instrumentation note): an image-blind L-only predictor beats measured recovery.
 COLUMNS = ["config_id", "source", "dataset", "N", "m", "form", "strategy", "n_seeds",
-           "kstar_rel_err_mean", "kstar_fft_rel_err_mean",
+           "kstar_fft_rel_err_mean", "kstar_rel_err_mean", "trivial_kstar_err_mean",
            "recovered_turing_frac", "sign_match_frac_mean",
            "loss_mean", "kstar_identifiability_std"]
 
@@ -55,8 +58,9 @@ def build_table(runs_root="experiments", backend="jsonl") -> list[dict]:
         table.append(dict(
             config_id=cfg_id, source=source, dataset=dataset, N=N, m=m, form=form,
             strategy=strategy, n_seeds=len(members),
-            kstar_rel_err_mean=_col_mean(members, "kstar_rel_err"),           # headline
-            kstar_fft_rel_err_mean=_col_mean(members, "kstar_fft_rel_err"),   # secondary
+            kstar_fft_rel_err_mean=_col_mean(members, "kstar_fft_rel_err"),   # headline
+            kstar_rel_err_mean=_col_mean(members, "kstar_rel_err"),           # secondary
+            trivial_kstar_err_mean=_col_mean(members, "trivial_kstar_err"),   # leak control
             recovered_turing_frac=_safe(mean, turing),
             sign_match_frac_mean=_safe(mean, signs),
             loss_mean=_safe(mean, losses),
@@ -71,8 +75,9 @@ def build_table(runs_root="experiments", backend="jsonl") -> list[dict]:
 
 DEGRADATION_COLUMNS = [
     "arm", "dataset", "n_true", "n_model", "n_runs",
-    "kstar_rel_err_mean",              # HEADLINE: vs the linear answer-key k*
-    "kstar_fft_rel_err_mean",          # SECONDARY diagnostic: vs the FFT-measured k*
+    "kstar_fft_rel_err_mean",          # HEADLINE: vs the FFT-measured answer-key k*
+    "kstar_rel_err_mean",              # SECONDARY diagnostic: vs the linear answer-key k*
+    "trivial_kstar_err_mean",          # LEAK CONTROL: image-blind L-only predictor
     "recovered_turing_frac",
     "subblock_sign_match_mean",        # comparison valid across ALL arms
     "sign_match_aligned_mean",         # permutation-aligned (hidden-channel arm)
@@ -94,11 +99,14 @@ def degradation_table(runs_root="experiments", backend="jsonl") -> list[dict]:
         one column comparable across every arm — read this for cross-arm degradation.
 
     The two wavelength columns are against DIFFERENT references and must be read as such:
-    `kstar_rel_err_mean` (headline) compares the recovered dispersion-relation k* to the
-    generator's linear k*; `kstar_fft_rel_err_mean` (secondary) compares it to the k*
-    measured off the frame by FFT, which is quantised onto the half-integer FFT-bin grid and
-    so differs from the linear k* by an offset of EITHER SIGN — a non-zero floor there is
-    expected even for a perfect recovery. Never average the two together.
+    `kstar_fft_rel_err_mean` (headline) compares the recovered dispersion-relation k* to the
+    k* measured off the frame by FFT, which is quantised onto the half-integer FFT-bin grid
+    and so differs from the linear k* by an offset of EITHER SIGN — a non-zero floor there
+    is expected even for a perfect recovery; `kstar_rel_err_mean` (secondary) compares it to
+    the generator's linear k* instead. Never average the two together. Read BOTH next to
+    `trivial_kstar_err_mean`: an image-blind predictor using only L (never the frame) scores
+    far below measured recovery on the linear reference, so neither column is evidence of
+    recovery on its own — see validate.score_recovery's leak-instrumentation note.
     """
     rows = IO.read_run_index(runs_root, backend=backend)
     groups = defaultdict(list)
@@ -111,8 +119,9 @@ def degradation_table(runs_root="experiments", backend="jsonl") -> list[dict]:
                      if x.get("recovered_turing") and _isnum(x.get("kstar_model"))]
         out.append(dict(
             arm=arm, dataset=dataset, n_true=n_true, n_model=n_model, n_runs=len(members),
-            kstar_rel_err_mean=_col_mean(members, "kstar_rel_err"),           # headline
-            kstar_fft_rel_err_mean=_col_mean(members, "kstar_fft_rel_err"),   # secondary
+            kstar_fft_rel_err_mean=_col_mean(members, "kstar_fft_rel_err"),   # headline
+            kstar_rel_err_mean=_col_mean(members, "kstar_rel_err"),           # secondary
+            trivial_kstar_err_mean=_col_mean(members, "trivial_kstar_err"),   # leak control
             recovered_turing_frac=_safe(mean, [1.0 if x.get("recovered_turing") else 0.0
                                                for x in members]),
             subblock_sign_match_mean=_col_mean(members, "subblock_sign_match"),

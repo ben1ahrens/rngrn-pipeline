@@ -11,15 +11,28 @@ parameters):
                    because comparing a recovered model's morphology needs a simulated
                    field and that costs a rollout (~seconds).
   1. wavelength  : recovered model k* vs answer-key k*.
-                   HEADLINE  `kstar_rel_err`     — against the LINEAR k* (answer_key.kstar),
-                                                   the like-for-like dispersion-relation
-                                                   comparison. Tune and report on this.
-                   SECONDARY `kstar_fft_rel_err` — against the FFT-MEASURED k*
-                                                   (answer_key.kstar_fft). Diagnostic only;
-                                                   it is quantised onto the FFT bin grid, so
-                                                   it differs from the linear number by an
-                                                   offset of EITHER SIGN (see the note in
-                                                   score_recovery) and is not a target.
+                   HEADLINE  `kstar_fft_rel_err`  — against the FFT-MEASURED k*
+                                                   (answer_key.kstar_fft), the wavenumber
+                                                   actually measured off the image. This
+                                                   REVERSED the 2026-07-26 decision on
+                                                   2026-07-29 (docs/STATE_OF_THE_SCIENCE.md
+                                                   line 499); it is quantised onto the FFT
+                                                   bin grid so a non-zero floor is expected
+                                                   even for a perfect recovery. Tune and
+                                                   report on this.
+                   SECONDARY `kstar_rel_err`     — against the LINEAR k* (answer_key.kstar),
+                                                   the dispersion-relation comparison. A
+                                                   property of the generating equations,
+                                                   not of the image; diagnostic only, not a
+                                                   target (see the note in score_recovery).
+                   LEAK GATE (applies to BOTH columns — read validate.score_recovery's
+                   docstring below before trusting either number): every generator sets
+                   L = clip(6*2*pi/k*, 18, 220), so k*_true is identically 6*2*pi/L for
+                   94.8% of all 287 registered samples. An image-blind predictor using L
+                   ALONE scores 1.4e-14% median error on kstar_rel_err — better than
+                   recovery. Every run-index row therefore also carries
+                   `trivial_kstar_err`, the L-only predictor's error, so neither k* column
+                   can be read without its control.
   2. regime      : does recovered J satisfy the Turing conditions?
   3. sign        : recovered J sign-structure vs answer-key J sign-structure
   4. robustness  : left to the analysis stage (eval.robustness_cloud), summarised here
@@ -139,10 +152,39 @@ def _morphology_metrics(target_frame, model_frame=None, reference_bank=None,
     return out
 
 
+def _leak_instrumentation(L, kstar_true) -> dict:
+    """The image-blind control for every k* number in this project.
+
+    Every generator sets L = clip(6*2*pi/k*, 18, 220) (data/staging/tg3/generator.py line
+    95), so k*_true is identically 6*2*pi/L to 1e-6 for 94.8% of all 287 registered
+    samples (periods-per-box exactly 6.000 for all 127 three_gene samples). A predictor
+    that never looks at the image — `k_trivial = 6*2*pi/L` — scores 1.4e-14% median error
+    on kstar_rel_err, beating measured recovery (3.14%). So a k* number is not evidence of
+    recovery unless it is read next to what this trivial predictor scores; computing it
+    here, from L alone, is what makes that comparison possible on every row without a
+    separate lookup.
+    """
+    if L is None or not np.isfinite(kstar_true) or kstar_true <= 0.0:
+        return {"trivial_kstar_err": float("nan"), "kstar_fft_bin_width": float("nan")}
+    k_trivial = 6.0 * 2.0 * np.pi / float(L)
+    bin_width = 2.0 * np.pi / float(L)
+    return {
+        "trivial_kstar_err": float(abs(k_trivial - kstar_true) / kstar_true),
+        "kstar_fft_bin_width": float(bin_width / kstar_true),
+    }
+
+
 def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
                    model_frame=None, morphology_bank=None,
-                   spectral_block=24) -> dict:
+                   spectral_block=24, L=None) -> dict:
     """Grade a RecoveryResult against an AnswerKey. Returns a flat metric dict.
+
+    L : the domain size (gate.RecoveryInput.L) of the sample being scored, or None.
+        Used ONLY to compute the image-blind LEAK-instrumentation columns below
+        (`trivial_kstar_err`, `kstar_fft_bin_width`) from L alone — it never reaches the
+        rel-err computation against the answer key. When None (the historical default,
+        still used by any caller not yet updated to pass it) both leak columns are NaN
+        rather than silently omitted, so their absence is visible in the row, not hidden.
 
     target_frame : the observed frame that was recovered from. (H, W) or (m, H, W);
         channel 0 is scored, the same channel recovery measures k* from. Given this alone,
@@ -186,28 +228,58 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
 
     # 1. wavelength — TWO references, and they are not interchangeable.
     #
-    #    HEADLINE   kstar_rel_err      : vs answer_key.kstar, the LINEAR k* (argmax_k of
-    #                                    sigma(k) from the generator's J, D). Like-for-like
-    #                                    against kstar_model, which is the same quantity
-    #                                    computed from the RECOVERED J, D. This is the
-    #                                    number to tune against and report.
-    #    SECONDARY  kstar_fft_rel_err  : vs answer_key.kstar_fft, the wavenumber MEASURED
-    #                                    off the generated frame by FFT. A diagnostic only:
-    #                                    it compares a dispersion-relation prediction to a
-    #                                    finite-grid Fourier measurement, which is quantised
-    #                                    onto the half-integer FFT-bin grid. So a non-zero
-    #                                    floor is expected even for a perfect recovery, and
-    #                                    the offset has EITHER SIGN depending on the sample
-    #                                    (median |kstar_fft/kstar - 1| = 0.084 over the 287
-    #                                    registered samples, 90th pct 0.250; the ratio's
-    #                                    median is above 1 on most datasets but below 1 on
-    #                                    three_gene_val). Do not tune on it and do not quote
-    #                                    it as the headline.
+    #    HEADLINE   kstar_fft_rel_err  : vs answer_key.kstar_fft, the wavenumber MEASURED
+    #                                    off the generated frame by FFT — the quantity an
+    #                                    inverse problem given only the image can actually
+    #                                    be graded against. Owner decision 2026-07-29
+    #                                    (docs/STATE_OF_THE_SCIENCE.md line 499), reversing
+    #                                    the 2026-07-26 decision that made kstar_rel_err the
+    #                                    headline. It is quantised onto the half-integer FFT
+    #                                    bin grid, so a non-zero floor is expected even for a
+    #                                    perfect recovery, and the offset has EITHER SIGN
+    #                                    depending on the sample (median |kstar_fft/kstar -
+    #                                    1| = 0.084 over the 287 registered samples, 90th pct
+    #                                    0.250; the ratio's median is above 1 on most
+    #                                    datasets but below 1 on three_gene_val). Tune and
+    #                                    report on this.
+    #    SECONDARY  kstar_rel_err      : vs answer_key.kstar, the LINEAR k* (argmax_k of
+    #                                    sigma(k) from the generator's J, D). A property of
+    #                                    the generating equations, not of the image — no
+    #                                    experiment can observe it directly. Diagnostic
+    #                                    only; do not tune on it and do not quote it as the
+    #                                    headline.
+    #
+    #    LEAK GATE — read before trusting either column above. Every generator sets
+    #    L = clip(6*2*pi/k*, 18, 220) (data/staging/tg3/generator.py), so k*_true is
+    #    identically 6*2*pi/L to 1e-6 for 94.8% of all 287 registered samples (and
+    #    periods-per-box is exactly 6.000 for all 127 three_gene samples). An image-blind
+    #    predictor using L ALONE — never looking at the frame — scores 1.4e-14% median
+    #    error on kstar_rel_err, beating measured recovery (3.14%). So no k* number here is
+    #    interpretable at face value: `trivial_kstar_err` (the L-only predictor's relative
+    #    error) is recorded on every row precisely so a reader of runs.jsonl can never see a
+    #    k* error without simultaneously seeing what ignoring the image entirely would have
+    #    scored. Treat any k* column as a GATE (regime / order-of-magnitude sanity), never
+    #    as evidence of recovery, until it clears its own trivial baseline by a wide margin.
+    #    Also see `kstar_fft_bin_width`: one FFT bin is 16.7% of k*, i.e. the configured
+    #    tolerance loss.tau = 0.12 (0.72 of one bin) sits BELOW the FFT estimator's own
+    #    resolution — see TUNING.md.
     out["kstar_model"] = float(result.kstar_model)
     out["kstar_true"] = _rel_ref(answer_key, "kstar")
     out["kstar_rel_err"] = _rel_err(result.kstar_model, out["kstar_true"])
     out["kstar_fft_true"] = _rel_ref(answer_key, "kstar_fft")
     out["kstar_fft_rel_err"] = _rel_err(result.kstar_model, out["kstar_fft_true"])
+
+    # LEAK INSTRUMENTATION — computed from L and the answer-key reference ONLY, never from
+    # the recovered model, so it measures what an image-blind predictor would have scored,
+    # not what recovery actually did. `trivial_kstar_err` is the relative error of the
+    # predictor `k_trivial = 6*2*pi/L` (every generator sets L = clip(6*2*pi/k*, 18, 220),
+    # so this predictor is exact to 1e-6 for 94.8% of registered samples) against
+    # answer_key.kstar. `kstar_fft_bin_width` is one FFT bin (2*pi/L) as a fraction of
+    # kstar_true — measured 16.7%, which means the configured tolerance loss.tau = 0.12 is
+    # only 0.72 of one bin, i.e. BELOW the FFT estimator's own resolution (see TUNING.md).
+    # Both are NaN when L is not supplied or the reference is unavailable, by the same
+    # fail-loud convention as the rest of this function.
+    out.update(_leak_instrumentation(L, out["kstar_true"]))
 
     # 2. regime — Turing conditions on the RECOVERED model
     J_rec = result.model.jacobian(

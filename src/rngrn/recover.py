@@ -30,24 +30,27 @@ second derivative scales by 1/s**2, so the residual is satisfied by D -> D*s**2)
 DEFAULT IS THE DIMENSIONAL PATH (`nondim=False`), unchanged, so every pre-existing number
 stays comparable. `RecoveryResult` reports PHYSICAL quantities on both paths.
 
-KNOWN LIMITATION OF THE NON-DIMENSIONAL ARM -- READ BEFORE COMPARING THE TWO PATHS.
-model.py inits theta_D ~ N(0, 0.5), i.e. D starts at median 1.00 (measured over 2000
-seeds). That scale was never chosen for either path, and the two paths are off from the
-target in OPPOSITE directions. Measured on the 19 three_gene_val samples (L = 40..139):
+D INIT, unit B4 (defect 2) -- opt-in via `d_init_from_kstar` / ModelConfig.d_init_from_kstar.
+model.py's "default" init used to set theta_D ~ N(0, 0.5) unconditionally, i.e. D starts at
+median 1.00 (measured over 2000 seeds) regardless of L or path. That scale was never chosen
+for either path, and the two paths were off from the target in OPPOSITE directions.
+Measured on the 19 three_gene_val samples (L = 40..139):
 
-    dimensional : generator D has median 28.8   -> init starts  29x TOO SMALL
-    unit box    : generator D/L**2 median 4.97e-3 -> init starts 202x TOO LARGE
+    dimensional : generator D has median 28.8    -> init started  29x TOO SMALL
+    unit box    : generator D/L**2 median 4.97e-3 -> init started 202x TOO LARGE
 
 (This is a statement about the numerical scale the optimiser starts from, NOT a claim that
 the generator's D values are biologically viable -- they are not; see the priors work.)
-So a head-to-head "dimensional vs nondim" result at a fixed step budget is CONFOUNDED by
-the init, and any such comparison must say so. The obvious repair -- shifting theta_D by
--2*log(L) on the nondim path -- is NOT applied here, deliberately: it would put L back
-inside the optimisation and destroy the exact cross-L invariance that is the entire point
-of the arm. The L-free repair is to set the D init from the frame's own k*_obs
-(D ~ |J|/k*_obs**2, firewall-clean), but that would change the DIMENSIONAL path too and
-therefore invalidate every recorded number, so it belongs with the priors/init work and
-not here. Left explicitly open. See TUNING.md.
+So a head-to-head "dimensional vs nondim" result at a fixed step budget was CONFOUNDED by
+the init. The repair is NOT to shift theta_D by -2*log(L) on the nondim path: that would put
+L back inside the optimisation and destroy the exact cross-L invariance that is the entire
+point of the arm. Instead theta_D is shifted by -2*log(k*_obs) -- k*_obs is an IMAGE
+observable (already a legal, firewall-clean recovery input) computed in the OBJECTIVE's own
+units on both paths (rad/length dimensional, rad/box nondim), so the same formula is
+automatically correct on both paths without ever reading L directly. This is OPT-IN
+(default False) because it changes the raw-parameter init distribution and therefore every
+number recorded with the old default -- see docs/TUNING.md and the PR body for the measured
+before/after D-ratio comparison.
 """
 from __future__ import annotations
 import hashlib
@@ -124,8 +127,16 @@ def _restart_seed(model_seed, r):
 
 
 def _kgrid_for(kstar_obs, n=400, span=8.0, device=None, dtype=torch.float64):
-    kmax = max(2.0, span * kstar_obs)
-    return torch.linspace(kstar_obs / 50.0 + 1e-3, kmax, n, device=device, dtype=dtype)
+    # unit B4 (defect 1): the floor used to be an ABSOLUTE 2.0 rad/length, which is not
+    # scale-free -- on the dimensional path it silently dominates whenever kstar_obs < 0.25
+    # (L > 150.8 on the registered datasets, 11/287 samples, 3.8%), pinning the grid to the
+    # wrong band instead of tracking the observed wavenumber. The only job of the floor is
+    # to keep the grid non-degenerate when kstar_obs is itself ~0 (a patternless frame), so
+    # it is now defined relative to kmin -- expressed in kstar_obs's own units, whatever
+    # they are (rad/length dimensional, rad/box nondim) -- instead of a fixed constant.
+    kmin = kstar_obs / 50.0 + 1e-3
+    kmax = max(span * kstar_obs, 2.0 * kmin)
+    return torch.linspace(kmin, kmax, n, device=device, dtype=dtype)
 
 
 def _topology(model):
@@ -141,7 +152,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             lbfgs_steps=50, grad_clip=10.0, seed=0, verbose=False, device=None,
             split_hinges=True, hinge_k_min_frac=0.1, staging_keys=("turing",),
             staging_off_frac=0.25, staging_ramp_frac=0.25, detach_xstar=False,
-            nondim=False, model_seed=None, dispersion_backend="eig", init="default"):
+            nondim=False, model_seed=None, dispersion_backend="eig", init="default",
+            d_init_from_kstar=False):
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
@@ -169,6 +181,11 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
 
     init: 'default' | 'low_basal' -- model raw-parameter init strategy (see model.py).
         Defaults to 'default' (OFF); callers opt in explicitly.
+
+    d_init_from_kstar: unit B4 (defect 2), OFF by default. When True and init='default',
+        theta_D is shifted so D starts at median 1/k*_obs**2 (in the objective's own units)
+        instead of median 1.0, on BOTH paths -- see the module docstring. Changes recorded
+        D / D-ratio numbers for any run that opts in; leaves everything else bit-identical.
     """
     ri = recovery_input
     model_seed = seed if model_seed is None else model_seed
@@ -221,8 +238,14 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
 
     best = None; restart_log = []
     for r in range(n_restarts):
+<<<<<<< HEAD
         model = RNGRN(N=N, form=form, seed=_restart_seed(model_seed, r), init=init,
                       dispersion_backend=dispersion_backend).to(dev)
+=======
+        model = RNGRN(N=N, form=form, seed=model_seed + r, init=init,
+                      dispersion_backend=dispersion_backend,
+                      kstar_obs=kstar_obs if d_init_from_kstar else None).to(dev)
+>>>>>>> feature/rngrn-ldefects
         latent_module = None
         latent = None
         if m < N:

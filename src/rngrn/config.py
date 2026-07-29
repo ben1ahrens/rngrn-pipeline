@@ -65,6 +65,8 @@ class ModelConfig:
 
     init: str = "default"                   # 'default' | 'low_basal' -- see model.py (unit 2)
 
+    d_init_from_kstar: bool = False         # opt-in D init from k*_obs, L-free  # unit B4
+
 
 @dataclass
 class LossConfig:

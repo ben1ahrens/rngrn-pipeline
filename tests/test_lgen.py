@@ -210,6 +210,89 @@ def test_dimensional_path_is_the_default():
 
 
 # --------------------------------------------------------------------------------------
+# unit B4, defect 1: the k-grid floor must be scale-free
+# --------------------------------------------------------------------------------------
+def test_kgrid_floor_tracks_kstar_obs_instead_of_a_fixed_2_0():
+    """The old floor was an ABSOLUTE 2.0 rad/length, so once kstar_obs < 0.25 the grid
+    stopped tracking the observed wavenumber (L > 150.8, 11/287 registered samples). A
+    small-but-real kstar_obs must still produce kmax = span * kstar_obs, not 2.0."""
+    from rngrn.recover import _kgrid_for
+    kstar_obs = 0.05   # well below the old 0.25 threshold where the 2.0 floor used to win
+    g = _kgrid_for(kstar_obs, span=8.0)
+    assert g.max().item() == pytest.approx(8.0 * kstar_obs, rel=1e-9)
+
+
+def test_kgrid_floor_still_guards_a_degenerate_zero_kstar_obs():
+    """The floor's only legitimate job is to keep the grid non-degenerate when kstar_obs
+    is itself ~0 (a patternless frame) -- that guard must survive the scale-free rewrite."""
+    from rngrn.recover import _kgrid_for
+    g = _kgrid_for(0.0)
+    assert g.max().item() > g.min().item() > 0.0
+
+
+# --------------------------------------------------------------------------------------
+# unit B4, defect 2: the D init must be L-free, opt-in via d_init_from_kstar
+# --------------------------------------------------------------------------------------
+def test_kstar_obs_shifts_theta_D_by_exactly_minus_2_log_kstar_obs():
+    """theta_D = randn(N)*0.5 - 2*log(kstar_obs) => D starts at median 1/kstar_obs**2. Same
+    seed => the SAME randn(N) draw either way, so the two must differ by exactly the shift
+    and nothing else on the model may move."""
+    kstar_obs, seed = 0.7, 3
+    base = RNGRN(N=3, seed=seed)
+    shifted = RNGRN(N=3, seed=seed, kstar_obs=kstar_obs)
+    assert torch.allclose(shifted.theta_D, base.theta_D - 2.0 * math.log(kstar_obs),
+                          rtol=0.0, atol=1e-12)
+    for name in ("theta_s", "theta_g", "theta_alpha", "theta_delta", "theta_beta"):
+        assert torch.equal(getattr(shifted, name), getattr(base, name)), name
+
+
+def test_kstar_obs_must_be_a_positive_finite_wavenumber():
+    for bad in (0.0, -1.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="positive finite"):
+            RNGRN(N=3, kstar_obs=bad)
+
+
+def test_kstar_obs_is_ignored_by_low_basal_init():
+    """low_basal has its own D-ratio scheme (unit 2); kstar_obs must not perturb it."""
+    seed = 4
+    base = RNGRN(N=3, seed=seed, init="low_basal")
+    shifted = RNGRN(N=3, seed=seed, init="low_basal", kstar_obs=0.3)
+    assert torch.equal(shifted.theta_D, base.theta_D)
+
+
+def test_d_init_from_kstar_defaults_to_off():
+    """OPT-IN: adopting the fix changes recorded D numbers, so it must be a measured
+    choice, not a silent bias -- same pattern as init='low_basal' (unit 2)."""
+    import inspect
+    from rngrn.recover import recover
+    from rngrn.config import ModelConfig
+    assert inspect.signature(recover).parameters["d_init_from_kstar"].default is False
+    assert ModelConfig().d_init_from_kstar is False
+
+
+def test_recover_d_init_from_kstar_is_automatically_correct_on_both_paths():
+    """The SAME formula (D_model median = 1/kstar_obs**2) must be right on both paths
+    without recover.py doing any extra L-dependent conversion -- because kstar_obs is
+    already measured in L_model's own units (rad/length dimensional, rad/box nondim)
+    before the model is constructed. Same seed => the on/off runs differ ONLY by the
+    D-init shift, so the ratio must match 1/kstar_obs_model_units**2 exactly."""
+    from rngrn.recover import recover
+    frame = _frame()
+    L = 57.0
+    for nondim in (False, True):
+        ri = _RI(frame, L)
+        on = recover(ri, n_restarts=1, adam_steps=0, lbfgs_steps=0, seed=0,
+                     nondim=nondim, d_init_from_kstar=True)
+        off = recover(ri, n_restarts=1, adam_steps=0, lbfgs_steps=0, seed=0,
+                      nondim=nondim, d_init_from_kstar=False)
+        scale = L if nondim else 1.0
+        kstar_obs_model_units = on.kstar_obs * scale
+        ratio = on.params["D_model"] / off.params["D_model"]
+        expected = np.full(3, 1.0 / kstar_obs_model_units ** 2)
+        assert ratio == pytest.approx(expected, rel=1e-9), (nondim, ratio, expected)
+
+
+# --------------------------------------------------------------------------------------
 # 3. the NON-DIMENSIONAL path is L-invariant, and physical D scales as L**2
 # --------------------------------------------------------------------------------------
 def test_nondim_recovery_is_invariant_across_three_domain_sizes():

@@ -583,28 +583,39 @@ def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
         return x, converged
 
     with torch.no_grad():
-        # attempt 1: the legacy pass from x0, unchanged, so any member that converged
-        # before converges to the BIT-IDENTICAL x* now.
-        x, converged = _attempt(x0)
-        # attempts 2-4: the unit-B3 analytic bracket, per member, for the stragglers only.
+        # ORDER: Newton(x0) -> Newton(bracket) -> relaxation, LAST RESORT ONLY.
         #
-        # THIS PORT IS NOT OPTIONAL. B3 added multistart to the serial solver because the
-        # single fixed seed x0 = ones is a globalisation failure that strands Newton on the
-        # det J = 0 fold, and that fix is what took nc1 from 31/32 abandoned restarts to
-        # 0/32. Without it here, the batched path would abandon members the serial path
-        # rescues -- so batched and serial would disagree on convergence, and batched nc1
-        # would still be untrainable. steady_state_bracket reads only beta/delta/alpha,
-        # which are already batch-shaped, so the same expression serves both.
-        # The bracket attempts run NEWTON ONLY (relax=False). B3's measured rescue mechanism
-        # is Newton from the analytic bracket -- from beta/delta it reached the true root at
-        # |f| = 2.0e-15, where the fixed seed x0 = ones was stranded on the det J = 0 fold at
-        # |f| = 1.7e-2. Relaxation from a bracket seed was never the mechanism, and it is the
-        # expensive half: leaving it on cost up to 12.3 s in a single training step even with
-        # the early exit, because a member that cannot be relaxed pays every step of it, three
-        # more times. Attempt 1 keeps the relaxation, so the legacy path stays bit-identical.
-        if multistart and not bool(converged.all()):
-            lo, hi = steady_state_bracket(model)
-            for seed in (lo, hi, torch.sqrt(lo * hi)):
+        # The legacy order was Newton(x0) -> relaxation -> Newton(bracket). Keeping that
+        # here made batched training 1.3 s/step and rising on real data (MEASURED: 18.7 s
+        # at 20 steps, 124.1 s at 100), because the relaxation is 2000 whole-batch reaction
+        # evaluations and fires often mid-training once the parameters are hard --
+        # especially with d_init_from_kstar, which starts D near 1/k*^2.
+        #
+        # Reordered because the relaxation is both the MOST expensive step and the LEAST
+        # accurate one: it accepts at |f| < 1e-4, where Newton from the analytic bracket
+        # reaches |f| ~ 1e-15 (B3 measured 2.0e-15 from beta/delta on the case that
+        # defeated x0 = ones). Trying the cheap, tighter solver before the expensive, looser
+        # one is strictly better on both axes.
+        #
+        # WHAT THIS CHANGES, stated because it is not nothing: a member that BOTH the
+        # bracket and the relaxation could solve now returns the bracket's root instead of
+        # the relaxation's. That is a tighter root, not a different steady state - both
+        # solve f(x*) = 0 for the same reaction - but it is not bit-identical to the legacy
+        # value, so a run whose x* came from the relaxation fallback will differ in the last
+        # digits. Members solved by Newton(x0) - the overwhelming majority, and every
+        # member at random init - are untouched. The relaxation still runs for anything
+        # neither Newton pass can solve, so the CONVERGENCE SET is unchanged or larger,
+        # never smaller. Recorded in docs/DECISIONS.md.
+        # multistart=False is the LEGACY solver exactly: Newton(x0) then the relaxation,
+        # nothing else. Kept bit-for-bit so pre-B3 numbers can be reproduced on demand and
+        # so a test can still exhibit a genuine per-member failure.
+        if not multistart:
+            return _attempt(x0, relax=True)
+
+        x, converged = _attempt(x0, relax=False)
+        if not bool(converged.all()):
+            lo0, hi0 = steady_state_bracket(model)
+            for seed in (lo0, hi0, torch.sqrt(lo0 * hi0)):
                 xs, ok = _attempt(seed.expand_as(x0).clone(), relax=False)
                 take = ok & ~converged
                 if bool(take.any()):
@@ -612,6 +623,12 @@ def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
                     converged = converged | take
                 if bool(converged.all()):
                     break
+        if not bool(converged.all()):
+            xs, ok = _attempt(x0, relax=True)      # the legacy relaxation, last resort
+            take = ok & ~converged
+            if bool(take.any()):
+                x = torch.where(take.unsqueeze(-1), xs, x)
+                converged = converged | take
     return x, converged
 
 

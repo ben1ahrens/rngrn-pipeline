@@ -84,3 +84,62 @@ def test_dispersion_backend_cubic_rejected_for_wrong_N():
         assert False, "expected ValueError for cubic backend with N != 3"
     except ValueError:
         pass
+
+
+# --------------------------------------------------------------------------------------
+# train.seed must actually vary the recovery (regression: D-EVID-4)
+# --------------------------------------------------------------------------------------
+def test_base_config_does_not_pin_model_seed():
+    """model.seed pinned in a base config makes train.seed a no-op for everything below it.
+
+    configs/base.yaml used to set `model.seed: 0`. fit() passes it straight to recover() as
+    model_seed, restart inits come from _restart_seed(model_seed, r) with per-restart
+    generators, and nothing in the recovery path reads the global RNG that
+    seed_everything(train.seed) touches -- so every run drew the SAME inits regardless of
+    train.seed. A K-seed replicate was K identical recoveries and cross-seed
+    topology_consistency, the project's primary metric, would have read 1.0 while measuring
+    nothing. Asserted at the config level because that is where the damage was done.
+    """
+    import yaml
+    with open("configs/base.yaml") as fh:
+        raw = yaml.safe_load(fh)
+    assert raw.get("model", {}).get("seed", "ABSENT") == "ABSENT", (
+        "configs/base.yaml must NOT set model.seed -- it is an override, not a default. "
+        "Pinning it makes train.seed a no-op for every config that composes this base.")
+    from rngrn.config import ModelConfig
+    assert ModelConfig().seed is None, "ModelConfig.seed must default to None (derive from train.seed)"
+
+
+def test_train_seed_changes_the_recovery_and_repeats_are_exact(tmp_path):
+    """Different train.seed -> different recovery. Same train.seed -> bit-identical.
+
+    Both halves matter: the first is what makes a seed replicate meaningful, the second is
+    what makes it reproducible. Kept cheap (few steps/restarts) -- this tests the SEEDING
+    wiring, not convergence. Uses the registered three_gene_qvar payload rather than a
+    reference system so nothing is generated here.
+    """
+    import os
+    import pytest
+    from rngrn.config import load_config, apply_overrides
+    from rngrn.train import fit
+
+    if not os.path.exists("data/datasets/three_gene_qvar/payload.h5"):
+        pytest.skip("three_gene_qvar payload not provisioned (scripts/link_payloads.sh)")
+
+    def run(seed, tag):
+        cfg = load_config("configs/m3_registry.yaml")
+        cfg = apply_overrides(cfg, [
+            "data.dataset_id=three_gene_qvar", "data.sample_key=sample_0000",
+            f"train.seed={seed}", "train.adam_steps=8", "train.n_restarts=2",
+            "train.lbfgs_steps=0", "solver.morphology_rollout=false",
+            "solver.save_plot_arrays=false"])
+        return float(fit(cfg, runs_root=str(tmp_path / tag))["loss"])
+
+    a0 = run(0, "a0")
+    b1 = run(1, "b1")
+    a0_again = run(0, "a0_again")
+
+    assert a0 == a0_again, f"same train.seed must reproduce exactly, got {a0} vs {a0_again}"
+    assert a0 != b1, (
+        f"different train.seed must change the recovery, got seed0={a0} seed1={b1} -- "
+        "train.seed is a no-op again (regression of docs/DECISIONS.md D-EVID-4)")

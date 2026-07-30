@@ -57,7 +57,23 @@ class ModelConfig:
     m: int = 2                              # observed species (m<=N)
     form: str = "competitive"               # 'competitive' | 'nc1'
     n_hill: int = 2
-    seed: int = 0
+    # None means DERIVE FROM train.seed. This is an OVERRIDE, not a default.
+    #
+    # It was `0`, and that silently broke seed replication entirely. fit() passes
+    # model_seed=cfg.model.seed into recover(), restart inits come from
+    # _restart_seed(model_seed, r) with per-restart generators, and NOTHING in the recovery
+    # path reads the global RNG that seed_everything(train.seed) touches. So a constant
+    # model.seed=0 pinned every run to the same inits no matter what train.seed said.
+    # MEASURED: three runs at train.seed 0/1/2, identical otherwise, returned
+    # loss=0.234338833269, kstar=0.0058744712, D0=0.1082955398 -- bit-identical to 12
+    # digits. A K-seed target report was therefore running K IDENTICAL recoveries, and
+    # cross-seed topology_consistency -- the project's PRIMARY metric -- would have read 1.0
+    # while measuring nothing at all.
+    #
+    # None restores recover()'s own fallback (`model_seed = seed if model_seed is None`), so
+    # train.seed drives the inits again. Set an int only to hold the model init FIXED while
+    # varying something else, which is a deliberate experiment, not a default.
+    seed: Optional[int] = None
     observed_idx: Optional[list] = None     # which model indices the m rows map to
     nondim: bool = False                    # recover on the unit box x/L; see recover.py  # unit 12
 

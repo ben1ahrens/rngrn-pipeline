@@ -381,7 +381,12 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     # was absent, which made a seed-replicate sweep — the project's standard design — impossible
     # to disaggregate from the index alone. `git_sha` joins a row to the code that produced it.
     row.update(
-        seed=int(cfg.train.seed), model_seed=int(cfg.model.seed),
+        # model_seed is the EFFECTIVE value recovery used, not the config's. cfg.model.seed
+        # is None by default meaning 'derive from train.seed', so recording the raw config
+        # value would put None on every row and hide which inits a run actually drew.
+        seed=int(cfg.train.seed),
+        model_seed=int(cfg.train.seed if cfg.model.seed is None else cfg.model.seed),
+        model_seed_explicit=bool(cfg.model.seed is not None),
         adam_lr=float(cfg.train.adam_lr), lbfgs_steps=int(cfg.train.lbfgs_steps),
         grad_clip=float(cfg.train.grad_clip), tau=float(cfg.loss.tau),
         jac_floor=float(cfg.loss.jac_floor), dratio_centre=float(cfg.loss.dratio_centre),

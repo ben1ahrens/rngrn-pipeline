@@ -314,6 +314,8 @@ def _sigma_max_cubic(M: torch.Tensor, eps: float = 1e-14) -> torch.Tensor:
 def build_model(cfg) -> RNGRN:
     """Construct a model from a ModelConfig (registry-dispatched by architecture)."""
     cls = MODELS.get(cfg.architecture)
+    # cfg.seed is None by default ('derive from train.seed'); RNGRN treats seed=None as
+    # 'use global RNG', which is the right behaviour for a caller that did not choose one.
     return cls(N=cfg.N, form=cfg.form, n_hill=cfg.n_hill, seed=cfg.seed,
                dispersion_backend=cfg.dispersion_backend,
                init=getattr(cfg, "init", "default"))

@@ -14,7 +14,13 @@ model:
   m: 2
   form: competitive
   n_hill: 2
-  seed: 0
+  # model.seed is DELIBERATELY UNSET. It is an OVERRIDE meaning "hold the model init fixed
+  # while varying something else"; left unset, recovery derives the init seed from
+  # train.seed. Pinning it to 0 here made train.seed a NO-OP for every config composing this
+  # base: three runs at train.seed 0/1/2 returned bit-identical loss, k* and D to 12 digits,
+  # so a K-seed replicate was K identical recoveries and cross-seed reproducibility --- the
+  # project's primary metric --- measured nothing. Do not reintroduce it.
+  # See config.py ModelConfig.seed and docs/DECISIONS.md D-EVID-4.
 
 loss:
   strategy: fixed            # 'fixed' | 'scheduled' | 'gradnorm' | 'ntk'

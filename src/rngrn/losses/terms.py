@@ -515,9 +515,12 @@ def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
     if x0 is None:
         x0 = torch.ones(B, N, device=dev, dtype=dt_)
 
-    def _attempt(x_init):
-        """One full legacy pass — damped Newton, then the relaxation fallback — from x_init.
-        Returns (x (B,N), converged (B,)). Verbatim the pre-multistart body."""
+    def _attempt(x_init, relax=True):
+        """Damped Newton from x_init, then optionally the relaxation fallback.
+
+        Returns (x (B,N), converged (B,)). With relax=True this is verbatim the
+        pre-multistart body, which is what makes attempt 1 bit-identical to the legacy
+        solver. relax=False is Newton only — used for the bracket attempts, see below."""
         x = x_init.clone()
         active = torch.ones(B, dtype=torch.bool, device=dev)
         broke = torch.zeros(B, dtype=torch.bool, device=dev)
@@ -550,13 +553,30 @@ def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
             x_new = torch.clamp(x - lam.unsqueeze(-1) * step, min=1e-9)
             x = torch.where(active.unsqueeze(-1), x_new, x)
 
-        needs_relax = active | broke
-        converged = ~needs_relax
-        if bool(needs_relax.any()):
+        needs_relax = (active | broke) & (True if relax else False)
+        converged = ~(active | broke)
+        if relax and bool(needs_relax.any()):
             xr = torch.where((x_init > 0).all(dim=-1, keepdim=True), x_init,
                              torch.ones_like(x_init))
-            for _ in range(relax_steps):
+            # EARLY EXIT, and it is worth 100x mid-training. The relaxation runs on the
+            # whole batch (indexing out a sub-batch would need a sub-model, since the
+            # parameters are per-member), and it used to run all `relax_steps` of them
+            # unconditionally. That was tolerable when the fallback was rare, but once
+            # multistart made it reachable up to four times per call it dominated
+            # everything: MEASURED on CUDA at B=64, a training step cost 110-170 ms for
+            # the first ~25 Adam steps and then 10,500-17,600 ms once the parameters
+            # drifted into a region where attempt 1 fails for a few members -- about 66
+            # minutes for a 400-step run. Checking convergence periodically and stopping
+            # when every member that NEEDS the relaxation has converged is value-preserving
+            # (it only ever stops once the answer has stopped changing for those members)
+            # and removes the blowup.
+            check_every = max(1, int(relax_steps // 40))
+            for i in range(relax_steps):
                 xr = torch.clamp(xr + relax_dt * model.reaction(xr), min=1e-9)
+                if (i + 1) % check_every == 0:
+                    done = torch.linalg.norm(model.reaction(xr), dim=-1) < 1e-4
+                    if bool((done | ~needs_relax).all()):
+                        break
             conv_r = torch.linalg.norm(model.reaction(xr), dim=-1) < 1e-4
             x = torch.where(needs_relax.unsqueeze(-1), xr, x)
             converged = torch.where(needs_relax, conv_r, converged)
@@ -575,10 +595,17 @@ def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
         # rescues -- so batched and serial would disagree on convergence, and batched nc1
         # would still be untrainable. steady_state_bracket reads only beta/delta/alpha,
         # which are already batch-shaped, so the same expression serves both.
+        # The bracket attempts run NEWTON ONLY (relax=False). B3's measured rescue mechanism
+        # is Newton from the analytic bracket -- from beta/delta it reached the true root at
+        # |f| = 2.0e-15, where the fixed seed x0 = ones was stranded on the det J = 0 fold at
+        # |f| = 1.7e-2. Relaxation from a bracket seed was never the mechanism, and it is the
+        # expensive half: leaving it on cost up to 12.3 s in a single training step even with
+        # the early exit, because a member that cannot be relaxed pays every step of it, three
+        # more times. Attempt 1 keeps the relaxation, so the legacy path stays bit-identical.
         if multistart and not bool(converged.all()):
             lo, hi = steady_state_bracket(model)
             for seed in (lo, hi, torch.sqrt(lo * hi)):
-                xs, ok = _attempt(seed.expand_as(x0).clone())
+                xs, ok = _attempt(seed.expand_as(x0).clone(), relax=False)
                 take = ok & ~converged
                 if bool(take.any()):
                     x = torch.where(take.unsqueeze(-1), xs, x)

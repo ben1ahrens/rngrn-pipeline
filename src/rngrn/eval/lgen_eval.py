@@ -261,7 +261,7 @@ def _dedup_L(L_values, L_train):
 
 def evaluate_across_L(model, L_train, L_values, *, n_grid=None, seed=0,
                       reference_bank=None, ppw_floor: float = PPW_FLOOR,
-                      n_max: int = 512, **sim_kw) -> dict:
+                      n_max: int = 512, grid_rule: str = "fixed", **sim_kw) -> dict:
     """Simulate ONE recovered model on several domain sizes and measure L-generalisation.
 
     model     : a recovered RNGRN whose `D` is PHYSICAL. If it came from a checkpoint, pass
@@ -270,8 +270,27 @@ def evaluate_across_L(model, L_train, L_values, *, n_grid=None, seed=0,
     L_train   : the domain size recovery ran on. Supplies the reference morphology class and
                 the L/L_train column, and anchors the grid rule.
     L_values  : the domain sizes to evaluate. L_train is added if absent (see `_dedup_L`).
-    n_grid    : the grid at L_train; every other L gets `grid_for_L`, holding dx fixed.
-                Defaults to DEFAULT_N_GRID (96, the registered payloads' grid).
+    n_grid    : the grid to simulate on. Defaults to DEFAULT_N_GRID (96, the registered
+                payloads' grid).
+    grid_rule : 'fixed' (DEFAULT) simulates every L on the SAME n_grid. 'constant_dx' scales
+                the grid with L via `grid_for_L` so dx — and hence pixels per wavelength —
+                is held at its L_train value.
+
+                'fixed' is the default by owner decision (2026-07-30: "resolution does not
+                need to be the same. we can drop resolution to make it faster"), and the cost
+                is bounded rather than ignored. Under 'constant_dx' a 3.25x L range needs a
+                3.25x grid, i.e. ~10x the cells and ~10x the time at the largest L — the
+                dominant cost of the whole evaluation. Under 'fixed', dx grows with L so
+                pixels per wavelength FALLS as 1/L, and the protection is `ppw_floor`: a
+                patterned row below it raises rather than being reported. Worked example on
+                three_gene_multiL system 13 (k*=0.4522, wavelength 13.9, L 55.6->180.7 at
+                n=96): 24.0, 13.7, 9.6, 7.4 px/wavelength — the widest real L span in the
+                dataset still clears the floor of 6.0 at a fixed 96 grid.
+
+                Use 'constant_dx' when a row would otherwise breach the floor, or when
+                comparing k* across L to a precision finer than one FFT bin (the bin width
+                itself scales with 1/L at fixed n, and `kstar_bin_width_rel` per row is what
+                tells you whether the comparison is bin-limited).
     seed      : the initial-noise seed, the same at every L. The noise FIELD still differs
                 between L because the grid differs, so this is reproducibility, not a
                 controlled initial condition.
@@ -320,28 +339,49 @@ def evaluate_across_L(model, L_train, L_values, *, n_grid=None, seed=0,
         xs, _ = steady_state(model)
         sim_kw["xstar"] = xs.detach().cpu().numpy()
 
+    if grid_rule not in ("fixed", "constant_dx"):
+        raise ValueError(
+            f"grid_rule must be 'fixed' or 'constant_dx'; got {grid_rule!r}")
+
     per_L = []
     for L in L_eval:
-        n = grid_for_L(L, L_train, n_grid, n_max=n_max)
+        n = n_grid if grid_rule == "fixed" else grid_for_L(L, L_train, n_grid, n_max=n_max)
         res = simulate(model, L=L, n=n, seed=seed, **sim_kw)
         row = _row_for(res, L=L, L_train=L_train, n=n, bank=bank)
         if row["patterned"] and row["pixels_per_wavelength"] < ppw_floor:
+            # The remedy depends on the grid rule, so compute it per rule rather than
+            # quoting one formula for both. Under 'fixed' the grid at THIS L is n_grid
+            # itself, so clearing the floor needs n_grid >= ppw_floor * q. Under
+            # 'constant_dx' the grid here is n_grid * L/L_train, so the requirement on
+            # n_grid carries the L_train/L factor. Getting this backwards sends the reader
+            # to a grid size that does not fix their problem.
+            need = ppw_floor * row["periods_per_box"]
+            if grid_rule == "constant_dx":
+                need *= L_train / L
+            hint = (f"n_grid >= {int(math.ceil(need))} would clear it here under "
+                    f"grid_rule={grid_rule!r}")
+            if grid_rule == "fixed":
+                hint += (", or pass grid_rule='constant_dx' to scale the grid with L "
+                         "(~10x the cost at a 3.25x L span)")
             raise ValueError(
                 f"L={L:g} produced a pattern at {row['pixels_per_wavelength']:.2f} pixels "
                 f"per wavelength, below the floor of {ppw_floor:g} "
                 f"(k*={row['kstar_phys']:.4g}, q={row['periods_per_box']:.3g}, grid {n}). "
                 f"Below the floor the k* estimate is not merely noisy, it is wrong "
-                f"(see PPW_FLOOR_PROVENANCE). Raise n_grid (currently {n_grid} at "
-                f"L_train={L_train:g}) — n_grid >= "
-                f"{int(math.ceil(ppw_floor * row['periods_per_box'] * L_train / L))} would "
-                f"clear it here — rather than reading this row as a measurement.")
+                f"(see PPW_FLOOR_PROVENANCE). {hint} — rather than reading this row as a "
+                f"measurement.")
         per_L.append(row)
 
     return dict(
         L_train=L_train,
         n_grid=n_grid,
-        grid_rule=(f"n(L) = nearest even int to {n_grid} * L / {L_train:g} "
-                   f"(dx held fixed; see grid_for_L)"),
+        grid_rule=grid_rule,
+        grid_rule_detail=(
+            f"n(L) = {n_grid} at every L (grid FIXED; dx grows with L, so "
+            f"pixels_per_wavelength falls — read it per row)"
+            if grid_rule == "fixed" else
+            f"n(L) = nearest even int to {n_grid} * L / {L_train:g} "
+            f"(dx held fixed; see grid_for_L)"),
         ppw_floor=float(ppw_floor),
         per_L=per_L,
         summary=summarise_across_L(per_L),

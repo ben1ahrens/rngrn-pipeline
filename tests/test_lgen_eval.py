@@ -79,10 +79,46 @@ def test_default_grid_is_the_registered_payload_grid():
 # --------------------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def fixture_across_L():
-    """The fixture evaluated at L/L_train = 0.5, 1, 2, 4. ~7 s; shared by three tests."""
+    """The fixture evaluated at L/L_train = 0.5, 1, 2, 4. ~7 s; shared by three tests.
+
+    grid_rule='constant_dx' is REQUIRED here and is not a stylistic choice. These three
+    tests measure whether the PHYSICS is L-invariant, so resolution must be held constant
+    or a drift in k* cannot be attributed. At the default 'fixed' rule this fixture's 4x L
+    span on a 48 grid reaches 3.85 px/wavelength — below the floor of 6.0 — and
+    evaluate_across_L rightly refuses to report it. That refusal is exercised as a feature
+    in test_fixed_grid_refuses_below_the_floor rather than worked around here.
+    """
     return evaluate_across_L(turing_model(), FIXTURE_L,
                              [0.5 * FIXTURE_L, FIXTURE_L, 2 * FIXTURE_L, 4 * FIXTURE_L],
-                             n_grid=N_GRID, seed=0)
+                             n_grid=N_GRID, seed=0, grid_rule="constant_dx")
+
+
+def test_fixed_grid_refuses_below_the_floor():
+    """The default 'fixed' grid rule trades resolution for speed, so its guard must bite.
+
+    Owner decision 2026-07-30: resolution need not be held constant across L, to make the
+    evaluation cheaper (constant_dx costs ~10x at a 3.25x L span). The protection is that a
+    patterned row below ppw_floor RAISES instead of being reported as a measurement — a k*
+    read off 3.85 pixels per wavelength is wrong, not merely noisy. This asserts the guard
+    fires and that its remedy hint is computed for the rule actually in force.
+    """
+    with pytest.raises(ValueError, match="pixels per wavelength"):
+        evaluate_across_L(turing_model(), FIXTURE_L,
+                          [0.5 * FIXTURE_L, FIXTURE_L, 2 * FIXTURE_L, 4 * FIXTURE_L],
+                          n_grid=N_GRID, seed=0, grid_rule="fixed")
+    with pytest.raises(ValueError, match="grid_rule='constant_dx'"):
+        evaluate_across_L(turing_model(), FIXTURE_L, [4 * FIXTURE_L],
+                          n_grid=N_GRID, seed=0, grid_rule="fixed")
+
+
+def test_grid_rule_is_validated_and_recorded():
+    """An unknown rule must fail loud, and the rule in force must be in the output."""
+    with pytest.raises(ValueError, match="grid_rule"):
+        evaluate_across_L(turing_model(), FIXTURE_L, [FIXTURE_L],
+                          n_grid=N_GRID, seed=0, grid_rule="scale_somehow")
+    out = evaluate_across_L(turing_model(), FIXTURE_L, [FIXTURE_L], n_grid=N_GRID, seed=0)
+    assert out["grid_rule"] == "fixed", "fixed is the documented default"
+    assert "FIXED" in out["grid_rule_detail"]
 
 
 def test_every_L_actually_patterned(fixture_across_L):
@@ -259,8 +295,14 @@ def test_nondim_and_dimensional_checkpoints_give_the_same_physical_kstar():
     dim, _ = physical_model_from_checkpoint(turing_model(), dict(nondim=False, L=FIXTURE_L))
     nd, _ = physical_model_from_checkpoint(_nondim_twin(turing_model(), FIXTURE_L),
                                           dict(nondim=True, L=FIXTURE_L))
-    a = evaluate_across_L(dim, FIXTURE_L, L_values, n_grid=N_GRID, seed=0)
-    b = evaluate_across_L(nd, FIXTURE_L, L_values, n_grid=N_GRID, seed=0)
+    # constant_dx: this compares a physical k* between two storage conventions, so
+    # resolution must not vary with L or a difference cannot be attributed to the
+    # conventions. (At the default 'fixed' rule this fixture's short wavelength breaches
+    # the pixels-per-wavelength floor already at 2x L on a 48 grid.)
+    a = evaluate_across_L(dim, FIXTURE_L, L_values, n_grid=N_GRID, seed=0,
+                          grid_rule="constant_dx")
+    b = evaluate_across_L(nd, FIXTURE_L, L_values, n_grid=N_GRID, seed=0,
+                          grid_rule="constant_dx")
     for ra, rb in zip(a["per_L"], b["per_L"]):
         assert ra["L"] == rb["L"]
         assert rb["kstar_phys"] == pytest.approx(ra["kstar_phys"], rel=1e-6), (
@@ -344,7 +386,10 @@ def test_record_kstar_false_is_refused():
 
 
 def test_L_train_is_always_evaluated_and_never_duplicated():
-    out = evaluate_across_L(turing_model(), FIXTURE_L, [2 * FIXTURE_L], n_grid=N_GRID, seed=0)
+    # constant_dx here only so the 2x row is measurable on this coarse fixture; the
+    # behaviour under test is L bookkeeping, which is rule-independent.
+    out = evaluate_across_L(turing_model(), FIXTURE_L, [2 * FIXTURE_L], n_grid=N_GRID,
+                            seed=0, grid_rule="constant_dx")
     assert [r["L"] for r in out["per_L"]] == [FIXTURE_L, 2 * FIXTURE_L]
     assert sum(r["is_L_train"] for r in out["per_L"]) == 1
     out2 = evaluate_across_L(turing_model(), FIXTURE_L, [FIXTURE_L, FIXTURE_L],

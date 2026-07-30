@@ -89,4 +89,35 @@ rngrn --runs-root experiments/lgen_transfer evaluate --config configs/m3_registr
 The run directory, frozen config, results JSON and checkpoint are tracked in git, so the
 numbers above trace to the run that produced them and the model can be re-simulated.
 
+## Persisted artefacts (added 2026-07-30, unit P1)
+
+The transfer table above used to exist only as stdout — `cmd_evaluate` printed it and stored
+nothing. It is now recorded, so every number here is re-plottable without re-running the
+9-minute recovery:
+
+| artefact | what it holds |
+|---|---|
+| `experiments/lgen_transfer/lgen_eval.jsonl` | one flat row per (run_id, L) — the transfer table |
+| `experiments/lgen_transfer/lgen_summary.jsonl` | one row per evaluation — the §3.5a quantities |
+| `runs/m3_registry_20260730_005701/arrays/lgen_fields.npz` | the (3, 128, 128) field at each L |
+| `runs/m3_registry_20260730_013119/arrays/plot_arrays.npz` | the full per-run arrays + training trajectory |
+
+Re-running the `evaluate` command above reproduced the transfer table exactly
+(`kstar_phys_cv` 0.047636, `periods_slope_rel_err` 0.014345,
+`morphology_class_preserved` 1.00, `min_pixels_per_wavelength` 11.055).
+
+`m3_registry_20260730_013119` is the **same recovery re-run** under the identical command with
+array/trajectory recording switched on: loss, `kstar_model`, `kstar_fft_rel_err`,
+`recovered_turing`, `morphology_match` and `plausibility_score` are **bit-identical** to
+`m3_registry_20260730_005701`, which is the evidence that the recorder is side-effect-free. It
+is kept because it is the only run here carrying a training trajectory — a trajectory exists
+only while recovery runs and cannot be reconstructed from a checkpoint.
+
+Draw the figures with:
+
+```bash
+python scripts/make_figures.py --runs-root experiments/lgen_transfer \
+  --run-id m3_registry_20260730_013119
+```
+
 **System 13 is now burned for tuning.** A §3.5a claim must use systems untouched here.

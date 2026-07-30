@@ -14,6 +14,9 @@ import os
 import numpy as np
 
 from .config import Config
+from .history import TrainingHistory
+from . import plotdata as PD
+from .scoring.morphology import FEATURE_ORDER
 from .data import gate
 from .data.rd_models import build_system
 from .data.spec import spec_from_config
@@ -132,6 +135,60 @@ def _morphology_rollout(cfg: Config, result, ri):
     return field, row
 
 
+def _best_restart(restarts) -> int | None:
+    """Index of the restart/member recover() reported as the winner: lowest finite total.
+
+    Recomputed here from the restart log rather than returned by recover(), which already
+    reports the winner's MODEL and not its index. It is needed so the training trajectory can
+    say which lane became the run's answer — on the batched path all B lanes are recorded and
+    the winner is only known after the last step.
+    """
+    best, best_i = None, None
+    for e in restarts:
+        t = e.get("total")
+        if t is None or not np.isfinite(t):
+            continue
+        if best is None or t < best:
+            best, best_i = t, int(e["restart"])
+    return best_i
+
+
+def _save_run_arrays(cfg: Config, rdir: str, run_id: str, ri, result, J_rec,
+                     model_frame, rollout_row, answer_key, metric, hist) -> int:
+    """Write <run_dir>/arrays/plot_arrays.npz. Returns its size in bytes.
+
+    SCORING SIDE, deliberately. The answer key's (J, D) are read here so
+    `dispersion_sigma_true` can be written on the same k grid as the recovered curve —
+    recovered-vs-true sigma(k) is the canonical Turing figure and was previously impossible
+    to draw. Recovery finished long before this line; nothing here reaches back into it.
+    """
+    morph_tgt = [metric[f"morphology_{k}_target"] for k in FEATURE_ORDER]
+    morph_mdl = ([metric[f"morphology_{k}_model"] for k in FEATURE_ORDER]
+                 if metric.get("morphology_scored") == "compared" else None)
+    best_member = _best_restart(result.restarts)
+    meta = dict(run_id=run_id, git_sha=provenance()["git_revision"],
+                config_id=cfg.config_id(), source=cfg.data.source,
+                dataset_id=cfg.data.dataset_id, sample_key=cfg.data.sample_key,
+                form=cfg.model.form, N=cfg.model.N, m=cfg.model.m,
+                seed=int(cfg.train.seed), arm=metric.get("arm"),
+                kstar_model=float(result.kstar_model), kstar_obs=float(result.kstar_obs),
+                kstar_true=metric.get("kstar_true"),
+                kstar_fft_true=metric.get("kstar_fft_true"),
+                loss=float(result.loss))
+    if hist is not None:
+        meta.update(hist.meta(best_member=best_member))
+    arrays = PD.build_plot_arrays(
+        target_frame=ri.frame, L=ri.L, J_recovered=J_rec, D_recovered=result.D_phys,
+        kstar_obs=result.kstar_obs, morph_vector_target=morph_tgt,
+        model_field=model_frame, rollout_status=rollout_row.get("rollout_status"),
+        morph_vector_model=morph_mdl,
+        J_true=getattr(answer_key, "J", None), D_true=getattr(answer_key, "D", None),
+        meta=meta)
+    if hist is not None:
+        arrays.update(hist.to_arrays())
+    return PD.save_plot_arrays(PD.plot_arrays_path(rdir), arrays)
+
+
 def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
         verbose: bool = False) -> dict:
     """Run one recovery + scoring. Returns the metric dict (and writes a run row)."""
@@ -144,6 +201,13 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     ri, answer_key = _resolve_recovery_input(cfg)   # <-- the firewall boundary
 
     strategy = build_strategy(cfg.loss)
+    # The plottable training trajectory (unit P1). Constructed here, before recovery, and read
+    # back afterwards — recover() takes it as an argument rather than returning it, so the
+    # trace survives even a recovery that raises. adam_steps == 0 (init-only / determinism
+    # checks) has no trajectory to record.
+    hist = (TrainingHistory(every=cfg.train.history_every, total_steps=cfg.train.adam_steps,
+                            n_members=cfg.train.n_restarts, N=cfg.model.N)
+            if (cfg.train.history_every > 0 and cfg.train.adam_steps > 0) else None)
     result = R.recover(ri, form=cfg.model.form, strategy=strategy, tau=cfg.loss.tau,
                        jac_floor=cfg.loss.jac_floor, n_restarts=cfg.train.n_restarts,
                        adam_steps=cfg.train.adam_steps, adam_lr=cfg.train.adam_lr,
@@ -161,7 +225,8 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        dispersion_backend=cfg.model.dispersion_backend,  # unit 10
                        d_init_from_kstar=cfg.model.d_init_from_kstar,   # unit B4
                        batched=cfg.train.batched,                        # unit b2
-                       device=cfg.train.device)                          # unit b2
+                       device=cfg.train.device,                          # unit b2
+                       history=hist)                                     # unit P1
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is
@@ -226,8 +291,18 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     # from. It is derivable from the parameters above, but "derivable" is not "recorded":
     # reconstructing it needs a matching torch and the right x*. Written out explicitly.
     import torch as _torch
-    recovered["J"] = result.model.jacobian(
-        _torch.as_tensor(result.xstar), create_graph=False).detach().cpu().numpy().tolist()
+    J_rec = result.model.jacobian(
+        _torch.as_tensor(result.xstar), create_graph=False).detach().cpu().numpy()
+    recovered["J"] = J_rec.tolist()
+    # THE PLOTTABLE ARRAYS (unit P1). Everything above this line is a scalar or a number as
+    # text; none of it can draw a pattern, a dispersion relation, a spectrum or a learning
+    # curve. `plot_arrays_bytes` goes on the run row so the cost of keeping them is itself
+    # auditable rather than a surprise in `du`.
+    plot_arrays_bytes = None
+    if cfg.solver.save_plot_arrays:
+        plot_arrays_bytes = _save_run_arrays(cfg, rdir, run_id, ri, result, J_rec,
+                                             model_frame, rollout_row, answer_key, metric,
+                                             hist)
     IO.save_results(rdir, "train_results.json",
                     dict(loss=result.loss, kstar_model=result.kstar_model,
                          kstar_obs=result.kstar_obs, restarts=result.restarts,
@@ -299,6 +374,28 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
         d_init_from_kstar=bool(cfg.model.d_init_from_kstar),
         deterministic=bool(cfg.train.deterministic),
         adam_steps=int(cfg.train.adam_steps), n_restarts_requested=int(cfg.train.n_restarts),
+    )
+    # THE REMAINING TUNING AXES (unit P1). Several phase-C sweeps are over exactly these, and
+    # a hyperparameter-vs-outcome plot can only be drawn from columns that are ON the row:
+    # frozen_config.yaml has them, but the index is what gets aggregated. `seed` in particular
+    # was absent, which made a seed-replicate sweep — the project's standard design — impossible
+    # to disaggregate from the index alone. `git_sha` joins a row to the code that produced it.
+    row.update(
+        seed=int(cfg.train.seed), model_seed=int(cfg.model.seed),
+        adam_lr=float(cfg.train.adam_lr), lbfgs_steps=int(cfg.train.lbfgs_steps),
+        grad_clip=float(cfg.train.grad_clip), tau=float(cfg.loss.tau),
+        jac_floor=float(cfg.loss.jac_floor), dratio_centre=float(cfg.loss.dratio_centre),
+        dratio_spread=float(cfg.loss.dratio_spread),
+        ratio_update_every=int(cfg.loss.ratio_update_every),
+        w_kstar=float(cfg.loss.weights.get("kstar", 0.0)),
+        w_turing=float(cfg.loss.weights.get("turing", 0.0)),
+        w_anticollapse=float(cfg.loss.weights.get("anticollapse", 0.0)),
+        w_morphology=float(cfg.loss.weights.get("morphology", 0.0)),
+        w_param_prior=float(cfg.loss.weights.get("param_prior", 0.0)),
+        n_grid=int(cfg.solver.n_grid), morphology_rollout=bool(cfg.solver.morphology_rollout),
+        history_every=int(cfg.train.history_every),
+        git_sha=provenance()["git_revision"],
+        plot_arrays_bytes=plot_arrays_bytes,
     )
     IO.append_run_index(runs_root, row, backend=cfg.tracking.index_backend)
     metric["run_id"] = run_id

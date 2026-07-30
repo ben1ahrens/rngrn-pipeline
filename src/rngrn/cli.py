@@ -10,6 +10,7 @@ Subcommands:
   benchmark      aggregate the run index into a comparison table (markdown/CSV)
   target-report  run K seeds on one target (dataset_id + sample_key + form), emit ONE
                  auditable reproducibility/robustness/pattern/viability report
+  export         the indexes as TIDY/long CSV (one observation per row), for plotting
 
 Every subcommand takes --config (a YAML) and optional dotted overrides (-o key=val).
 """
@@ -46,6 +47,36 @@ def cmd_train(args):
     cfg = _load(args)
     metric = fit(cfg, runs_root=args.runs_root, verbose=args.verbose)
     print(json.dumps(metric, indent=2, default=str))
+
+
+def _persist_lgen(args, cfg, out):
+    """Write a cross-L evaluation into the run-index machinery and an npz. Prints nothing.
+
+    THE DEFECT THIS FIXES. `evaluate_across_L` returns a rich per-L table and this command
+    PRINTED it to stdout and stored nothing, so the measurement in
+    docs/LGEN_TRANSFER_FIRST_RESULT.md could not be re-plotted without re-running a 9-minute
+    recovery. The per-L rows and the summary now go through the SAME machinery
+    optim/target_report.py uses (index.open_index on a named table), as flat scalar rows
+    carrying run_id and the git sha so they join back to the run; the per-L FIELDS go to
+    <run_dir>/arrays/lgen_fields.npz because the pattern at each domain size is itself a
+    figure.
+    """
+    from .index import open_index
+    from . import plotdata as PD
+    from .utils import provenance
+    git_sha = provenance()["git_revision"]
+    per_L_rows, summary = PD.lgen_rows(out, run_id=args.run_id, git_sha=git_sha)
+    backend = cfg.tracking.index_backend
+    idx = open_index(args.runs_root, "lgen_eval", backend)
+    for row in per_L_rows:
+        idx.append(row)
+    open_index(args.runs_root, "lgen_summary", backend).append(summary)
+    if cfg.solver.save_plot_arrays:
+        rdir = os.path.join(args.runs_root, "runs", args.run_id)
+        PD.save_lgen_fields(PD.lgen_fields_path(rdir), out,
+                            meta=dict(run_id=args.run_id, git_sha=git_sha,
+                                      dataset_id=cfg.data.dataset_id,
+                                      sample_key=cfg.data.sample_key))
 
 
 def cmd_evaluate(args):
@@ -88,8 +119,13 @@ def cmd_evaluate(args):
         out = evaluate_across_L(model, L_train, L_values, n_grid=cfg.solver.n_grid,
                                 seed=cfg.train.seed, integrator=cfg.solver.integrator,
                                 horizon_growth_times=cfg.solver.horizon_growth_times,
-                                noise=cfg.solver.noise)
-        print(json.dumps(out, indent=2, default=str))
+                                noise=cfg.solver.noise,
+                                keep_fields=cfg.solver.save_plot_arrays)
+        _persist_lgen(args, cfg, out)
+        # the fields are numpy arrays and belong in the npz, not in stdout
+        printable = dict(out, per_L=[{k: v for k, v in r.items() if k != "field"}
+                                     for r in out["per_L"]])
+        print(json.dumps(printable, indent=2, default=str))
         return
 
     res = simulate(model, L=L_train, n=cfg.solver.n_grid,
@@ -178,6 +214,14 @@ def cmd_benchmark(args):
             w.writerow({c: row.get(c) for c in COLUMNS})
 
 
+def cmd_export(args):
+    """Write the indexes out as TIDY (long) CSV — one observation per row — for plotting."""
+    from .export import export_all
+    counts = export_all(args.runs_root, args.out_dir, backend=args.index_backend,
+                        history_members=args.history_members)
+    print(json.dumps(dict(out_dir=args.out_dir, rows=counts), indent=2))
+
+
 def cmd_target_report(args):
     from .optim.target_report import run_target_report
     cfg = _load(args)
@@ -236,6 +280,13 @@ def build_parser():
     sp.add_argument("--seeds", type=int, nargs="+", required=True)
     sp.add_argument("--workers", type=int, default=1, help="ProcessPoolExecutor workers over seeds (1 = sequential)")
     sp.set_defaults(func=cmd_target_report)
+    sp = sub.add_parser("export", help="indexes -> tidy/long CSV (one observation per row)")
+    sp.add_argument("--out-dir", default="exports")
+    sp.add_argument("--index-backend", choices=["jsonl", "sqlite"], default="jsonl")
+    sp.add_argument("--history-members", choices=["best", "all"], default="best",
+                    help="training-history rows: only the winning member (default) or every "
+                         "recorded restart (much larger; the npz holds all of them either way)")
+    sp.set_defaults(func=cmd_export)
     sp = sub.add_parser("list-datasets")
     sp.add_argument("--datasets-root", default="data/datasets")
     sp.add_argument("--index-backend", choices=["jsonl", "sqlite"], default="jsonl")

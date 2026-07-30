@@ -261,7 +261,8 @@ def _dedup_L(L_values, L_train):
 
 def evaluate_across_L(model, L_train, L_values, *, n_grid=None, seed=0,
                       reference_bank=None, ppw_floor: float = PPW_FLOOR,
-                      n_max: int = 512, grid_rule: str = "fixed", **sim_kw) -> dict:
+                      n_max: int = 512, grid_rule: str = "fixed", keep_fields: bool = False,
+                      **sim_kw) -> dict:
     """Simulate ONE recovered model on several domain sizes and measure L-generalisation.
 
     model     : a recovered RNGRN whose `D` is PHYSICAL. If it came from a checkpoint, pass
@@ -298,6 +299,12 @@ def evaluate_across_L(model, L_train, L_values, *, n_grid=None, seed=0,
                 MORPH.default_reference_bank() — the baked-in centroids, measurably weaker
                 than a bank of real fields (82.1% vs 89.7% held-out accuracy). Pass
                 MORPH.build_reference_bank(...) when the dataset is reachable.
+    keep_fields : attach each L's simulated (N, H, W) field to its row under 'field'.
+                OFF by default because the fields are ~110 KB each at 96x96/N=3 and most
+                callers only want the scalars. Needed to PERSIST the fields — "the pattern at
+                each domain size" is itself a figure, so `plotdata.save_lgen_fields` writes
+                them to an npz next to the cross-L index rows. The field is the rollout's own
+                array, not a copy.
     ppw_floor : minimum pixels per measured wavelength. A patterned row below it RAISES.
     **sim_kw  : forwarded to `rollout.simulate`. `L` and `n` are set by this function and
                 are rejected if passed; `record_kstar=False` is rejected because k* is the
@@ -348,6 +355,8 @@ def evaluate_across_L(model, L_train, L_values, *, n_grid=None, seed=0,
         n = n_grid if grid_rule == "fixed" else grid_for_L(L, L_train, n_grid, n_max=n_max)
         res = simulate(model, L=L, n=n, seed=seed, **sim_kw)
         row = _row_for(res, L=L, L_train=L_train, n=n, bank=bank)
+        if keep_fields:
+            row["field"] = res["fields"]
         if row["patterned"] and row["pixels_per_wavelength"] < ppw_floor:
             # The remedy depends on the grid rule, so compute it per rule rather than
             # quoting one formula for both. Under 'fixed' the grid at THIS L is n_grid

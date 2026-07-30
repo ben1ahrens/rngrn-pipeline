@@ -179,7 +179,7 @@ def _clip_grad_norm_per_member(params, max_norm, B):
 def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
                       frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
                       adam_steps, adam_lr, grad_clip, tau, jac_floor, dev, verbose,
-                      term_kw, kstar_obs_init=None):
+                      term_kw, kstar_obs_init=None, history=None):
     """Run all restarts SIMULTANEOUSLY as one batched optimisation (unit b2).
 
     `restart_seeds` is the EXPLICIT list of per-member init seeds, one per restart. It is
@@ -232,11 +232,18 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
         if bool(newly_dead.any()):
             for b in newly_dead.nonzero().flatten().tolist():
                 died_at[b] = step
+                if history is not None:
+                    history.record_death(b, step)
                 if verbose:
                     print(f"  member {b} step {step}: steady state diverged; member abandoned")
             alive = alive & conv
         if not bool(alive.any()):
             break
+        # Recorded BEFORE opt.step(), so the parameters in the trace are the ones that
+        # produced the loss in the same row. `alive` is passed so an abandoned lane stays
+        # NaN instead of logging frozen parameters nobody is optimising any more.
+        if history is not None and history.should_record(step):
+            history.record_batched(step, parts, bmodel, alive=alive)
         total = torch.where(alive, loss_vec, torch.zeros_like(loss_vec)).sum()
         total.backward()
         _clip_grad_norm_per_member(params, grad_clip, B)
@@ -250,6 +257,10 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
             bmodel, frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
             step=adam_steps, **loss_kw)
     final_alive = alive & conv
+    # The FINAL parameters -- the ones that get checkpointed -- are always in the trace,
+    # whatever the stride (TrainingHistory.should_record).
+    if history is not None:
+        history.record_batched(adam_steps, parts, bmodel, alive=final_alive)
 
     best, restart_log = None, []
     for b in range(B):
@@ -280,7 +291,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             staging_off_frac=0.25, staging_ramp_frac=0.25, detach_xstar=False,
             nondim=False, model_seed=None, dispersion_backend="eig", init="default",
             d_init_from_kstar=False,   # unit b4
-            batched=False):            # unit b2
+            batched=False,             # unit b2
+            history=None):             # plottable training trajectory
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
@@ -322,6 +334,18 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         the serial path is ~1e-12 for one step, not bit-exact over a whole run (see
         _batched_restarts). Requires lbfgs_steps=0, m==N, and a static weighting strategy
         with resid weight 0; each of those raises rather than quietly degrading.
+
+    history: an optional `history.TrainingHistory`. When given, the per-step loss terms, the
+        live weights, and the CONSTRAINED physical parameters of EVERY member are recorded at
+        the recorder's own thinned cadence, on both the serial and the batched path. The
+        recorder is passed IN and read back by the caller rather than returned on the
+        RecoveryResult, because it is an optional side-record and not part of the recovery's
+        answer -- and because this module must not depend on it: nothing here imports
+        `history`, it only calls methods on whatever object it is handed. None (the default)
+        records nothing; the recorder itself only reads parameters under `no_grad`, so a
+        recorded run and an unrecorded one produce the same numbers (verified bit-identical on
+        the tracked `m3_registry_20260730_005701` recovery, see
+        docs/LGEN_TRANSFER_FIRST_RESULT.md).
     """
     ri = recovery_input
     model_seed = seed if model_seed is None else model_seed
@@ -408,7 +432,7 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             dispersion_backend, frame, L_model,
             observed_idx, kgrid, kstar_obs, strategy, adam_steps, adam_lr, grad_clip,
             tau, jac_floor, dev, verbose, term_kw,
-            kstar_obs_init=kstar_obs if d_init_from_kstar else None)
+            kstar_obs_init=kstar_obs if d_init_from_kstar else None, history=history)
     # the serial loop is skipped entirely when the batched path ran; it stays the REFERENCE
     # implementation and the default, so no pre-existing number changes method.
     for r in range(0 if batched else n_restarts):
@@ -439,8 +463,13 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                 # the restart rather than optimise against a meaningless x*.
                 if verbose:
                     print(f"  restart {r} step {step}: steady state diverged; skipping restart")
+                if history is not None:
+                    history.record_death(r, step)
                 failed = True
                 break
+            # BEFORE opt.step(): the recorded parameters are the ones that produced this loss.
+            if history is not None and history.should_record(step):
+                history.record_serial(step, r, parts, model)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params, grad_clip)
             opt.step()
@@ -485,10 +514,16 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             # every other restart, instead of being logged and skipped.
             if verbose:
                 print(f"  restart {r}: steady state diverged at final scoring; skipping restart")
+            if history is not None:
+                history.record_death(r, adam_steps)
             restart_log.append(dict(restart=r, total=float("inf"), steady_state_failed=True,
                                     failed_at="final_eval"))
             continue
 
+        # The FINAL parameters -- post-LBFGS, the ones that get checkpointed -- are always in
+        # the trace, whatever the stride (TrainingHistory.should_record).
+        if history is not None:
+            history.record_serial(adam_steps, r, parts, model)
         restart_log.append(dict(restart=r, total=float(loss), sig_max=parts.get("sig_max"),
                                 sig_max_pos=parts.get("sig_max_pos"),
                                 kstar_model=parts.get("kstar_model"), rel_err=parts.get("rel_err")))

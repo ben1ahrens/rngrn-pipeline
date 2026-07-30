@@ -113,6 +113,41 @@ reproducible and must be re-measured.
 
 **Where it lives:** `src/rngrn/cli.py` (`cmd_evaluate`).
 
+### D-EVID-4 — `train.seed` does not change what recovery does: every "seed replicate" is the SAME draw
+
+**Date found:** 2026-07-30 (unit P1, while validating the new `seed` / `model_seed` run-index
+columns). **Status:** **OPEN — FOUND, NOT FIXED.** Reported rather than repaired because
+changing the seed plumbing would change what every previously recorded "seed replicate"
+number means, and that is the owner's call, not the implementing agent's.
+
+**What was found.** `train.fit` calls
+`R.recover(..., seed=cfg.train.seed, model_seed=cfg.model.seed)`. Inside `recover`,
+`model_seed = seed if model_seed is None else model_seed` — and `cfg.model.seed` is `0`, never
+None, so **`model_seed` is 0 on every run regardless of `train.seed`**. Restart inits come
+from `_restart_seed(model_seed, r)` and a per-restart `torch.Generator`, never from the global
+RNG that `seed_everything(cfg.train.seed)` seeds. `train.seed` therefore reaches only the
+post-training rollout's noise field (`eval.rollout.simulate(seed=...)`), not the optimisation.
+
+**The measurement.** A 12-run sweep over `train.adam_steps` ∈ {60, 120, 240} ×
+`model.form` ∈ {competitive, nc1} × `train.seed` ∈ {0, 1} on
+`three_gene_val/sample_0000`: the six pairs differing **only** in `train.seed` have
+**bit-identical** loss (e.g. competitive/60: 0.223712 and 0.223712; nc1/240: 0.073764 and
+0.073764) and identical `kstar_fft_rel_err`. The defect was invisible before unit P1 because
+neither `seed` nor `model_seed` was on the run row.
+
+**What it plausibly affects, stated as a question and not as a conclusion.**
+`optim/target_report.py` builds its K per-seed jobs with `apply_overrides(..., ["train.seed=<seed>"])`
+and nothing else, so on the reading above a K-seed target report runs K identical recoveries
+and its cross-seed reproducibility statistics would be measuring nothing. **This has not been
+verified end to end here** — it follows from the code path and from the sweep evidence above,
+but no target report was re-run to confirm it, and any existing reproducibility number should
+be re-checked against `model_seed` before it is quoted.
+
+**Where it lives:** `src/rngrn/train.py` (the `model_seed=cfg.model.seed` argument);
+`src/rngrn/recover.py` (`_restart_seed`, the `model_seed` default);
+`src/rngrn/optim/target_report.py` (`run_target_report`'s per-seed overrides). The new
+`seed` / `model_seed` columns on the run row are what make it visible.
+
 ---
 
 ## Part 2 — Decisions
@@ -696,6 +731,172 @@ older checkpoint is refused rather than assumed dimensional.
 **Where it lives:** `src/rngrn/eval/lgen_eval.py` (`evaluate_across_L`,
 `summarise_across_L`, `physical_model_from_checkpoint`); `src/rngrn/cli.py`
 (`--eval-L` / `--l-factors`); `tests/test_lgen_eval.py`.
+
+---
+
+### D-PLOT-1 — the plottable ARRAYS are persisted per run, at float32 for fields and float64 for k axes, and are TRACKED in git
+
+**Date:** 2026-07-30. **Status:** DECIDED. **Decided by:** the implementing agent, under the
+owner's requirement "all data need to be stored in a way that I can make plots on this stage
+for my research".
+
+**The problem.** A run recorded scalars (`runs.jsonl`, `target_reports.jsonl`), the recovered
+parameters and Jacobian as text, and a checkpoint. That audits a number and re-runs a model.
+It cannot draw a figure: **you cannot plot a pattern, a dispersion relation or a spectrum
+from a scalar**, and every array was discarded when the process exited. The canonical Turing
+figure — recovered σ(k) overlaid on the answer key's σ(k) — was impossible to draw at all.
+
+**The decision.** `train.fit` writes one compressed `<run_dir>/arrays/plot_arrays.npz`
+(`solver.save_plot_arrays`, default **ON**) carrying `target_frame`, `model_field` (only when
+the rollout patterned), `dispersion_k` + `dispersion_sigma` + `dispersion_sigma_true` on ONE
+shared k grid, `raps_k` + `raps_target` + `raps_model`, the two 4-D morphology vectors with
+their `morph_feature_order`, and a self-describing JSON `meta` (run_id, git sha, dataset_id,
+sample_key, form, L, and every k\*).
+
+**dtype, split deliberately.** *Fields and spectra* → **float32**: they are plotted, never
+differentiated, and float32's ~7 significant digits are far beyond what a colour map or a
+log-y axis resolves; it halves the file. *k axes and σ(k)* → **float64**: these are read as
+numbers (k\* is their argmax, and σ near onset is ~1e−3 against a J of order 1), so they keep
+the precision they were computed in.
+
+**MEASURED size, and why it is tracked.** Per-run npz, real runs on `three_gene_multiL`
+(96×96, N=3): **110 KB** for a short serial run with no history and no model field;
+**118 KB** batched, 8 restarts, 60 steps; and **645 KB** for the full phase-C shape — the
+tracked `m3_registry_20260730_013119` (64 restarts, 400 steps, `history_every=10`, both fields
+present, `plot_arrays_bytes = 644886`). Of its 806 KB uncompressed content the training
+trajectory is **570 KB** and the two fields **221 KB**; float32 mantissas barely compress, so
+this is not an estimate that will improve. Projected for a phase-C wave of ~96 runs (8 seeds ×
+6 targets × 2 forms): **≈62 MB**, plus **0.82 MB per cross-L evaluation** (5 L × 3 × 128 × 128
+float32, measured on the tracked `m3_registry_20260730_005701` evaluation).
+
+That is tens of MB, not GB, and no single run is multi-MB — so `.gitignore` now **tracks**
+`experiments/**/arrays/*.npz` (it previously ignored `experiments/**/*.npz` wholesale, which
+cost nothing only because nothing wrote one). Two levers exist if a wave needs to be cheaper,
+both explicit rather than silent: `solver.save_plot_arrays=false` (no npz at all) and
+`train.history_every` (the trajectory is 70% of the file; stride 20 halves it). The
+per-run byte count goes on the run row as `plot_arrays_bytes`, so the cost stays auditable.
+
+**Figures are NOT tracked** (`experiments/**/figures/`, `*.png` stay ignored): they are
+redrawn from the arrays in seconds by `scripts/make_figures.py`. The arrays are the artefact.
+
+**The one guard that matters, carried over.** A rollout that did not pattern writes **no**
+`model_field` key, and `meta.rollout_status` says why. The project already recorded one false
+`morphology_match` from classifying decayed float noise (see `train._morphology_rollout`);
+saving that noise as a field would re-open the same hole from the plotting side.
+`tests/test_plot_arrays.py::test_unpatterned_rollout_gets_no_model_field` pins it.
+
+**Firewall.** `plotdata.py` reads the answer key's (J, D) — passed in as plain numpy by
+`train.fit` — so it is SCORING side. It imports nothing truth-side, and
+`tests/test_plot_arrays.py::test_recovery_side_does_not_import_the_scoring_side_writers`
+audits statically that no recovery-side module imports it, mirroring `tests/test_firewall.py`.
+
+**Where it lives:** `src/rngrn/plotdata.py`; `src/rngrn/train.py` (`_save_run_arrays`);
+`src/rngrn/config.py` (`solver.save_plot_arrays`); `.gitignore`;
+`scripts/make_figures.py`; `tests/test_plot_arrays.py`.
+
+### D-PLOT-2 — the training trajectory is recorded at stride 10, for ALL members, at float32
+
+**Date:** 2026-07-30. **Status:** DECIDED, with the stride flagged as a SIZE tradeoff rather
+than a scientific one. **Decided by:** the implementing agent; the default stride of 10 was
+the owner's suggestion and is adopted with its cost measured.
+
+**The problem.** `recover()` kept one summary row per RESTART and nothing per step. A run
+that reached its loss by step 100 and one that crawled there by step 1900 left identical
+records, the weights actually in force were never written down (and `DataFirstStaging` ramps
+`turing` from 0 across the first 50% of the budget, so a loss curve read without them is
+misleading), and the D trajectory — whether recovery reaches biologically plausible
+diffusivities is the live question behind D1/D3 — was invisible.
+
+**The decision.** `history.TrainingHistory` records, per recorded step and per **member**:
+every loss term (`L_*`) and the total, every weight in force (`w_*`), the **constrained
+physical** parameters KA/KR/α/δ/β/D (36 columns at N=3 — *not* raw θ, which is a link-function
+artefact), the derived D-ratio, the per-step diagnostics (`kstar_model`, `sig_max`,
+`sig_max_pos`, `rel_err`), and `ss_converged`. Both the serial and the batched path are
+instrumented, since phase C runs batched on CUDA.
+
+**Stride 10, with the cost measured.** One record per step × 64 restarts × 36 parameters is
+~921k floats per 400-step run (**≈3.7 MB** at float32) — not affordable across a 96-run wave.
+Stride 10 measures **≈0.51 MB** per run (S=41, B=64, Q=17, P=36, float32, measured by
+`savez_compressed`), and still puts 21 recorded points across the staging ramp at
+`adam_steps=400`. **Step 0, the last training step, and the post-training evaluation step are
+recorded unconditionally whatever the stride**, so no curve's endpoints are interpolated.
+`train.history_every=0` disables the recorder entirely.
+
+**ALL members are kept, thinned — never member 0 relabelled as "the run".** On the batched
+path B members are optimised jointly and the reported result is the **best** member, whose
+index is only known after the last step; recording one lane during training would either be
+the wrong lane or require guessing. `meta.history_best_member` records which lane won, so a
+figure can plot the winner without the trace having pre-committed to it. The offered
+alternative (full trace for the winner plus min/median/max across the rest) was **not**
+taken: it costs a second pass to identify the winner and would have discarded the
+restart-to-restart spread, which is itself the answer to "is this recovery reproducible".
+
+**A member that dies is an EVENT, not a gap.** A restart whose steady state diverges is
+abandoned; its lane becomes NaN from that step on, and `hist_death_step` records the step it
+died at. Lanes are never reindexed, so the seed-to-lane mapping stays auditable.
+
+**float32, and one measured performance note.** The trajectory is plotted, not
+differentiated. On CUDA the first draft read parameters per (member, parameter), which is
+6·B synchronising device→host copies per recorded step (15 744 for a 400-step, 64-restart run
+at stride 10); `history._param_block` reads each parameter once for the whole batch instead —
+6 copies per recorded step. The loss/diagnostic entries of a batched `parts` dict are already
+numpy (`losses/terms._np`), so they cost no extra sync.
+
+**Where it lives:** `src/rngrn/history.py`; `src/rngrn/recover.py` (both loops);
+`src/rngrn/config.py` (`train.history_every`); `src/rngrn/export.py` (`tidy_history`);
+`tests/test_plot_arrays.py`.
+
+### D-PLOT-3 — the cross-L table is persisted through the run-index machinery; exports are TIDY/long
+
+**Date:** 2026-07-30. **Status:** DECIDED. **Decided by:** the implementing agent.
+
+**The problem, twice over.** (1) `eval.lgen_eval.evaluate_across_L` returns a rich per-L table
+and `cli.cmd_evaluate` **printed it to stdout and stored nothing** — so the measurement in
+`docs/LGEN_TRANSFER_FIRST_RESULT.md` could not be re-plotted without re-running a 9-minute
+recovery. (2) The indexes are one row per run with ~120 columns, which is a record, not a
+plotting frame: drawing "outcome vs hyperparameter" from a wide row requires knowing which
+columns are identifiers and reshaping first.
+
+**The decisions.**
+
+- **Cross-L results go through the SAME machinery** `optim/target_report.py` uses —
+  `index.open_index(runs_root, <table>, backend)` — as **flat scalar** rows built with
+  `dict.update()`: one row per (run_id, L) in table `lgen_eval`, one summary row per
+  evaluation in `lgen_summary`. Both carry `run_id` and `git_sha` so a row joins back to the
+  run that produced the model and the code that evaluated it. Two tables rather than one
+  mixed table with a `row_kind` discriminator, because a tidy export of a mixed table would
+  have to filter before it could be plotted. The per-L **fields** go to
+  `<run_dir>/arrays/lgen_fields.npz` (`evaluate_across_L(keep_fields=True)`), one key per L
+  because under `grid_rule='constant_dx'` the grids differ between L and cannot be stacked.
+  Verified by re-running the tracked `m3_registry_20260730_005701` evaluation: every number in
+  `docs/LGEN_TRANSFER_FIRST_RESULT.md`'s transfer table reproduced exactly
+  (`kstar_phys_cv` 0.047636, `periods_slope_rel_err` 0.014345,
+  `morphology_class_preserved` 1.0, `min_pixels_per_wavelength` 11.055).
+- **`rngrn export` writes LONG/TIDY csv** — `runs_tidy.csv`, `target_reports_tidy.csv`,
+  `lgen_tidy.csv`, `history_tidy.csv` — as `<identifier columns…>, variable, value,
+  value_num`: **one observation per row**. `value` keeps the verbatim text (so a categorical
+  observation like `morphology_pred` survives) and `value_num` the numeric reading, empty when
+  there is none; booleans are numeric 0/1 *and* text. The **hyperparameters stay as identifier
+  columns** (`export.RUN_ID_COLS`), which is exactly what makes an outcome-vs-hyperparameter
+  plot a group-by rather than a reshape; a sweep already writes one run row per cell
+  (`optim/sweep.py` calls `fit()` per point), so a sweep axis is a column like any other.
+  Stdlib `csv` only — a tidy export must not be the reason a plotting environment needs
+  pandas. `tests/test_plot_arrays.py` asserts the tidiness directly: every record has exactly
+  one variable/value pair and (identifiers, variable) is unique.
+- **Missing hyperparameter columns were added to the run row**: `seed` and `model_seed` (their
+  absence made a seed-replicate sweep — this project's standard design — impossible to
+  disaggregate from the index alone), `adam_lr`, `lbfgs_steps`, `grad_clip`, `tau`,
+  `jac_floor`, `dratio_centre`, `dratio_spread`, `ratio_update_every`, the remaining loss
+  weights, `n_grid`, `history_every`, `git_sha`, `plot_arrays_bytes`.
+- **`history_tidy.csv` defaults to the winning member only** (`--history-members best`), which
+  is what a learning curve "for this run" means and keeps the file at ~S·(Q+P) rows instead of
+  ~112k for one 400-step, 64-restart run. `--history-members all` exports every recorded
+  restart. Nothing is dropped from the npz either way — the arrays always hold every member;
+  the flag chooses what the CSV projects, and it is documented in `--help`.
+
+**Where it lives:** `src/rngrn/plotdata.py` (`lgen_rows`, `save_lgen_fields`);
+`src/rngrn/cli.py` (`_persist_lgen`, `cmd_export`); `src/rngrn/export.py`;
+`src/rngrn/eval/lgen_eval.py` (`keep_fields`); `tests/test_plot_arrays.py`.
 
 ---
 

@@ -121,6 +121,18 @@ class TrainConfig:
     batched: bool = False                   # unit b2
     device: str = "cpu"                     # unit b2
 
+    # ---- unit P1: plottable TRAINING TRAJECTORY ----------------------------------------
+    # Step stride for history.TrainingHistory, which records the per-step loss terms, the
+    # WEIGHTS actually in force, and the CONSTRAINED physical parameters (KA, KR, alpha,
+    # delta, beta, D) of EVERY member. 0 or less records nothing.
+    # 10 is the default because one record per step x 64 members x 36 parameters is ~3.7 MB
+    # per 400-step run at float32 — not affordable across a 96-run wave — while a stride of
+    # 10 is ~370 KB and still resolves the staging ramp, which spans 25-50% of the budget
+    # (25 recorded points across it at adam_steps=1000). Step 0, the last training step and
+    # the final evaluation are recorded UNCONDITIONALLY whatever the stride, so no curve's
+    # endpoints are interpolated. See docs/DECISIONS.md D-PLOT-2.
+    history_every: int = 10                 # unit P1
+
 
 @dataclass
 class SolverConfig:
@@ -149,6 +161,17 @@ class SolverConfig:
     morphology_check_every: int = 200        # unit 7
     morphology_saturation_tol: float = 0.01  # unit 7 [TUNE] — uncalibrated stopping rule
     morphology_saturation_window: int = 5    # unit 7 [TUNE] — uncalibrated stopping rule
+
+    # ---- unit P1: the PLOTTABLE ARRAYS of a run ---------------------------------------
+    # Write <run_dir>/arrays/plot_arrays.npz — the target frame, the recovered model's
+    # rolled-out field, sigma(k) recovered AND true, the RAPS of both, the morphology
+    # vectors and the training trajectory. ON by default: a run whose arrays were not saved
+    # cannot be plotted afterwards without re-running it, and re-running a phase-C recovery
+    # costs ~9 minutes. Turn it OFF deliberately for a very large sweep. MEASURED: 645 KB for
+    # the full phase-C shape (96x96 grid, N=3, 64 restarts, 400 steps, history_every=10, both
+    # fields present), of which the training trajectory is ~0.51 MB; 110 KB for a short run
+    # with no history and no model field. See docs/DECISIONS.md D-PLOT-1.
+    save_plot_arrays: bool = True            # unit P1
 
 
 @dataclass

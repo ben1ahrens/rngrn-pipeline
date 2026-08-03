@@ -1278,3 +1278,49 @@ from adopting the alternative, but no one has made that a formal decision.
 - `src/rngrn/losses/weighting.py`, `src/rngrn/cli.py`, `.githooks/pre-push` (read
   directly to confirm the two evidence-integrity fixes are actually in the code, not
   only claimed in a PR body).
+
+---
+
+### D-PERF-1 — an outer CONVERGENCE CHECK on the loss would be fast and WRONG
+
+**Question asked (owner, 2026-08-03):** "would the code run faster if we had a convergence
+check?" `recover.py:226` and `:474` run `for step in range(adam_steps)` with no early exit,
+so the full budget is always spent. The inner steady-state Newton already has convergence
+checks and an early exit; the outer Adam loop has none.
+
+**Measured, from 18 committed runs' `hist_scalars` (no new compute):**
+
+| quantity | median | p90 | max |
+|---|---|---|---|
+| step reaching 99 % of total loss drop | **30** | 180 | 399 |
+| step reaching 99.9 % of loss drop | **35** | 190 | 400 |
+| last step any restart flips Turing state | **160** | — | **270** |
+
+**The decision: do NOT add a loss-based convergence check.** The loss is done by step ~30,
+but restarts are still flipping into and out of the Turing regime until step 160–270. A
+loss-based early stop would fire at ~35, look like a 10x speedup, and silently change the
+Turing rate — the criterion the project actually scores. It is a concrete instance of the
+standing rule that the lowest-loss configuration is not the best recovery.
+
+**A check on Turing-state stability instead would be sound but modest**: ~100 quiet steps
+after the last flip puts the stop at 260–370 of 400, i.e. **25–35 %**, not a transformation.
+
+**And it does not touch the real cost.** The ~30x per-target spread occurs at IDENTICAL step
+counts, so it is per-step cost in the steady-state solve, not step count. The correlation
+runs the wrong way for an early stop: legacy 174/512 restarts @ 370 s, qvar/sample_0003
+31/512 @ 1024 s, qvar/sample_0000 2/512 @ 1275 s — monotone in both. The expensive targets
+are the non-patterning ones, where the optimiser thrashes and a convergence check fires
+LEAST. It would accelerate the cheap runs and leave the expensive ones untouched.
+
+**Where the real win is, recorded but NOT taken:** 510 of 512 restarts never reach the
+Turing regime and burn the full budget. Culling provably-dead restarts (sig_max flat and
+negative for N steps) would cut cost on exactly the expensive targets, and the hook already
+exists — `hist_death_step` is in the history arrays and is non-finite for all 64 members,
+i.e. nothing ever dies. NOT taken here because it changes WHICH restart wins: a science
+change needing its own measurement, and it would break comparability with every cell
+measured so far.
+
+**Cheaper unexplored alternative:** `train.adam_steps` has never been swept. Given 99.9 % of
+the loss drop lands by step 35 and the last Turing flip by 270, a 400-step budget may
+already be generous, and measuring 200/300/400 is a config-only answer to "can this run
+faster" that requires no code change and no comparability argument.

@@ -225,6 +225,70 @@ not optional**: two concurrent trainer pools still do not fit, one does. The gua
 children at ~1.6 GiB each, so `--workers 4` needs ~8 GiB, and a floor below the pool's own
 footprint would let it launch into headroom it cannot fit in.
 
+### 7b. `ps`, `pgrep` and `pkill` ARE BLIND INSIDE THE SANDBOX. Always disable it to check.
+
+They do not error — they return an **empty result**, which reads exactly like "nothing is
+running". On 2026-08-03 that cost 43 minutes: two queues had been training for 52 minutes,
+every sandboxed `ps` said they were dead, and acting on that I deleted the live stdout file
+of a running trainer (losing a 53-minute cell) and briefly deleted committed run
+directories. `lsof` on `.trainer.lock` with the sandbox disabled showed the truth
+immediately.
+
+This is the same failure mode as the zero-byte reports: **absence of evidence rendered
+indistinguishable from evidence of absence.** So:
+
+- Any process check — `ps`, `pgrep`, `pkill`, `/proc` walks — runs with
+  `dangerouslyDisableSandbox: true`, or its result means nothing.
+- Before concluding a job died, corroborate with something the sandbox cannot hide: file
+  mtimes, `free -h` (a dead pool frees GiB), or `lsof` on the lock.
+- A log whose last line is a START is **not** evidence of death. The next line only arrives
+  when the target finishes, which can be 40 minutes later.
+
+### 7c. There is NO discretised Laplacian in training. It is analytic, in Fourier space.
+
+Repeatedly re-derived from scratch, so it is written down once here.
+
+**Training never simulates.** `losses/terms.py` constrains the reaction *pointwise*; the
+spatial operator enters only through its Fourier eigenvalues, in the dispersion relation
+
+```
+sigma(k) = max Re eig( J - k^2 * diag(D) )        model.py::dispersion
+```
+
+The `-k^2 D` term **is** the Laplacian. No grid, no stencil, no FFT of any field, and
+therefore no spatial discretisation error anywhere in the objective. Cost lives in the
+steady-state Newton solve, never in a spatial operator — which is why the measured ~30x
+per-target spread localises there.
+
+**A real Laplacian appears only post-hoc**, in `eval/numerics.py`, and it is **spectral,
+never finite-difference**: `_spectral_k2` / `_spectral_k2_half` build `|k|^2` from
+`fftfreq(n, d=L/n) * 2*pi` for the ETDRK4 rollout behind the morphology comparison. The
+generator (`scripts/gen_tg3.py`) uses the same spectral IMEX scheme.
+
+Three consequences that matter:
+
+1. **The training k-grid is continuous; the box is not.** A periodic domain of size L
+   admits only `k = 2*pi*|m|/L`. Training hinges on 400 continuous wavenumbers
+   (`recover._kgrid_for`), including ones the domain cannot support — so a model can be
+   Turing-unstable *in training* and still fail to pattern in a rollout, because the
+   realised mode must snap to the admissible lattice. This is exactly the mode-quantisation
+   argument `PREREGISTRATION` §3.5a relies on to make cross-L transfer non-trivial. Milder
+   in 2D than it sounds, since `|k| = 2*pi*sqrt(m^2+n^2)/L` is a denser set than the 1D
+   picture suggests, but genuinely coarse at small L.
+2. **The grid is anchored to the observed k\***: `kmin = kstar_obs/50 + 1e-3`,
+   `kmax = max(8*kstar_obs, 2*kmin)`. Firewall-legal (it comes from an FFT of the observed
+   frame). Unit B4 fixed a real defect here — the floor had been an absolute 2.0
+   rad/length, which is not scale-free and silently dominated whenever `kstar_obs < 0.25`,
+   i.e. 11 of 287 samples (3.8 %), pinning the grid to the wrong band.
+3. **L enters only as a unit.** `L_model = 1.0 if nondim else L`. Since k scales as 1/L and
+   the Laplacian as 1/L^2, the non-dimensional path is an EXACT change of variables — no
+   approximation, only the units of D and k change. That is precisely why §3.5b forbids the
+   nondim path from claiming credit for L-invariance: it is L-invariant by construction.
+
+**So "Turing-unstable" and "patterns" are different claims.** Closing that gap is the entire
+reason `eval/rollout.py` exists, and why `morphology_match` is scored separately from every
+dispersion-derived criterion.
+
 ## 8. Evidence discipline
 
 The single most important rule in this file.

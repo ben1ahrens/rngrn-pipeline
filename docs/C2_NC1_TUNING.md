@@ -233,8 +233,17 @@ The Jacobian-diagonal defect of `STATE_OF_THE_SCIENCE` §10 reproduces exactly o
 `three_gene` systems that do — and patterning needs self-activation. `init='low_basal'`
 takes that to **80/249**. It also *lowers* the init's topological concentration (rtol 0.02
 K=8 modal 0.733 → 0.235), i.e. it buys J-diversity at the cost of the trivially-high init
-agreement. **Not measured under training in this unit** — recorded as the highest-value
-untried axis, not as a claim.
+agreement. **Not measured under training in this unit** — recorded as a lead, not a claim.
+
+One thing worth flagging for whoever picks it up. `docs/DECISIONS.md` D9 rejected
+`low_basal` as a default on two grounds: it failed 40/40 restarts under training on
+`three_gene_val/sample_0000`, **and** its own Newton steady-state solve converged only
+**255/400 = 64 %** even before any objective was added. That second ground no longer
+reproduces here: on `nc1`, `low_basal` converges **249/256 = 97 %**. Two things changed
+between D9 and now — the form (D9 measured `competitive`) and unit B3's **multistart**
+steady-state globalisation. If B3 is what fixed it, D9's training-time failure deserves
+re-measuring before the axis is treated as closed. That is a hypothesis with a named test,
+not a result.
 
 ---
 

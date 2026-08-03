@@ -26,8 +26,8 @@
 #
 # name|seeds|targets|workers|overrides
 c2_P_t8k8_consol|0,1,2,3,4,5,6,7|sample_0003,sample_0001,sample_0004|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=8.0
-c2_R_t8k32|0,1,2,3,4,5,6,7|sample_0000,sample_0003|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=32.0
-c2_R_t8k16|0,1,2,3,4,5,6,7|sample_0000,sample_0003|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=16.0
+c2_R_t8k32|0,1,2,3,4,5,6,7|sample_0000,sample_0001|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=32.0
+c2_R_t8k16|0,1,2,3,4,5,6,7|sample_0000,sample_0001|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=16.0
 c2_Q_t2k8|0,1,2,3,4,5,6,7|sample_0000|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=2.0 -o loss.weights.kstar=8.0
 c2_Q_t4k8|0,1,2,3,4,5,6,7|sample_0000|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=4.0 -o loss.weights.kstar=8.0
 c2_Q_t16k8|0,1,2,3,4,5,6,7|sample_0000|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=16.0 -o loss.weights.kstar=8.0

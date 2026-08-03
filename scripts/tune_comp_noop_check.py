@@ -36,6 +36,7 @@ from rngrn.train import fit  # noqa: E402
 # The axes this unit sweeps. name -> list of "dotted.path=value" overrides applied to the
 # shared control config. Each is compared against the control (the library default).
 AXES = {
+    "turing_weight":     ["loss.weights.turing=8.0"],
     "detach_xstar":      ["loss.detach_xstar=true"],
     "d_init_from_kstar": ["model.d_init_from_kstar=true"],
     "param_prior":       ["loss.weights.param_prior=1.0"],

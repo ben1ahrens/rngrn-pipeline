@@ -685,3 +685,101 @@ remaining cells. It does not make the target pass: **3.1 and 3.3 and 3.4 all fai
 under `PREREGISTRATION.md` §3 a target passes only if all five criteria hold. What it does
 is convert 3.2 from uncomputable to met, cut the k\* error 4-fold, and — most usefully —
 remove the Turing rate as a confound so that the remaining failures can be attributed.
+
+---
+
+## 10. Cell `baseline` on `sample_0003` — and criterion 3.1's control, at last computable on the PRIMARY dataset
+
+`three_gene_qvar/sample_0003`, K = 8 (seeds 0…7), `git_sha 9227636`,
+`config_id 8681906d5a17`, **1024 s**. Baseline configuration unchanged. All 8 run records
+present and non-empty (21.3–21.7 KB), `seed_errors` `{}`, 0 raised — a complete K = 8. (The
+earlier in-flight attempt at this cell was 3-of-7 with 4 zero-byte results and was removed
+rather than reported; this is a clean re-run of the whole cell, per §2.)
+
+This is the target `BIO_VIABILITY.md` §4.2 identified as one that *patterns*, and it does:
+`turing_frac` 0.875 (7 of 8; seed 7 is the miss), pooled restarts 31/512 = 0.0605 — **15×**
+`sample_0000`'s baseline reachability of 2/512, on identical settings. It also cost 1024 s
+against `sample_0000`'s 1275 s at the same K and workers, which is the third data point on
+the cost anomaly and points the same way as §7.4: **the cheap targets are the patterning
+ones.** Ranked by pooled reachability against wall-clock, the three baseline cells are
+`legacy_control` 174/512 @ 370 s, `sample_0003` 31/512 @ 1024 s, `sample_0000` 2/512 @
+1275 s — monotone in both. The expensive targets are the ones where the steady-state solve
+grinds on a flattening, near-singular Jacobian.
+
+### 10.1 CRITERION 3.1's CONTROL — the substantive half, and it is NEGATIVE
+
+With two distinct `three_gene_qvar` targets in one runs-root, §3.1's size-matched
+cross-target control is computable on the primary dataset for the first time in this unit:
+
+| rtol | within-target | size-matched cross-target | **gap** | bar |
+|---|---|---|---|---|
+| 0.02 | 0.250 | 0.500 | **−0.250** | ≥ +0.25 |
+| **0.05** | **0.250** | **0.510** | **−0.260** | **≥ +0.25** |
+| 0.10 | 0.250 | 0.508 | **−0.258** | ≥ +0.25 |
+
+**The gap is negative at every tolerance, and by roughly the full width of the bar in the
+wrong direction.** Criterion 3.1 requires within-target agreement to exceed cross-target
+agreement by ≥ 0.25; the measurement is that cross-target agreement is **twice** the
+within-target value (0.510 vs 0.250).
+
+`PREREGISTRATION.md` §3.1 states the reading in advance: *"If within-target ≈ cross-target,
+the model is reproducing itself, not the target, and the criterion fails **regardless of the
+absolute number**."* The measurement is worse than that condition — not approximate equality
+but a systematic deficit. **Seeds fitted to different targets agree with each other more
+than seeds fitted to the same target do.** That is the failure this control was placed first
+to expose, and it is now measured on the primary dataset rather than inferred.
+
+It also independently reproduces C2's finding on `nc1` (gap ≈ 0 at 0.250 within / 0.512
+cross), across both regulation forms.
+
+**This forecloses the one remaining escape route.** §8.4's gauge-invariant 7-bit statistic —
+the coarser diagnostic that scored higher in absolute terms — carries its own control here,
+and **it is negative too**: within 0.375, cross 0.500, gap **−0.125**. So the higher absolute
+number was granularity, exactly as §8.4 warned, and not target information. No statistic
+tried in this unit, at any tolerance, under any quotient, shows the model's recovered
+topology carrying more information about *this* target than about a different one.
+
+### 10.2 The other pre-registered criteria on this target
+
+| # | criterion | bar | value | verdict |
+|---|---|---|---|---|
+| 3.1 | `topology_consistency` @0.05 | ≥ 0.75 | 0.250 (7 distinct structures) | **FAILS** |
+| 3.1 | within − cross gap | ≥ 0.25 | **−0.260** | **FAILS** |
+| 3.2 | median `turing_volume_10pct` | ≥ 0.90 | **0.990** (n = 7) | **MEETS** |
+| 3.2 | median `turing_volume_4p8pct` | ≥ 0.95 | **1.000** (n = 7) | **MEETS** |
+| 3.3 | `kstar_fft_rel_err` median | ≤ 0.083 | **0.0169** | **MEETS** |
+| 3.3 | `trivial_kstar_err` (reported beside it) | — | **0.143** | **not leaked** |
+| 3.3 | `morphology_match_frac` | true | 0.143 (1 of 7 compared) | **FAILS** |
+| 3.4 | `plausibility_score` mean | = 1.0 | 0.417 | **FAILS** |
+
+**`kstar_fft_rel_err` = 0.0169 against a bar of 0.083, with `trivial_kstar_err` = 0.143
+beside it, is the first genuine k\* result in this project.** The model is 8.5× better than
+the image-blind `L`-only predictor on this target, so — unlike every legacy number, where
+the trivial predictor is exact to 1.3e−16 — this one carries real information about the
+image. `kstar_spread` across the 8 seeds is 0.079.
+
+So on `sample_0003` the pipeline meets **3.2 (both bars) and 3.3's k\* bar on non-leaked
+data**, and fails **3.1 (both halves), 3.3's morphology requirement, and 3.4**. Under
+§3 a target passes only if all five criteria hold, so `sample_0003` does not pass — but the
+shape of the shortfall is now specific rather than global, and the binding failure is
+unambiguously 3.1.
+
+### 10.3 What this changes about the unit's conclusion
+
+Combining §9 and §10, the two failures the brief separated are now measured independently of
+each other on the primary dataset:
+
+* **The rate is tractable.** `loss.weights.turing=8.0` took `sample_0000` from 1/8 to 8/8
+  seeds and 2/512 to 18/512 restarts; `sample_0003` reaches 7/8 at the baseline already.
+* **Criterion 3.1 is not.** It sits at 0.125–0.250 against 0.75 on every cell measured, it
+  does not move when the rate moves 8×, it does not move under any symmetry quotient, and
+  its control — the half `PREREGISTRATION.md` calls substantive — is **negative** on the
+  primary dataset in both forms.
+
+The mechanism in §8 says why these are different problems: the objective constrains J only
+through σ(k), which fixes 7 of 9 functions of J and pins the diagonal that patterning needs,
+while leaving the off-diagonal pair senses — *who regulates whom* — genuinely unconstrained.
+Raising the Turing weight tightens exactly the constraint that is already binding. **No
+weighting of the existing terms can fix 3.1, because the information 3.1 asks for is not in
+the objective at all.** Fixing it requires a term that sees J beyond its spectrum, which is
+future work and is recorded as such rather than attempted after the fact.

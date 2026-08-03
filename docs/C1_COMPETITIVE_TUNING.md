@@ -367,3 +367,150 @@ That is the direction the unit brief flagged as significant: the expensive targe
 non-patterning ones, so the cost anomaly and the Turing-rate problem look like one problem —
 the steady-state solve grinding on a flattening, near-singular Jacobian. Two targets is not
 a measurement of that; `sample_0003` (which patterns) is the next data point.
+
+---
+
+## 8. JOB B — criterion 3.1 as its own problem: what the objective can and cannot see in J
+
+§7.2 established, from the legacy control, that **3.1 is not downstream of the Turing
+rate**: 8 of 8 seeds pattern, all agree on k\* to 1.5 %, and `topology_consistency` is
+still 0.125 with 8 distinct sign structures. This section asks the next question directly —
+*which directions in J does the objective actually constrain?* — and answers it with a
+proof plus a measurement. Instrument: `scripts/c1_gauge.py`.
+
+### 8.1 The objective sees J only through σ(k), and that has exact consequences
+
+Every J-dependent term in the trained objective is one of three:
+
+| term | how it sees J |
+|---|---|
+| `losses/terms.py::kstar_anchor` | only via σ(k) = max Re eig(J − k²D) |
+| `losses/terms.py::turing_hinges_split` | only via σ(k) |
+| `losses/terms.py::anticollapse` | `softplus_hinge(jac_floor − ‖J‖_F)`, `jac_floor` = 1.0 |
+
+`frame_scale_anchor` sees x\* only, `param_prior` sees D/α/δ only, and `resid` has weight 0
+and is not even computed on the batched path (`losses/total.py::compute_terms_batched`).
+
+The `anticollapse` term is a **one-sided** hinge, so it is exactly flat with exactly zero
+gradient everywhere ‖J‖_F > 1 — and every recovered network measured in this unit sits
+there (‖J‖_F = 1.54–2.63 across all 24 committed runs). **On the region the optimiser
+actually occupies, the objective is a function of σ(k) alone.**
+
+Because **D is diagonal**, three transformations then leave σ(k) unchanged at every k:
+
+1. **Transpose.** (J − k²D)ᵀ = Jᵀ − k²D, and a matrix and its transpose are isospectral.
+   *The objective cannot distinguish a network from the one with every regulatory edge
+   reversed.*
+2. **Diagonal similarity.** For S = diag(s), s > 0: S(J − k²D)S⁻¹ = SJS⁻¹ − k²D, since a
+   diagonal S commutes with a diagonal D. So J_ij → (s_i/s_j)·J_ij is invisible — an
+   (N−1)-parameter **continuous** gauge freedom, 2-dimensional at N = 3.
+3. **Node permutation** (with D permuted too) — the symmetry §7.3's PERM block measured.
+
+A dimension count says these are the *whole* of the blindness, not merely some of it: σ(k)
+for all k fixes the characteristic polynomial of J − k²D, whose coefficients depend on J
+through 7 independent functions (the 3 diagonal entries, the 3 2×2 principal minors, and
+det J). 9 entries − 7 constraints = **2**, exactly the dimension of the diagonal-similarity
+group modulo its scalar centre.
+
+**This is verified numerically, not asserted** (`c1_gauge.py` BLOCK 1), on *real* recovered
+(J, D) from the committed `legacy_control` runs — max |Δσ(k)| over the k-grid:
+
+| seed | ‖J‖_F | transpose | diagonal similarity | permutation | σ scale |
+|---|---|---|---|---|---|
+| 0 | 2.038 | 6.66e−16 | 1.11e−15 | 1.93e−14 | 0.5080 |
+| 1 | 2.504 | 4.53e−14 | 2.04e−14 | 4.75e−14 | 0.7823 |
+| 2 | 2.099 | 5.05e−15 | 4.33e−15 | 3.94e−15 | 0.5706 |
+
+Exact to machine precision against a σ scale of order 0.5–0.8.
+
+### 8.2 But the gauge is NOT what is breaking 3.1 — a clean negative result
+
+If the seeds were landing on different points of one gauge orbit, quotienting by the group
+would collapse them onto one structure. **It does not.** The consistency ladder
+(`c1_gauge.py` BLOCK 2), at the pre-registered rtol 0.05:
+
+| cell | target | **raw (= criterion 3.1)** | +perm | +perm,transpose | +perm,transpose,balance |
+|---|---|---|---|---|---|
+| `legacy_control` | `three_gene_val/sample_0000` | **0.125** | 0.375 | 0.375 | 0.375 |
+| `baseline` | qvar `sample_0000` | **0.125** | 0.125 | 0.125 | 0.375 |
+| `detach` | qvar `sample_0000` | **0.250** | 0.375 | 0.375 | 0.250 |
+
+Adding the transpose quotient moves **nothing** on any row. Adding the diagonal-similarity
+gauge fixing (`scipy.linalg.matrix_balance`, Osborne) moves one row up, one row down, and
+one not at all. **The exact symmetries proven in §8.1 are real and are not the explanation.**
+The best value anywhere in the table is 0.375 against a bar of 0.75.
+
+This is worth stating plainly because the opposite conclusion was the natural guess and it
+is wrong: the seeds have not found the same network in different gauges.
+
+### 8.3 What IS breaking it: the statistic's threshold sits at the median of the entries
+
+`topology_consistency` calls J_ij an edge iff |J_ij| ≥ rtol·max|J|, a **hard** cut, then
+compares sign matrices entrywise. `c1_gauge.py` BLOCK 3 measures where that cut lands
+(`|J_ij|/max|J|` pooled over all K seeds):
+
+| cell | target | q25 | **q50** | q75 | within a factor 3 of the cut | `topology_consistency` min→max over rtol ∈ [0.005, 0.5] |
+|---|---|---|---|---|---|---|
+| `baseline` | qvar `sample_0000` | 0.0107 | **0.0512** | 0.5277 | **0.333** (24/72) | 0.125 → 0.500 |
+| `detach` | qvar `sample_0000` | 0.0089 | **0.0730** | 0.5597 | **0.361** (26/72) | 0.125 → 0.250 |
+| `legacy_control` | `three_gene_val` | 0.0264 | 0.3143 | 0.7716 | 0.153 (11/72) | 0.125 → 0.250 |
+
+**On `baseline` the pre-registered rtol of 0.05 sits on the median entry magnitude
+(0.0512).** That is the single worst place a hard threshold can sit: it maximises the
+number of entries whose edge/no-edge assignment is decided by numerical noise rather than
+by dynamics. A third of all entries are within a factor of 3 of the cut.
+
+And the criterion is correspondingly unstable in the tolerance. Recomputed across the sweep
+0.005 / 0.01 / 0.02 / 0.03 / 0.05 / 0.08 / 0.10 / 0.15 / 0.20 / 0.30 / 0.50:
+
+```
+baseline        sample_0000   0.375 0.375 0.250 0.250 0.125 0.250 0.250 0.250 0.250 0.250 0.500
+detach          sample_0000   0.250 0.125 0.125 0.125 0.250 0.250 0.250 0.250 0.250 0.125 0.250
+legacy_control  sample_0000   0.250 0.125 0.125 0.125 0.125 0.250 0.250 0.125 0.250 0.125 0.250
+```
+
+Non-monotone, with no trend, spanning 0.125–0.500 — and the pre-registered 0.05 happens to
+be at or near the **minimum** of `baseline`'s curve. §3.1 of `PREREGISTRATION.md` flagged
+this tolerance UNCALIBRATED in advance and required 0.02/0.05/0.10 to be reported; this is
+the measurement of *how* uncalibrated, and it is why the reported shortfall should be read
+as "3.1 fails, and the estimator is also noisy", not as a precise distance from the bar.
+
+**No bar moves and nothing here is a rescue.** 3.1 fails at every tolerance in the sweep on
+every cell measured. The finding is that a material part of the *variance* in the number is
+the estimator, which is a defect worth fixing in a future instrument and worth stating in
+the paper — not a reason to reinterpret a failing measurement as a pass.
+
+### 8.4 The gauge-invariant content, which is what σ(k) can actually pin
+
+Given §8.1, the natural gauge-invariant summary of J at N = 3 is the sign of the diagonal
+entries (self-activation/repression, 3 bits), the sign of the 2-cycle products J_ij·J_ji
+(the feedback *sense* of each pair, 3 bits), and the sign of the 3-cycle product (1 bit) —
+**7 sign bits, exactly the 7 functions of J that σ(k) fixes**, against the raw statistic's
+9 entrywise signs. `c1_gauge.py` BLOCK 4, modal fraction over K = 8:
+
+| cell | target | diag | pairs | 3-cycle | all 7 |
+|---|---|---|---|---|---|
+| `baseline` | qvar `sample_0000` | 0.875 | 0.500 | 0.750 | 0.500 |
+| `detach` | qvar `sample_0000` | 0.875 | 0.500 | 1.000 | 0.500 |
+| `legacy_control` | `three_gene_val` | **1.000** | 0.500 | 0.750 | 0.375 |
+
+Seven of eight `baseline` seeds, and **eight of eight** `legacy_control` seeds, agree on the
+sign pattern of the Jacobian diagonal — the property `STATE_OF_THE_SCIENCE.md` §10 identifies
+as the binding one for patterning — while the pre-registered entrywise statistic scores the
+same eight runs as eight distinct networks.
+
+Note the *shape* of the failure, which splitting the statistic into columns makes visible
+and a single 9-bit number cannot: agreement is **concentrated in the diagonal**
+(0.875–1.000) and collapses on the off-diagonal pair senses (0.500 on all three cells).
+What the seeds reproduce is *which nodes self-activate*; what they do not reproduce is
+*who regulates whom*. The joint 7-bit column is 0.375–0.500 — still far below 0.75, so this
+is not a criterion in disguise — but it localises the disagreement to the off-diagonal for
+the first time, and that is the direction a future 3.1 fix has to attack.
+
+**This is a DIAGNOSTIC and is not criterion 3.1**, and it is deliberately reported with its
+limits attached: it is *coarser* than the pre-registered statistic (7 bits not 9, and node
+identity is quotiented out), so a higher number is expected on granularity alone and the
+comparison is not like-for-like. A statistic this coarse can also agree by the model's
+inductive bias rather than from the target, which is exactly what §3.1's control exists to
+catch — so **it means nothing until read against the size-matched cross-target control**,
+which requires ≥ 2 targets in the same runs-root and is measured in §9.

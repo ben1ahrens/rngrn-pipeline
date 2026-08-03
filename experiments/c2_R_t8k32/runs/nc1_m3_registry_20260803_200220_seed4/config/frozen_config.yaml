@@ -6,7 +6,7 @@ data:
   datasets_root: data/datasets
   dataset_id: three_gene_qvar
   hdf5_path: null
-  sample_key: sample_0003
+  sample_key: sample_0001
   L: 100.0
   L_override: null
   resolution: 128
@@ -30,7 +30,7 @@ model:
   d_init_from_kstar: false
 loss:
   weights:
-    kstar: 8.0
+    kstar: 32.0
     turing: 8.0
     resid: 0.0
     anticollapse: 0.5
@@ -57,7 +57,7 @@ train:
   adam_lr: 0.05
   lbfgs_steps: 0
   grad_clip: 10.0
-  seed: 7
+  seed: 4
   deterministic: true
   batched: true
   device: cuda

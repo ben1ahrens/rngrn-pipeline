@@ -273,3 +273,79 @@ def test_terms_and_scoring_box_loaders_agree_on_the_real_box():
     for name, row in scoring_box.items():
         expected = (row.low, row.high) if row.bounded else None
         assert terms_box[name] == expected, name
+
+
+# --------------------------------------------------------------------------------------
+# unit c-bioviab: the prior is WIRED. Before this, loss.weights.param_prior was a no-op on
+# the path recover.py runs — losses/total.py never called terms.param_prior — so a run
+# configured with the prior on trained without it and said nothing. These tests pin that
+# the term now reaches the objective, that the batched twin equals the serial one, and
+# that the default (weight 0 -> param_prior_kw=None) path is byte-for-byte unchanged.
+# --------------------------------------------------------------------------------------
+def _tiny_recovery_fixture():
+    """A minimal (model, frame, kgrid, kstar_obs) tuple for exercising losses/total."""
+    from rngrn.model import RNGRN
+    torch.manual_seed(0)
+    model = RNGRN(N=3, form="competitive", seed=3)
+    frame = torch.rand(3, 16, 16, dtype=torch.float64) + 0.5
+    kgrid = torch.linspace(0.02, 4.0, 64, dtype=torch.float64)
+    return model, frame, kgrid, 1.0
+
+
+def test_param_prior_kw_none_leaves_the_objective_byte_identical():
+    from rngrn.losses import total as LT
+    model, frame, kgrid, kobs = _tiny_recovery_fixture()
+    base, _ = LT.compute_terms(model, frame, 10.0, [0, 1, 2], kgrid, kobs,
+                               compute_resid=False)
+    with_none, _ = LT.compute_terms(model, frame, 10.0, [0, 1, 2], kgrid, kobs,
+                                    compute_resid=False, param_prior_kw=None)
+    assert set(base) == set(with_none) == {"kstar", "turing", "anticollapse", "anchor"}
+    for k in base:
+        assert float(base[k].detach()) == float(with_none[k].detach())
+
+
+def test_param_prior_kw_adds_the_term_to_the_objective():
+    from rngrn.losses import total as LT
+    model, frame, kgrid, kobs = _tiny_recovery_fixture()
+    terms, parts = LT.compute_terms(
+        model, frame, 10.0, [0, 1, 2], kgrid, kobs, compute_resid=False,
+        param_prior_kw=dict(dratio_centre=7.5, dratio_spread=1.0,
+                            box_path="configs/bio_box.yaml"))
+    assert "param_prior" in terms
+    assert float(terms["param_prior"].detach()) > 0.0     # a random init is not at 7.5
+    assert "L_dratio" in parts and "d_ratio" in parts
+
+
+def test_param_prior_batched_equals_the_serial_prior_member_by_member():
+    from rngrn.model import RNGRN, BatchedRNGRN
+    from rngrn.losses.terms import param_prior, param_prior_batched
+    members = [RNGRN(N=3, form="competitive", seed=s) for s in (11, 12, 13, 14)]
+    bm = BatchedRNGRN(members)
+    Lb, pb = param_prior_batched(bm, dratio_centre=7.5, dratio_spread=1.0)
+    assert Lb.shape == (4,)
+    for b, m in enumerate(members):
+        Ls, ps = param_prior(m, dratio_centre=7.5, dratio_spread=1.0)
+        assert float(Lb[b].detach()) == pytest.approx(float(Ls.detach()), rel=1e-12,
+                                                     abs=1e-14)
+        assert float(pb["d_ratio"][b]) == pytest.approx(ps["d_ratio"], rel=1e-12)
+
+
+def test_recover_raises_when_the_prior_is_asked_for_with_an_adaptive_strategy():
+    """An adaptive strategy sets a term's weight FROM its value, so the prior would be
+    re-weighted by its own magnitude rather than by the recorded bio_box strength."""
+    import rngrn.recover as R
+    from rngrn.losses.weighting import RatioWeighting
+    strategy = RatioWeighting(dict(kstar=1.0, turing=1.0, anticollapse=0.5, anchor=2.0,
+                                   resid=0.0, param_prior=1.0))
+    assert not strategy.static_weights
+    ri = _fake_recovery_input()
+    with pytest.raises(ValueError, match="static weights"):
+        R.recover(ri, form="competitive", strategy=strategy, n_restarts=1, adam_steps=1,
+                  lbfgs_steps=0)
+
+
+def _fake_recovery_input():
+    from rngrn.data.gate import RecoveryInput
+    rng = np.random.default_rng(0)
+    return RecoveryInput(frame=rng.random((3, 16, 16)) + 0.5, L=10.0,
+                         observed_idx=(0, 1, 2), N=3)

@@ -49,6 +49,17 @@ experiments/**/*.npz
 experiments/**/*.npy
 experiments/**/*.png
 
+# ...WITH ONE EXCEPTION. `experiments/figures_report/` holds REPORT figures, where the
+# IMAGE is the deliverable rather than a regenerable view of an array — the Stage-0
+# biological-viability check exists because the owner asked to "visually verify ... that
+# our model does in fact form turing patterns under the biological conditions", and a
+# boolean in a JSON file does not answer that. These PNGs are therefore tracked, together
+# with the arrays/ behind every panel (already tracked by the rule above), so the figure
+# and its data are auditable as a pair. This is deliberately NOT a global un-ignore: the
+# per-run sweep figures must stay regenerable from arrays/ by scripts/make_figures.py, or
+# a 96-run wave would add ~100 MB of PNGs to the repo.
+!experiments/figures_report/**/*.png
+
 # tidy CSV exports (`rngrn export`) — a pure projection of the tracked indexes
 exports/
 

@@ -149,9 +149,10 @@ class TrainingHistory:
         """The scalar columns of one member: diagnostics, per-term losses, live weights.
 
         `member` slices (B,) batched entries; None reads the serial floats. Every `L_*` key
-        `losses.total` wrote is picked up by name, so a term added later (param_prior is
-        written by losses/terms.py but not yet wired into compute_terms) appears without a
-        change here.
+        `losses.total` wrote is picked up by name, so a term added later appears without a
+        change here — `L_param_prior` did exactly that when the biological prior was finally
+        wired into compute_terms (docs/DECISIONS.md D-EVID-5). This docstring used to say
+        param_prior was "not yet wired into compute_terms"; that is no longer true.
         """
         def scalar(v):
             if hasattr(v, "shape") and getattr(v, "ndim", 0) == 1 and member is not None:

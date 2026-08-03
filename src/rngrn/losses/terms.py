@@ -477,8 +477,9 @@ def param_prior(model, dratio_centre=7.5, dratio_spread=1.0, box=None,
 #
 # NOT batched, deliberately: `stationarity_residual` (needs per-pixel states, which would
 # require broadcasting the parameters to (B,1,N,N); its default weight is 0 and
-# total.compute_terms_batched raises rather than pretend), `morphology_consistency`
-# (non-differentiable numpy diagnostic) and `param_prior` (not in compute_terms at all).
+# total.compute_terms_batched raises rather than pretend) and `morphology_consistency`
+# (non-differentiable numpy diagnostic). `param_prior` IS batched, as `param_prior_batched`
+# below: it reads only model.D / .alpha / .delta, all of which carry the leading B.
 
 def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
                          relax_steps=2000, relax_dt=1e-2, multistart=True):
@@ -679,6 +680,42 @@ def turing_hinges_split_batched(model, xstar, kgrid, margin=1e-3, k_min_frac=0.1
     L = _softplus_hinge(sig0 + margin) + _softplus_hinge(-(sig_pos - margin))
     return L, dict(sig0=_np(sig0), sig_max=_np(sig.max(dim=1).values),
                    sig_max_pos=_np(sig_pos), hinge_i_min=int(i_min))
+
+
+def param_prior_batched(model, dratio_centre=7.5, dratio_spread=1.0, box=None,
+                        box_path="configs/bio_box.yaml"):
+    """Batched twin of `param_prior`. Returns ((B,), parts of (B,) numpy arrays).
+
+    Term for term the same arithmetic as the serial version: the D-ratio log-normal on the
+    two MOST-MOBILE species (so a near-immobile node is never penalised) plus the soft box
+    hinges on alpha and delta. `beta` is UNCITED in configs/bio_box.yaml and is not hinged
+    here either. The only change is that every reduction stops at the leading batch
+    dimension instead of collapsing to a scalar.
+    """
+    box = _load_box_bounds(box_path) if box is None else box
+    D = model.D                                          # (B, N)
+    if D.shape[-1] < 2:
+        raise ValueError(f"param_prior needs N>=2 species, got {D.shape[-1]}")
+    sorted_D, _ = torch.sort(D, dim=-1)
+    lo, hi = sorted_D[..., -2], sorted_D[..., -1]        # (B,)
+    log_ratio = torch.log(hi) - torch.log(lo)
+    L_dratio = (log_ratio - float(np.log(dratio_centre))) ** 2 / (2.0 * dratio_spread ** 2)
+
+    L_box = torch.zeros_like(L_dratio)
+    parts = dict(d_ratio=_np(hi / lo), L_dratio=_np(L_dratio))
+    for name, value in (("alpha", model.alpha), ("delta", model.delta)):
+        bounds = box.get(name)
+        if bounds is None:
+            continue  # UNCITED or unbounded row: no fabricated hinge (bio_box.yaml)
+        low, high = bounds
+        term = _softplus_hinge(low - value) + _softplus_hinge(value - high)
+        term = term.reshape(term.shape[0], -1).sum(dim=-1)      # (B,)
+        L_box = L_box + term
+        parts[f"L_box_{name}"] = _np(term)
+
+    loss = L_dratio + L_box
+    parts["L_param_prior"] = _np(loss)
+    return loss, parts
 
 
 def frame_scale_anchor_batched(xstar, obs_scale, floor=1e-6):

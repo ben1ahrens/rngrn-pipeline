@@ -21,7 +21,7 @@ class SteadyStateError(RuntimeError):
 def compute_terms(model, frame, L, observed_idx, kgrid, kstar_obs,
                   latent_fields=None, tau=0.12, jac_floor=1.0, strict=True,
                   split_hinges=True, hinge_k_min_frac=0.1, detach_xstar=False,
-                  compute_resid=True) -> tuple:
+                  compute_resid=True, param_prior_kw=None) -> tuple:
     """Return (terms_dict, parts_dict) of UNWEIGHTED loss terms + diagnostics.
 
     strict=True (default): raise SteadyStateError if the steady state did not converge,
@@ -48,6 +48,17 @@ def compute_terms(model, frame, L, observed_idx, kgrid, kstar_obs,
     `resid_skipped=True` so no downstream reader can mistake "not computed" for "zero".
     Callers must only pass False when the residual's weight is genuinely 0 (recover.py
     checks the strategy's base weight AND that the strategy's weights are static).
+
+    param_prior_kw: kwargs for terms.param_prior (dratio_centre, dratio_spread, box_path),
+    or None to OMIT the biological-plausibility prior entirely. None is the default and
+    reproduces every number recorded before this term was wired in: the key is absent from
+    term_vals, so `strategy.combine`'s sum(weight * term) does not see it at all rather
+    than adding a zero-weighted product. recover.py decides, from the strategy's base
+    weight for 'param_prior', exactly as it does for the stationarity residual. Until this
+    argument existed, loss.weights.param_prior was a NO-OP on the path recover.py runs:
+    losses/terms.py::param_prior had no caller outside terms.composite_loss (the standalone
+    reference form, which recover.py does not use), so a run configured with the prior on
+    trained without it and said nothing.
     """
     xstar, conv = T.steady_state(model)
     if not conv and strict:
@@ -74,13 +85,17 @@ def compute_terms(model, frame, L, observed_idx, kgrid, kstar_obs,
         parts.update(p_r)
     else:
         parts["resid_skipped"] = True
+    if param_prior_kw is not None:
+        L_p, p_p = T.param_prior(model, **param_prior_kw)
+        term_vals["param_prior"] = L_p
+        parts.update(p_p)
     return term_vals, parts
 
 
 def total_loss(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
                step=0, latent_fields=None, tau=0.12, jac_floor=1.0, strict=True,
                split_hinges=True, hinge_k_min_frac=0.1, detach_xstar=False,
-               compute_resid=True) -> tuple:
+               compute_resid=True, param_prior_kw=None) -> tuple:
     """Composite loss via a weighting strategy. Returns (scalar loss, parts).
 
     Raises SteadyStateError (from compute_terms) when strict and x* did not converge."""
@@ -88,7 +103,8 @@ def total_loss(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
         model, frame, L, observed_idx, kgrid, kstar_obs,
         latent_fields=latent_fields, tau=tau, jac_floor=jac_floor, strict=strict,
         split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
-        detach_xstar=detach_xstar, compute_resid=compute_resid)
+        detach_xstar=detach_xstar, compute_resid=compute_resid,
+        param_prior_kw=param_prior_kw)
     loss, weights_used = strategy.combine(term_vals, step, model=model)
     parts["total"] = float(loss.detach())
     parts["weights_used"] = weights_used
@@ -103,7 +119,7 @@ def total_loss(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
 def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
                           tau=0.12, jac_floor=1.0, split_hinges=True,
                           hinge_k_min_frac=0.1, detach_xstar=False,
-                          compute_resid=False) -> tuple:
+                          compute_resid=False, param_prior_kw=None) -> tuple:
     """Batched twin of `compute_terms`. Returns (term_vals, parts, converged).
 
     `model` is a model.BatchedRNGRN of B members; every term_vals entry is a (B,) tensor and
@@ -154,13 +170,17 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
     term_vals = dict(kstar=L_k, turing=L_t, anticollapse=L_a, anchor=L_s)
     parts = dict(ss_converged=conv.detach().cpu().numpy(), resid_skipped=True,
                  **p_k, **p_t, **p_a, **p_s)
+    if param_prior_kw is not None:
+        L_p, p_p = T.param_prior_batched(model, **param_prior_kw)
+        term_vals["param_prior"] = L_p
+        parts.update(p_p)
     return term_vals, parts, conv
 
 
 def total_loss_batched(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
                        step=0, tau=0.12, jac_floor=1.0, split_hinges=True,
                        hinge_k_min_frac=0.1, detach_xstar=False,
-                       compute_resid=False) -> tuple:
+                       compute_resid=False, param_prior_kw=None) -> tuple:
     """Batched twin of `total_loss`. Returns (loss_vec (B,), parts, converged (B,)).
 
     The weighting strategy is applied UNCHANGED: `combine` only ever does
@@ -176,7 +196,8 @@ def total_loss_batched(model, frame, L, observed_idx, kgrid, kstar_obs, strategy
     term_vals, parts, conv = compute_terms_batched(
         model, frame, L, observed_idx, kgrid, kstar_obs, tau=tau, jac_floor=jac_floor,
         split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
-        detach_xstar=detach_xstar, compute_resid=compute_resid)
+        detach_xstar=detach_xstar, compute_resid=compute_resid,
+        param_prior_kw=param_prior_kw)
     loss, weights_used = strategy.combine(term_vals, step, model=model)
     parts["total"] = loss.detach().cpu().numpy()
     parts["weights_used"] = weights_used

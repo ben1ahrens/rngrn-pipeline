@@ -226,6 +226,12 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        d_init_from_kstar=cfg.model.d_init_from_kstar,   # unit B4
                        batched=cfg.train.batched,                        # unit b2
                        device=cfg.train.device,                          # unit b2
+                       # unit 5: the biological prior's own knobs. These were already
+                       # recorded on every run-index row (dratio_centre/dratio_spread) but
+                       # were never handed to recovery, so the prior could not act.
+                       dratio_centre=cfg.loss.dratio_centre,
+                       dratio_spread=cfg.loss.dratio_spread,
+                       bio_box_path=cfg.loss.bio_box_path,
                        history=hist)                                     # unit P1
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame

@@ -1278,3 +1278,62 @@ from adopting the alternative, but no one has made that a formal decision.
 - `src/rngrn/losses/weighting.py`, `src/rngrn/cli.py`, `.githooks/pre-push` (read
   directly to confirm the two evidence-integrity fixes are actually in the code, not
   only claimed in a PR body).
+
+---
+
+## D-C1-GAUGE — the J-degeneracy of the objective, and what it does and does not explain
+*Decided by unit C1 (competitive tuning), 2026-08-03, under the threshold-setting authority
+recorded in `PREREGISTRATION.md` §0. Evidence: `scripts/c1_gauge.py`,
+`docs/C1_COMPETITIVE_TUNING.md` §8, computed on 24 already-committed runs.*
+
+**The finding.** On the region the optimiser occupies (‖J‖_F > 1, true for all 24 runs, where
+the `anticollapse` hinge is exactly flat), the trained objective is a function of
+σ(k) = max Re eig(J − k²D) alone. Since D is diagonal, that makes it **exactly** invariant
+under (i) transpose, (ii) diagonal similarity J → SJS⁻¹ (a 2-parameter continuous gauge at
+N=3), and (iii) node permutation. Verified numerically at max |Δσ| ≈ 1e-15 on real recovered
+(J, D). A dimension count (σ(k) fixes 7 independent functions of J's 9 entries) says these
+are the whole of the blindness, not a subset.
+
+**What was decided, and it is a negative.** This is **not** adopted as the explanation of the
+criterion 3.1 failure, because quotienting by the full group does not rescue the statistic:
+raw → +perm → +transpose → +balance is 0.125 → 0.375 → 0.375 → 0.375 on the legacy control
+and 0.125 → 0.125 → 0.125 → 0.375 on `baseline`, against a bar of 0.75. The tempting
+conclusion — "the seeds found the same network in different gauges" — is measured to be
+false and is recorded as false so it is not re-proposed.
+
+**What is adopted, as an instrument limitation rather than a threshold change.**
+`topology_consistency`'s hard cut at rtol·max|J| lands on the **median** entry magnitude on
+`baseline` (q50 = 0.0512 against rtol 0.05), with 33 % of entries within a factor 3 of it,
+and the statistic wanders non-monotonically over 0.125–0.500 as rtol is swept 0.005→0.5.
+`PREREGISTRATION.md` §3.1 already flagged the tolerance UNCALIBRATED and required
+0.02/0.05/0.10 to be reported; this quantifies it. **No bar moves and the raw modal fraction
+at rtol 0.05 remains the number read against 0.75** — the criterion fails at every tolerance
+in the sweep, so nothing here converts a failure into a pass. The consequence is for the
+paper's wording and for any *future* instrument, not for this pre-registration.
+
+**Left explicitly OPEN.** Whether a gauge-invariant, magnitude-weighted reproducibility
+statistic should replace the entrywise one. It must not be decided now: inventing a metric
+after seeing that the current one fails is exactly what `PREREGISTRATION.md` §5 forbids. If
+it is ever adopted it goes in a new dated section that says plainly it was added after
+seeing results.
+
+## D-C1-DIAG — `max diag(J) > 0` adopted as a secondary readout, not as a criterion
+*Same unit and date. Evidence: `docs/C1_COMPETITIVE_TUNING.md` §8.5.*
+
+A positive Jacobian diagonal entry separates patterning perfectly across all 24 committed
+runs (10 Turing / 10 positive, 14 non-Turing / 14 negative, no off-diagonal cell). This is a
+**necessary condition being confirmed, not a discovery** — diffusion-driven instability with
+diagonal D requires it — and is recorded that way. It is adopted only as a cheap continuous
+proxy for rate progress, beside the pooled per-restart `sig_max_pos` rate, because
+`turing_frac` is a floored count over K = 8 and cannot rank two failing configurations. It
+replaces no pre-registered criterion.
+
+## D-C1-TURINGW — `loss.weights.turing` promoted to the lead rate axis
+*Same unit and date.*
+
+The axis is not in C1's original eight and had never been tried by this unit. C2 measured
+`-o loss.weights.turing=8.0` moving `nc1` on qvar `sample_0000` from `turing_frac` 0.0625 to
+0.750 at K = 8. Promoted to first position in `scripts/c1_queue4.sh` and proven LIVE on both
+the serial and the batched path before any cell using it is believed, per the standing rule
+that five silent no-ops have already been found in this codebase. Reordering a queue changes
+no threshold and drops no cell.

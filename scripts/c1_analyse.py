@@ -202,13 +202,28 @@ def block_perm(reps):
         print(row)
 
 
+def target_of(rep, key):
+    """The TARGET a group of seeds was fitted to: (dataset_id, sample_key).
+
+    The group key is (cell, sample_key), and `sample_key` alone does NOT identify a target:
+    three_gene_val/sample_0000 and three_gene_qvar/sample_0000 are different systems that
+    share a stem. Excluding "the same sample_key" from the cross-target control would
+    therefore silently drop a genuinely different target from the control, biasing the one
+    number PREREGISTRATION section 3.1 calls the substantive half of the criterion. The
+    dataset_id is carried in every target-report, so the target is keyed on the pair.
+    """
+    return (rep.get("dataset_id"), rep.get("sample_key", key[1]))
+
+
 def block_repro(reps):
     groups = {}   # (cell, sample) -> [J, ...]
+    tgt = {}      # (cell, sample) -> (dataset_id, sample_key)
     for key, r in sorted(reps.items()):
         Js = [d.get("recovered", {}).get("J") for _, d in results_of(r)]
         Js = [J for J in Js if J is not None]
         if Js:
             groups[key] = Js
+            tgt[key] = target_of(r, key)
     print("\n=== REPRO — criterion 3.1, modal fraction vs the SIZE-MATCHED cross-target control ===")
     hdr = (f"{'cell':<14}{'sample':<12}{'K':>3}" +
            "".join(f"{'within@' + str(t):>13}{'cross@' + str(t):>12}{'gap':>7}" for t in RTOLS))
@@ -223,7 +238,7 @@ def block_repro(reps):
             within = Counter(keys).most_common(1)[0][1] / len(keys)
             # cross-target control: one seed from each of K DISTINCT other groups,
             # size-matched to the within-target group.
-            others = [k for k in groups if k[1] != samp]
+            others = [k for k in groups if tgt[k] != tgt[key]]
             if len(others) >= 2:
                 vals = []
                 for _ in range(N_CROSS_DRAWS):
@@ -235,8 +250,8 @@ def block_repro(reps):
             else:
                 row += f"{within:>13.3f}{'  -':>12}{'  -':>7}"
         print(row)
-    if len(set(k[1] for k in groups)) < 2:
-        print("  (cross-target control needs >= 2 distinct samples; not computable yet)")
+    if len(set(tgt.values())) < 2:
+        print("  (cross-target control needs >= 2 distinct targets; not computable yet)")
 
 
 def main():

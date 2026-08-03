@@ -78,7 +78,8 @@ import numpy as np
 from scipy.linalg import matrix_balance
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
-from c1_analyse import RTOLS, load_cells, results_of, sign_key  # noqa: E402
+from c1_analyse import (RTOLS, load_cells, results_of, sign_key,  # noqa: E402
+                        target_of)
 
 N_CROSS_DRAWS = 4000
 
@@ -152,11 +153,12 @@ LEVELS = [
 
 
 def block_ladder(reps, rtol):
-    groups = {}
+    groups, tgt = {}, {}
     for (cell, samp), r in sorted(reps.items()):
         Js = [np.asarray(d["recovered"]["J"], float) for _, d in results_of(r)]
         if Js:
             groups[(cell, samp)] = Js
+            tgt[(cell, samp)] = target_of(r, (cell, samp))
     print(f"\n=== BLOCK 2 — consistency ladder at sign-zero rtol {rtol} "
           f"({'THE PRE-REGISTERED TOLERANCE' if rtol == 0.05 else 'sensitivity'}) ===")
     print("    `raw` IS criterion 3.1. The rest are gauge diagnostics and no bar reads them.")
@@ -171,7 +173,7 @@ def block_ladder(reps, rtol):
         for _, fn in LEVELS:
             keys = [fn(J, rtol) for J in Js]
             within = Counter(keys).most_common(1)[0][1] / len(keys)
-            others = [k for k in groups if k[1] != samp]
+            others = [k for k in groups if tgt[k] != tgt[key]]
             if len(others) >= 2:
                 vals = []
                 for _ in range(N_CROSS_DRAWS):
@@ -183,8 +185,8 @@ def block_ladder(reps, rtol):
             else:
                 row += f"{within:>11.3f}{'-':>7}{'-':>7}"
         print(row)
-    if len(set(k[1] for k in groups)) < 2:
-        print("  (cross-target control needs >= 2 distinct samples; not computable yet)")
+    if len(set(tgt.values())) < 2:
+        print("  (cross-target control needs >= 2 distinct targets; not computable yet)")
 
 
 # ======================================================================================
@@ -267,18 +269,21 @@ def block_invariant(reps):
            f"{'3cycle':>10}{'all7':>10}{'ctrl':>7}{'gap':>7}")
     print(hdr)
     print("-" * len(hdr))
-    groups = {}
+    groups, tgt = {}, {}
     for (cell, samp), r in sorted(reps.items()):
         Js = [np.asarray(d["recovered"]["J"], float) for _, d in results_of(r)]
         if Js:
             groups[(cell, samp)] = Js
+            tgt[(cell, samp)] = target_of(r, (cell, samp))
 
     def full(J):
         d, p, c = invariants(J)
         return tuple(np.sort(d)) + tuple(np.sort(p)) + tuple(c)
 
     rng = random.Random(0)
-    for (cell, samp), Js in sorted(groups.items()):
+    for key, Js in sorted(groups.items()):
+        cell, samp = key
+
         def modal(fn, JJ):
             return Counter(fn(J) for J in JJ).most_common(1)[0][1] / len(JJ)
         row = (f"{cell:<20}{samp:<12}{len(Js):>3}"
@@ -286,7 +291,7 @@ def block_invariant(reps):
                f"{modal(lambda J: tuple(np.sort(invariants(J)[1])), Js):>10.3f}"
                f"{modal(lambda J: tuple(invariants(J)[2]), Js):>10.3f}"
                f"{modal(full, Js):>10.3f}")
-        others = [k for k in groups if k[1] != samp]
+        others = [k for k in groups if tgt[k] != tgt[key]]
         if len(others) >= 2:
             vals = []
             for _ in range(N_CROSS_DRAWS):

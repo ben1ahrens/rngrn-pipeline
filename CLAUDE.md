@@ -214,9 +214,16 @@ Two things that do **not** fix this, recorded so they are not re-attempted:
   Failure #5 occurred *after* that change was applied.
 - **Per-agent worker limits alone.** See above: the sum across agents is what matters.
 
-The ceiling itself is a **Windows-side** fix and is not ours to make:
-`/mnt/c/Users/benja/.wslconfig` sets `processors=14` but has **no `memory=` key**, so
-WSL2 silently defaults to 50 % of the 31.4 GiB host. Raising it needs `wsl --shutdown`.
+**The ceiling was raised on 2026-08-03** — `.wslconfig` now sets `memory=18874368000`
+(17.58 GiB `MemTotal`, from 15.34) and `swap=8388608000` (7.8 GiB, from 4). Verify with
+`free -h` after any WSL restart.
+
+That is a real improvement but **still below the 18.8 GiB peak demand** measured at the
+worst of the five events (14.87 GiB RSS + 3.96 GiB swap). So the guard is **load-bearing,
+not optional**: two concurrent trainer pools still do not fit, one does. The guard's
+`MemAvailable` floor is 8192 MB for the same reason — a pool is 1 parent + `--workers`
+children at ~1.6 GiB each, so `--workers 4` needs ~8 GiB, and a floor below the pool's own
+footprint would let it launch into headroom it cannot fit in.
 
 ## 8. Evidence discipline
 

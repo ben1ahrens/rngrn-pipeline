@@ -32,8 +32,19 @@
 #      whole user session instead of one cell -- exactly backwards. Raising adj needs no
 #      privilege (lowering would).
 #
+# THE FLOOR MUST EXCEED THE POOL'S OWN FOOTPRINT. A trainer pool is 1 parent +
+# --workers children at 1.47-1.68 GiB each, so --workers 4 needs ~8 GiB. A floor lower
+# than that lets a pool launch into headroom it cannot fit in, which is how the original
+# overcommit happened. Hence the 8192 MB default: measured pool size, not a round number.
+#
+# On 2026-08-03 the owner raised the WSL2 ceiling to memory=18874368000 (17.58 GiB
+# MemTotal) and swap=8388608000 (7.8 GiB), from 15.34 + 4. That is a real improvement but
+# it is still BELOW the 18.8 GiB peak demand (14.87 GiB RSS + 3.96 GiB swap) measured at
+# the worst of the five OOM events -- so serialisation here is load-bearing, not a
+# belt-and-braces extra. Two concurrent pools still do not fit; one does, comfortably.
+#
 # Usage:  bash scripts/guarded_run.sh <command> [args...]
-# Env:    RNGRN_MEM_FLOOR_MB   (default 4096) MemAvailable required before launching
+# Env:    RNGRN_MEM_FLOOR_MB   (default 8192) MemAvailable required before launching
 #         RNGRN_MEM_WAIT_S     (default 1800) give up waiting after this long
 #         RNGRN_LOCK_WAIT_S    (default 7200) give up waiting for the lock after this
 #         RNGRN_LOCK_PATH      (default /home/benja/projects/personal/rngrn/.trainer.lock)
@@ -50,7 +61,7 @@ if [[ "${RNGRN_GUARD_OFF:-0}" == "1" ]]; then
     exec "$@"
 fi
 
-MEM_FLOOR_MB="${RNGRN_MEM_FLOOR_MB:-4096}"
+MEM_FLOOR_MB="${RNGRN_MEM_FLOOR_MB:-8192}"
 MEM_WAIT_S="${RNGRN_MEM_WAIT_S:-1800}"
 LOCK_WAIT_S="${RNGRN_LOCK_WAIT_S:-7200}"
 LOCK_PATH="${RNGRN_LOCK_PATH:-/home/benja/projects/personal/rngrn/.trainer.lock}"

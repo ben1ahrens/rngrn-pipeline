@@ -1,0 +1,96 @@
+{
+  "competitive/mobile3": {
+    "n": 20000,
+    "converged": 19944,
+    "strict": 1,
+    "loose": 270,
+    "rate_strict": 5e-05,
+    "rate_loose": 0.0135,
+    "wilson95_strict": [
+      8.826282270075369e-06,
+      0.00028319057031904384
+    ]
+  },
+  "competitive/immobile": {
+    "n": 20000,
+    "converged": 19944,
+    "strict": 17,
+    "loose": 286,
+    "rate_strict": 0.00085,
+    "rate_loose": 0.0143,
+    "wilson95_strict": [
+      0.0005307884847849506,
+      0.0013609211101142569
+    ]
+  },
+  "competitive/POOLED": {
+    "n": 40000,
+    "converged": 39888,
+    "strict": 18,
+    "loose": 556,
+    "rate_strict": 0.00045,
+    "rate_loose": 0.0139,
+    "wilson95_strict": [
+      0.00028467724116999955,
+      0.000711263582750809
+    ]
+  },
+  "nc1/mobile3": {
+    "n": 20000,
+    "converged": 19883,
+    "strict": 0,
+    "loose": 329,
+    "rate_strict": 0.0,
+    "rate_loose": 0.01645,
+    "wilson95_strict": [
+      0.0,
+      0.00019203605619473864
+    ]
+  },
+  "nc1/immobile": {
+    "n": 20000,
+    "converged": 19883,
+    "strict": 1,
+    "loose": 330,
+    "rate_strict": 5e-05,
+    "rate_loose": 0.0165,
+    "wilson95_strict": [
+      8.826282270075369e-06,
+      0.00028319057031904384
+    ]
+  },
+  "nc1/POOLED": {
+    "n": 40000,
+    "converged": 39766,
+    "strict": 1,
+    "loose": 659,
+    "rate_strict": 2.5e-05,
+    "rate_loose": 0.016475,
+    "wilson95_strict": [
+      4.413127503397827e-06,
+      0.0001416093195785885
+    ]
+  },
+  "_meta": {
+    "beta_mode": "generator",
+    "seed": 0,
+    "n_per_cell": 20000,
+    "n_hill": 2,
+    "N": 3,
+    "kgrid": [
+      0.001,
+      3162.2776601683795,
+      501
+    ],
+    "s_log_range": [
+      -2.0,
+      2.0
+    ],
+    "gate_logit_sd": 2.5,
+    "batched_serial_check": [
+      32,
+      32
+    ],
+    "batched_serial_worst_eig_dev": 4.267802728552539e-06
+  }
+}

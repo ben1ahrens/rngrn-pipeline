@@ -292,6 +292,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             nondim=False, model_seed=None, dispersion_backend="eig", init="default",
             d_init_from_kstar=False,   # unit b4
             batched=False,             # unit b2
+            dratio_centre=7.5, dratio_spread=1.0,          # unit 5, biological prior
+            bio_box_path="configs/bio_box.yaml",           # unit 5
             history=None):             # plottable training trajectory
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
@@ -385,8 +387,27 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             "latent fields. NOTE exp06 measured the residual as harmful to Turing recovery "
             "(9/9 swept cells collapsed), so hidden-channel recovery currently has no "
             "known-good objective — that is an open problem, not a config mistake.")
+    # The biological-plausibility prior (unit 5) is opt-in the SAME way the residual is
+    # opt-out: it is computed only when it can contribute, i.e. the strategy's weights are
+    # a static function of base/step AND its base weight is non-zero. Passing None omits
+    # the key from term_vals entirely, so every number recorded before this was wired in
+    # is reproduced bit-for-bit. Before this, loss.weights.param_prior was a NO-OP on this
+    # path -- losses/total never called terms.param_prior -- so a run asking for the prior
+    # silently trained without it.
+    use_param_prior = (getattr(strategy, "static_weights", False)
+                       and float(strategy.base.get("param_prior", 0.0)) != 0.0)
+    if float(strategy.base.get("param_prior", 0.0)) != 0.0 and not use_param_prior:
+        raise ValueError(
+            "loss.weights.param_prior > 0 requires a strategy with static weights "
+            f"(got {type(strategy).__name__}). An adaptive strategy reads a term's VALUE "
+            "to set its weight, and the prior would then be re-weighted by its own "
+            "magnitude rather than by the recorded bio_box prior strength.")
     term_kw = dict(split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
-                   detach_xstar=detach_xstar, compute_resid=compute_resid)
+                   detach_xstar=detach_xstar, compute_resid=compute_resid,
+                   param_prior_kw=(dict(dratio_centre=dratio_centre,
+                                        dratio_spread=dratio_spread,
+                                        box_path=bio_box_path)
+                                   if use_param_prior else None))
 
     # The length unit the objective is written in. nondim=True sets it to the box itself,
     # which is an exact change of variables: obs.kstar_of and obs.laplacian_torch are both

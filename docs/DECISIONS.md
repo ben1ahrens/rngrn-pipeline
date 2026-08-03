@@ -900,6 +900,311 @@ columns are identifiers and reshaping first.
 
 ---
 
+## Part 2b — Stage 0: the biological-viability precondition (unit c-bioviab, 2026-08-03)
+
+Decisions taken while measuring whether `configs/bio_box.yaml` is Turing-EMPTY — the
+feasibility precondition behind `docs/PREREGISTRATION.md` §3.4. Results in
+`docs/BIO_VIABILITY.md`; the D-EVID-5 entry below belongs with Part 1's evidence-integrity
+defects and is placed here only to keep the unit's entries together.
+
+---
+
+### D-EVID-5 — `loss.weights.param_prior` was a NO-OP: the biological prior was never in the objective
+
+**Date found:** 2026-08-03 (unit c-bioviab). **Fixed:** 2026-08-03, same unit.
+**Status:** SUPERSEDED (defect; now fixed).
+
+`losses/terms.py::param_prior` existed, was tested (`tests/test_plausibility.py`), had a
+weight in `config.py` (`loss.weights.param_prior`, default 0.0), had its own knobs
+(`loss.dratio_centre`, `loss.dratio_spread`, `loss.bio_box_path`) and had a column on
+every run-index row (`w_param_prior`, `dratio_centre`, `dratio_spread`, written by
+`train.py`) — **and no caller on the path recovery runs.** `losses/total.py`'s
+`compute_terms` / `compute_terms_batched` — the assemblers `recover.py` actually calls —
+never referenced it. Its only caller was `losses/terms.py::composite_loss`, which the
+module's own docstring labels "the standalone reference form" and which `recover.py` does
+not use. `train.py` also never passed `cfg.loss.dratio_centre` / `dratio_spread` /
+`bio_box_path` to `recover()`.
+
+Consequence: a run configured with `loss.weights.param_prior = 1.0` would have trained
+with **no** biological prior, recorded `w_param_prior: 1.0` on its index row, and said
+nothing. Any future claim of the form "recovery under the biological prior does X" made
+before this fix would have been measuring the prior-OFF arm. No such run exists in the
+index yet (`w_param_prior` is 0.0 on every recorded row), so no published number is
+affected — this was caught before it produced evidence, not after.
+
+A second, smaller defect found in the same read and **deliberately left alone**:
+`composite_loss` computes `loss` twice, and its second assignment drops the
+`w['anchor']*L_s` term that the first included. It is a standalone reference form with no
+caller in `src/`, so fixing it is out of this unit's scope; recorded here so it is not
+rediscovered as new.
+
+**Fix:** `compute_terms` / `compute_terms_batched` take `param_prior_kw`; `None` (the
+default) omits the key from `term_vals` entirely, so `strategy.combine`'s
+`sum(weight * term)` never sees it and every previously recorded number is reproduced
+bit-for-bit (`tests/test_plausibility.py::test_param_prior_kw_none_leaves_the_objective_byte_identical`).
+`recover.py` builds the kwargs from the strategy's base weight, exactly as it already
+decides `compute_resid`, and **raises** if the prior is asked for with an adaptive
+(non-static) strategy, which would re-weight the prior by its own magnitude. A batched
+twin `terms.param_prior_batched` was added (the serial one reads only `model.D/.alpha/
+.delta`, all of which carry the leading `B`) and is pinned equal to the serial term member
+by member. `configs/base.yaml`'s `weights` dict gained a `param_prior: 0.0` row — value
+unchanged, but without it `apply_overrides` fails loud on an unknown key and
+`-o loss.weights.param_prior=...` was unreachable from the CLI.
+
+**Where it lives:** `src/rngrn/losses/total.py`, `src/rngrn/losses/terms.py`
+(`param_prior_batched`), `src/rngrn/recover.py`, `src/rngrn/train.py`,
+`configs/base.yaml`, `tests/test_plausibility.py` (4 new tests).
+
+---
+
+### D-EVID-6 — the pre-push hook tested a DIFFERENT worktree's source
+
+**Date found:** 2026-08-03 (unit c-bioviab). **Fixed:** 2026-08-03, same unit.
+**Status:** SUPERSEDED (defect; now fixed).
+
+`.githooks/pre-push` falls back to `../turing-training/.venv/bin/python` when the current
+worktree has no `.venv` of its own — which is every worktree. That venv was created by an
+**editable install**, which writes `turing-training`'s absolute `src` path into a `.pth`
+file. So from any other worktree the hook ran `pytest` against
+`../turing-training/src/rngrn`, **not against the source being pushed.**
+
+**MEASURED, not inferred.** The four tests added in this unit for the `param_prior` wiring
+FAILED under the hook and PASS under `PYTHONPATH=$PWD/src` — because the hook was exercising
+a tree that does not contain the change. Directly:
+
+```
+hook would import: .../worktrees/turing-training/src/rngrn
+with PYTHONPATH  : .../worktrees/c-bioviab/src/rngrn
+```
+
+The failure mode is worse than a false red: a worktree whose change BREAKS something that
+`turing-training/src` does not contain would have been green-lit. This is the same class of
+defect as D-EVID-2 — a hook that reads as protection while protecting nothing — and it was
+active for every worktree push since the sibling-venv fallback was added.
+
+**Fix:** the hook now exports `PYTHONPATH="$repo_root/src"` before running pytest
+(PYTHONPATH takes precedence over `.pth` entries) and PRINTS the resolved `rngrn` path, so
+which tree was tested is visible in the push output instead of having to be inferred.
+
+**Where it lives:** `.githooks/pre-push`.
+
+---
+
+### D-BIO-1 — `beta` for the box-viability sampler is the GENERATOR's own basal draw, and is never scored
+
+**Date:** 2026-08-03. **Status:** DECIDED (scope: the Stage-0 sampler only).
+
+`configs/bio_box.yaml` marks `beta` `source: UNCITED`, and `plausibility.py` never scores
+an UNCITED row. But a value is still needed to *build* a model, so one had to be picked.
+Picked: `beta ~ 10**U(-2, -0.3)` (0.01–0.5), which is `scripts/gen_tg3.py:157`'s own basal
+draw `b = 10**rng.uniform(-2, -0.3, 3)` — i.e. calibrated against the data-generating
+process this pipeline actually fits, not invented. **Rejected:** inventing a bound and
+putting it in `bio_box.yaml`; and `docs/STATE_OF_THE_SCIENCE.md` §10's beta ~1e-4–1e-2
+range, which that document explicitly marks as an init-distribution search result "not a
+neutral prior" and "deliberately not adopted".
+
+Sensitivity is measurable rather than assumed: `--beta-mode {generator,low,high}` reruns
+the whole part-1 measurement at fixed beta = 1e-3 and beta ≈ 0.5.
+
+**Where it lives:** `scripts/stage0_bio_viability.py::BETA_MODES`; `docs/BIO_VIABILITY.md`.
+
+---
+
+### D-BIO-2 — the D vector is sampled under TWO paired schemes, because the near-immobile node is an INTENDED escape valve
+
+**Date:** 2026-08-03. **Status:** DECIDED (scope: the Stage-0 sampler only).
+
+`scoring/plausibility.py::d_ratio_of` takes the ratio of the two MOST MOBILE species
+deliberately, so a near-immobile third node never enters the scored `d_ratio` — the
+mechanism `docs/ROBUSTNESS_MEASUREMENT.md` §4.4 measures as keeping 127/127 generator
+systems strictly Turing when the slowest diffuser is immobilised. A sampler that ignored
+that would answer a different question from the one the box asks. So D is drawn under two
+schemes, both satisfying the `d_ratio` row by construction and reported separately:
+
+* `mobile3` — all three species genuinely mobile: `D_lo ∈ 10**U(-1,0) × D_mid`.
+* `immobile` — a near-immobile third node: `D_lo ∈ 10**U(-4,-2) × D_mid`.
+
+Both draw from the SAME rng stream in the same order under a common seed, so they differ
+in the slowest D and in nothing else: a PAIRED comparison. The absolute D scale is fixed
+at `D_max = 1` because it is a pure length rescale (`k* ∝ 1/√D`) that part 3 absorbs into
+its choice of L.
+
+**[UNCALIBRATED]** the two decade windows (−1..0 and −4..−2) are a reasoned separation of
+"mobile" from "near-immobile", not a measured boundary. What they support is the
+*comparison* between the arms, not an absolute rate.
+
+**Where it lives:** `scripts/stage0_bio_viability.py::D_SCHEMES`, `draw_batch`.
+
+---
+
+### D-BIO-3 — the Turing verdict is the STRICT test, on a LOG k-grid to 10^3.5
+
+**Date:** 2026-08-03. **Status:** DECIDED.
+
+Stability is `max Re eig(J) < 0`, not `tr(J) < 0`. `docs/ROBUSTNESS_MEASUREMENT.md` §3
+measured the trace test overcounting by up to 70 % of draws, and the robustness fix already
+moved to strict for that reason; `eval/analysis.py::turing_ok` still uses the trace test, so
+its verdict is reported here only as `turing_loose`, never led with. **Measured in this
+unit:** on 80 000 in-box draws the loose criterion accepts 1215 and the strict criterion 19
+— the trace test overcounts by a factor of ~64 on this population, because every one of its
+extra "successes" is a UNIFORMLY unstable state (`max Re eig(J) > 0`) whose dispersion peaks
+at k → 0. That is not a Turing pattern; it is a homogeneous instability.
+
+The k-grid is `[0] ++ logspace(-3, 3.5, 500)`, not `eval/analysis.py`'s
+`linspace(1e-3, 50, 4000)`: with a near-immobile node (D ~ 1e-6 × D_max) the branch that
+node dominates only turns over at `k ~ √(|J|/D_lo) ~ 10^3`, so a grid stopping at k = 50
+cannot see whether it grows there. k = 0 is prepended and EXCLUDED from the instability
+search so the uniform mode can never be reported as the growing one.
+
+A draw whose steady state does not converge is a FAILED draw: it stays in the denominator
+with `converged=False` and is never silently dropped.
+
+**Where it lives:** `scripts/stage0_bio_viability.py::KGRID`, `turing_verdict`,
+`turing_verdict_batch`.
+
+---
+
+### D-BIO-4 — the box-constrained sampler is BATCHED, and pinned against the serial reference
+
+**Date:** 2026-08-03. **Status:** DECIDED.
+
+The serial path costs ~55 ms per draw (model construction + `losses/terms.steady_state`),
+so 80 000 draws would be 75 min. Batched through `BatchedRNGRN` + `steady_state_batched` +
+batched numpy `eigvals` it is ~130 draws/s. Because a fast path that quietly disagrees with
+the reference would invalidate every rate in this unit, part 1 re-runs 32 draws through the
+serial `RNGRN` + `steady_state` + serial verdict and compares. **Measured:** 32/32 verdicts
+agree; worst `|Δ max Re eig J|` = 4.27e-06, which comes from the two solvers legitimately
+stopping at different residuals (the serial relaxation fallback accepts `|f| < 1e-4`, the
+batched Newton reaches ~1e-10 on the same root). A verdict disagreement, or a deviation
+above 1e-4, is fatal and aborts the run.
+
+**A note on the artefact's size, since it was weighed rather than ignored.**
+`part1_box_draws_generator.npz` is **25 MB** — 80 000 draws x 39 float64 parameters. That is
+the single largest tracked artefact in the repo. It is kept whole because §1's rates are the
+headline claim of this unit and D-PLOT-1's standing rule is that the arrays behind a claim
+are versioned with it; 25 MB also sits inside the 10-62 MB per phase-C wave that rule already
+accepts. Two cheaper options were considered and rejected: storing the parameters at float32
+(halves it, but then the stored draws are not the draws that were evaluated), and storing
+parameters only for the 19 survivors (the rest are exactly regenerable from the recorded
+seed, but every consumer would then need an index-remapping layer for a saving of 23 MB).
+Recorded so the choice is visible; if the repo later needs the space, regenerating from
+`seed=0, n=20000, beta_mode=generator` reproduces the file exactly.
+
+**Where it lives:** `scripts/stage0_bio_viability.py::part1` (the equivalence block).
+
+---
+
+### D-BIO-5 — the mu sweep varies the GEOMETRIC MEAN of delta, and separately one species at a time
+
+**Date:** 2026-08-03. **Status:** DECIDED.
+
+`delta` is a vector but the box row bounds every species, so there is no single "the delta".
+Two parameterisations, both reported:
+
+* **uniform** — hold the base draw's per-species delta *pattern* and rescale it so its
+  geometric mean equals the swept value `d`. Individual `delta_i` can then sit outside
+  [0.4, 5] even when `d` is inside it, so `all_delta_in_box` is recorded per point.
+* **per_species** — move ONE `delta_i` and hold the others at the base draw.
+
+Range: 41 log-spaced points over [0.04, 50], i.e. the cited box row [0.4, 5.0] plus one
+decade either side, so the boundary is located relative to the box edges rather than
+asserted to be outside them.
+
+**Useful fact, worth stating explicitly:** the generator draws `mu = 10**U(-0.4, 0.7)`
+= 0.398…5.01 (`scripts/gen_tg3.py:159`) and the box row is [0.4, 5.0]. These are the SAME
+range to two significant figures, so unlike the D-ratio axis (generator ~8–250 vs box
+[1, 60]) the degradation axis is one where the box does NOT fight the data.
+
+**Where it lives:** `scripts/stage0_bio_viability.py::SWEEP_D`, `_sweep_one`.
+
+---
+
+### D-BIO-6 — the rollout domain is L = 6 × 2π/k* on a 64×64 grid
+
+**Date:** 2026-08-03. **Status:** DECIDED.
+
+Six full wavelengths of the fastest-growing linear mode across the box. Six is the
+generator's OWN original choice — `scripts/gen_tg3.py:66` records "The original generator
+hard-coded 6 periods per box" — and sits inside its replacement acceptance window
+`PERIODS_CHOICES = {3..14}`, so these figures use the same domain size the training data was
+built at. 64×64 is the owner's "small grid" and costs 0.54 s a field (`eval/rollout.py`,
+measured, `etdrk4_rfft`, `OMP_NUM_THREADS=1`, N=3, 609 steps).
+
+`stopped_reason` is recorded and printed on every panel: a run that ended on `step_budget`
+was TRUNCATED and its field is not a statement about the attractor, so it is labelled as
+such rather than shown as a pattern. `sig_max` is the SIGNED dispersion maximum.
+
+**Where it lives:** `scripts/stage0_bio_viability.py::PERIODS`, `GRID_N`, `part3`.
+
+---
+
+### D-BIO-8 — part 3 shows the channel with the LARGEST spatial std, and records BOTH pattern verdicts
+
+**Date:** 2026-08-03. **Status:** DECIDED.
+
+`eval/rollout.py::simulate` defines `amplitude` and `patterned` on **channel 0 only**. That
+is right for a real dataset, where channel 0 is the observed channel. It is wrong for the
+Stage-0 sampler, and by the sampler's own doing: `draw_batch` shuffles the species order
+(nothing distinguishes the species except which one drew the small D), so channel 0 is
+arbitrary. **MEASURED:** a competitive/`mobile3` survivor has channel-0 std **2.0e-4** and
+channel-1 std **0.76** — the library calls it unpatterned while a large labyrinth sits one
+channel over. Reading channel 0 gave 4/12 patterned; reading any channel gives **9/12**.
+
+Decided: each panel shows the channel with the largest spatial std and NAMES it in the
+title, with all three channel stds listed beside it. Both verdicts are recorded and neither
+overrides the other — `patterned` stays the library's channel-0 number, untouched, and
+`patterned_any` is the new any-channel one. **Rejected:** changing `eval/rollout.py`'s
+definition, which is correct for its actual callers; and quietly reporting the any-channel
+number under the library's name.
+
+**Where it lives:** `scripts/stage0_bio_viability.py::part3`,
+`scripts/stage0_figures.py::fig_pattern_gallery`.
+
+---
+
+### D-BIO-9 — the sweep grid always contains the base draw's own delta, and the harvest is round-robined across D-schemes
+
+**Date:** 2026-08-03. **Status:** DECIDED. Both are corrections to defects found by
+dry-running the pipeline before the real data landed.
+
+1. **The base point is inserted into the sweep grid.** The 41-point log grid does not
+   generally contain the base draw's own `delta`, so a system harvested BECAUSE it is
+   strictly Turing could report `0/41` strictly Turing — a curve missing the one point it is
+   known to pass through. `_sweep_one` now adds the base value and marks it (`is_base`,
+   drawn as an open diamond).
+2. **Survivors are round-robined across the D-schemes.** `survivors(mobile3)[:n] +
+   survivors(immobile)[:n]` truncated to `n` yields `n` mobile3 and ZERO immobile whenever
+   mobile3 has `n` of its own — which is exactly what happened on the first part-2 run, and
+   would have made every curve and panel one scheme's anecdote, the precise thing the two
+   schemes exist to prevent. `balanced_picks` alternates and falls through when one pool
+   empties. The re-run gives 3 `mobile3` / 3 `immobile` per form.
+
+**Where it lives:** `scripts/stage0_bio_viability.py::_sweep_one`, `balanced_picks`.
+
+---
+
+### D-BIO-7 — the binding parameters (KA/KR) are the FREE directions and are sampled over four decades
+
+**Date:** 2026-08-03. **Status:** DECIDED, marked **[UNCALIBRATED]**.
+
+`configs/bio_box.yaml` has no row for the binding budget `s` or the gate `g` at all, so
+`plausibility_score` is blind to them: they are the directions in which the Turing region is
+free to live. The sampler draws `s ~ 10**U(-2, 2)` per entry and the gate logit
+`~ N(0, 2.5)` (the wide, sub-saturated split of `model.py::_low_basal_raw_params`). The
+four-decade window is chosen to bracket the generator's own Hill thresholds — `gen_tg3.py:160`
+draws `K = 10**U(-1, 0.6)` with `n ∈ {2,3,4}`, so the comparable binding scale `1/K^n` spans
+roughly 1e-2…1e2 — but the mapping between a Hill threshold and this model's `KA` is not an
+identity, so this is a bracketing argument, not a calibration. Marked UNCALIBRATED rather
+than presented as derived.
+
+This matters for how the acceptance rate is read: it is the acceptance rate **under a stated
+prior**, and a wide prior on an unscored direction lowers it. Figure `f1` panel (d) reports
+where the survivors actually sit in `s`, which is the part of this that is a measurement.
+
+**Where it lives:** `scripts/stage0_bio_viability.py::S_LOG_RANGE`, `GATE_LOGIT_SD`.
+
+---
+
 ## Part 3 — Reconciling `docs/CODE_REALITY.md` §11 ("open decisions currently blocking progress")
 
 `docs/CODE_REALITY.md` §11 lists six open decisions as of the phase-A merge. Reconciled

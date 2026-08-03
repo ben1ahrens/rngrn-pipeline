@@ -143,3 +143,73 @@ every seed converged, and seven converged to the same non-pattern.
 baseline by a wide margin, and it fails because the seeds that do not pattern have no
 shared topology to agree on. Reproducibility and the Turing rate are not independent
 problems here; the first is downstream of the second.
+
+### 3.2 The SENSITIVE readout on the same 8 runs — the failure is REACHABILITY, not selection
+
+`target-report` scores the **one** restart the loss-argmin returns, so `turing_frac` = 0.125
+is a statistic with K = 8 samples behind it. Every run record also stores all
+`n_restarts = 64` restarts with their own `sig_max_pos` — the max of σ(k) over the
+instability hinge's support, i.e. exactly the quantity that must go positive for a Turing
+regime — so pooling gives **512** samples instead of 8 (C2's instrument, imported here as
+`scripts/c1_restarts.py`; run via `scripts/c1_analyse.py`).
+
+| cell | target | K | pooled restarts | `sig_max_pos > 0` | rate | p90 | best | winner's `sig_max` (median) | `D_lo/D_mid` (median) |
+|---|---|---|---|---|---|---|---|---|---|
+| `baseline` | `sample_0000` | 8 | 512 | **2** | **0.0039** | −0.0413 | +0.1869 | −0.0304 | 0.512 |
+
+**Two of five hundred and twelve.** `n_pos > 0` alongside a scored `turing_frac` of 0.125
+means the selection rule is not the problem — it found one of the two — and the p90 at
+−0.041 means the *typical* restart is not near the boundary either. **The Turing regime is
+essentially never reached from a default init**, which is a different defect from "reached
+and then discarded", and it has a different fix.
+
+`STATE_OF_THE_SCIENCE.md` §10 has that root cause already measured, independently of this
+unit: **the RNGRN's Jacobian diagonal is negative at every default init** — 0 of 200
+converged inits had any positive diagonal (mean ≈ −0.63, max −0.27), against 88/88 real
+`three_gene` systems that do — and Turing patterning requires self-activation. The same
+section measures a low-basal init taking Turing-unstable inits from **0 % to 82 %**.
+
+---
+
+## 4. The cells, pre-registered here BEFORE they were run
+
+Every cell below is K = 8 independent seeds on the stated target, differing from `baseline`
+by **exactly one** override, on the shared execution block at the top of this document. The
+ranking rule is §2's table and is not restated per cell. The queue that runs them —
+`scripts/c1_queue2.sh` — is launched **detached** (`setsid nohup`) so that a session exit
+costs polling, not compute; four runs across three sessions have now been lost to session
+exits. A report is written only on `rc = 0` **and** non-empty, via a `.tmp` + `mv`, so a
+killed process cannot leave a zero-byte file that a later reader takes for a measurement.
+
+| # | cell | the single override | why it is where it is |
+|---|---|---|---|
+| 1 | `detach` | `loss.detach_xstar=true` | the largest untested difference between the library path and the exp05 experiment that measured `turing_frac` 0.3684; a gradient path through x\* lets the optimiser flatten σ(k), which is the k\*→0 attractor's mechanism |
+| 2 | `lowbasal` | `model.init=low_basal` | §3.2's 2/512, plus `STATE_OF_THE_SCIENCE.md` §10's measured 0 %→82 % on the identical statistic |
+| 3 | `legacy_control` | *(none — `three_gene_val`)* | one-off CONTROL, §5 |
+| 4 | `steps2000` / `steps8000` | `train.adam_steps` | the curve, 2 seeds × 2 targets only |
+| 5 | `dinit` | `model.d_init_from_kstar=true` | the dimensional D init starts ~29× too small |
+| 6 | `prior0p3` | `loss.weights.param_prior=0.3` | a real axis for the first time; Stage 0 measured weight 1.0 buying `plausibility 1.0` at a k\* cost of 0.017→0.087 |
+| 7 | `anchor4` / `anchor0p5` | `loss.weights.anchor` | 2.0 is inherited and was never swept |
+| 8 | `staging005` | `loss.staging_off_frac` / `_ramp_frac` | both 0.25, inherited, never swept |
+
+**`lowbasal` was promoted from position 6 to position 2 after §3.2 was measured, and this
+is recorded rather than presented as the original plan.** The unit's brief lists
+`detach_xstar` first and `model.init` sixth. §3.2 is new evidence — measured on the
+already-committed baseline runs, not on any cell — that the binding failure is reachability
+from the init, and §10 names the init as its measured cause. Reordering a queue changes no
+threshold and drops no cell; the pre-registered bars in `PREREGISTRATION.md` §3 are
+untouched.
+
+## 5. The legacy control, and what it can and cannot say
+
+The baseline's 0.125 is read against a library benchmark of 0.3684 — but that benchmark was
+measured on **legacy** data, where `L = clip(6·2π/k*, 18, 220)` makes an image-blind
+predictor score 0.0 % median k\* error. Without a control, 0.125 vs 0.3684 cannot separate
+"`three_gene_qvar` is genuinely harder" from "something regressed since the benchmark".
+`legacy_control` therefore runs the **baseline configuration unchanged** on
+`three_gene_val/sample_0000`, K = 8, into a **separate runs-root**
+(`experiments/tune_comp_legacy`).
+
+**It is a CONTROL and nothing else.** `PREREGISTRATION.md` §1 forbids legacy data from
+supporting any k\* claim, and its numbers are never pooled with `three_gene_qvar` numbers
+anywhere in this document.

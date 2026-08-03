@@ -1,0 +1,14 @@
+{
+  "sample_0003": {
+    "turing_volume_1pct": 0.995,
+    "turing_volume_4p8pct": 0.6575,
+    "turing_volume_10pct": 0.39,
+    "turing_volume_20pct": 0.205
+  },
+  "sample_0004": {
+    "turing_volume_1pct": 0.995,
+    "turing_volume_4p8pct": 0.655,
+    "turing_volume_10pct": 0.45,
+    "turing_volume_20pct": 0.26
+  }
+}

@@ -346,18 +346,128 @@ def cmd_recovered(args):
     _ladder(systems, "recovered", args.seed)
 
 
+# ======================================================================================
+# robust — THE DELIVERABLE: is the circuit still ROBUST at finite mu?
+# ======================================================================================
+# WHICH FINITE mu, and why exactly these two. The scope is a robustness statement AT a
+# stated finite mu, not a study of the mu axis, so two values are named and defended and
+# the rest of the axis is reported only for context.
+#   mu = 1e-3  HEADLINE. mu is (TF-promoter binding time)/(protein turnover time), both in
+#              the same units, so it is dimensionless. Live-cell single-molecule tracking
+#              puts specific TF-DNA dwell times at ~10 s (Chen et al. 2014, Cell 156:1274 —
+#              Sox2 12.0-14.6 s), and measured morphogen clearance half-lives in patterning
+#              tissue are ~2-4 h (Muller et al. 2012, Science 336:721 — Nodal/Lefty 95-218
+#              min), i.e. mean lifetimes ~2e4 s. 10/2e4 = 5e-4; with the model's own delta
+#              of order 1 setting one time unit to one protein lifetime (configs/bio_box.yaml
+#              delta row [0.4, 5.0]), 1e-3 is that estimate rounded up one notch.
+#   mu = 1e-2  STRESS. One decade slower gates than the estimate, i.e. binding an order of
+#              magnitude less separated from turnover than measured. If the verdict holds
+#              here it holds comfortably at any defensible mu.
+MU_FINITE = (1e-3, 1e-2)
+# Context only (demoted per the narrowed scope): the same cloud read across the mu axis.
+# It costs one eigen-scan per point because lifted.rescale_mu is exact, so it is free.
+MU_CONTEXT = np.logspace(-6.0, 2.0, 17)
+ROBUST_LEVELS = ("4p8pct", "10pct")
+
+
+def cmd_robust(args):
+    """turing_volume_{4.8,10}pct on the LIFTED Jacobian at finite mu.
+
+    The perturbation model is lifted.draw_param_cloud: lognormal multiplicative factors on
+    the PHYSICAL kinetic parameters, x* and the Jacobian re-derived per draw, strict
+    max Re eig(J_full) < 0 for the uniform state. See that docstring for why the reduced-J
+    scheme of eval/analysis.py::_draw_JD_cloud cannot be used on a lifted system, and why
+    every number here is read against its OWN mu -> 0 column rather than against the QSS
+    tables in docs/ROBUSTNESS_MEASUREMENT.md §4.2.
+
+    A Turing-unstable mode whose leading eigenvalue has Im != 0 is a travelling wave, not
+    the stationary pattern this project claims. `stationary` is reported beside `turing`
+    everywhere and the two are never merged.
+    """
+    os.makedirs(A, exist_ok=True)
+    z = _harvest()
+    systems = []
+    for form in ("competitive", "nc1"):
+        for scheme, i in balanced_picks(z, form, N_PER_FORM):
+            m, xstar, _ = _system(z, form, scheme, i)
+            systems.append((f"{form[:4]}/{scheme}/{i}", m))
+    for s in RECOVERED:                       # the two networks carrying the claim
+        m, _x, _c, _p = _recovered(s)
+        systems.append((f"rec/{s}", m))
+
+    rows, flat = [], {}
+    t0 = time.time()
+    for label, m in systems:
+        for lvl in ROBUST_LEVELS:
+            sigma = lifted.CLOUD_SIGMA_LEVELS[lvl]
+            r = lifted.robustness_vs_mu(m, MU_CONTEXT, sigma_log=sigma,
+                                        n_samples=args.n_samples, seed=args.seed)
+            vol = np.array([q["frac_turing"] for q in r["rows"]])
+            sta = np.array([q["frac_stationary"] for q in r["rows"]])
+            osc = np.array([q["frac_oscillatory"] for q in r["rows"]])
+            key = f"{label}__{lvl}".replace("/", "_")
+            flat[f"{key}__vol"] = vol
+            flat[f"{key}__stationary"] = sta
+            flat[f"{key}__oscillatory"] = osc
+            flat[f"{key}__fail_uniform"] = np.array(
+                [q["frac_fail_uniform"] for q in r["rows"]])
+            flat[f"{key}__fail_band"] = np.array([q["frac_fail_band"] for q in r["rows"]])
+            at = {mu: int(np.argmin(np.abs(np.log(MU_CONTEXT / mu)))) for mu in MU_FINITE}
+            row = dict(label=label, form=m.form, level=lvl, sigma_log=sigma,
+                       bar=lifted.PREREG_BARS[lvl], n=r["n"], n_converged=r["n_converged"],
+                       recovered=label.startswith("rec/"),
+                       vol_qss=r["qss"]["frac_turing"],
+                       stationary_qss=r["qss"]["frac_stationary"],
+                       vol_mu0=float(vol[0]))
+            for mu, j in at.items():
+                row[f"vol_mu{mu:g}"] = float(vol[j])
+                row[f"stationary_mu{mu:g}"] = float(sta[j])
+                row[f"oscillatory_mu{mu:g}"] = float(osc[j])
+                row[f"pass_mu{mu:g}"] = bool(vol[j] >= lifted.PREREG_BARS[lvl])
+            # CONTEXT ONLY: how far the volume moves anywhere on the swept axis. A number,
+            # not a study — it exists so "flat in mu" is a measurement and not an impression.
+            row["vol_max_dev_from_qss"] = float(np.max(np.abs(vol - r["qss"]["frac_turing"])))
+            row["oscillatory_max_over_axis"] = float(osc.max())
+            rows.append(row)
+            print(f"  {label:26s} {lvl:7s} QSS={row['vol_qss']:.3f} "
+                  f"mu=1e-3:{row['vol_mu0.001']:.3f} mu=1e-2:{row['vol_mu0.01']:.3f} "
+                  f"stat(1e-3)={row['stationary_mu0.001']:.3f} "
+                  f"osc_max={row['oscillatory_max_over_axis']:.3f} "
+                  f"maxdev={row['vol_max_dev_from_qss']:.4f}  [{time.time()-t0:.0f}s]",
+                  flush=True)
+
+    np.savez_compressed(os.path.join(A, "robust.npz"), mu_context=MU_CONTEXT,
+                        mu_finite=np.array(MU_FINITE), n_samples=args.n_samples,
+                        seed=args.seed, **flat)
+    with open(os.path.join(A, "robust.json"), "w") as fh:
+        json.dump(rows, fh, indent=2, default=str)
+    print(f"\nwrote {A}/robust.npz + .json")
+
+    print(f"\nHEADLINE — strict Turing volume on the LIFTED Jacobian at finite mu "
+          f"(n={args.n_samples} draws/cell, seed={args.seed}, N=3, n_hill=2)")
+    print(f"{'system':26s} {'lvl':7s} {'bar':>4s} {'QSS':>6s} {'mu=1e-3':>8s} "
+          f"{'mu=1e-2':>8s} {'stat@1e-3':>9s} {'PASS@1e-3':>9s}")
+    for r in rows:
+        print(f"{r['label']:26s} {r['level']:7s} {r['bar']:4.2f} {r['vol_qss']:6.3f} "
+              f"{r['vol_mu0.001']:8.3f} {r['vol_mu0.01']:8.3f} "
+              f"{r['stationary_mu0.001']:9.3f} "
+              f"{'yes' if r['pass_mu0.001'] else 'NO':>9s}")
+    return rows
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=("fixedpoint", "mucrit", "dtconv", "ladder",
+    ap.add_argument("cmd", choices=("fixedpoint", "mucrit", "robust", "dtconv", "ladder",
                                     "recovered"))
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--n-samples", type=int, default=400)
     ap.add_argument("--lo", type=float, default=1e-6)
     ap.add_argument("--hi", type=float, default=1e4)
     ap.add_argument("--per-decade", type=int, default=8)
     args = ap.parse_args(argv)
     os.chdir(os.path.join(HERE, ".."))
-    {"fixedpoint": cmd_fixedpoint, "mucrit": cmd_mucrit, "dtconv": cmd_dtconv,
-     "ladder": cmd_ladder, "recovered": cmd_recovered}[args.cmd](args)
+    {"fixedpoint": cmd_fixedpoint, "mucrit": cmd_mucrit, "robust": cmd_robust,
+     "dtconv": cmd_dtconv, "ladder": cmd_ladder, "recovered": cmd_recovered}[args.cmd](args)
 
 
 if __name__ == "__main__":

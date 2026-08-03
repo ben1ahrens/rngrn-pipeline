@@ -1278,3 +1278,159 @@ from adopting the alternative, but no one has made that a formal decision.
 - `src/rngrn/losses/weighting.py`, `src/rngrn/cli.py`, `.githooks/pre-push` (read
   directly to confirm the two evidence-integrity fixes are actually in the code, not
   only claimed in a PR body).
+
+---
+
+## Part 2c — Stage 0b: robustness at FINITE mu, i.e. with the QSS reduction UNDONE (unit c-mu, 2026-08-03)
+
+Full write-up: `docs/TIMESCALE_MU.md`. Code: `src/rngrn/eval/lifted.py`,
+`scripts/stage0b_mu.py`, `scripts/stage0b_figures.py`, `tests/test_lifted.py`.
+Arrays and figures: `experiments/figures_report/stage0b/`.
+
+### D-MU-0 — `mu` here is the QSS lift's FAST-VARIABLE TIMESCALE, not the generator's degradation rate
+
+**Date:** 2026-08-03. **Status:** DECIDED (terminology, project-wide).
+
+`mu` names two unrelated quantities in this project and the ambiguity has already cost one
+unit's work. `docs/BIO_VIABILITY.md` / `scripts/stage0_bio_viability.py` swept the
+GENERATOR's `mu[i]` (`scripts/gen_tg3.py:93`), which is the RNGRN's `delta`. This unit
+measures the OTHER one: the promoter-gate relaxation timescale of
+`eval/dynamical.py::lift_check`. Both readings are legitimate and both are now measured;
+what is no longer acceptable is writing `mu` without saying which. Every docstring in
+`src/rngrn/eval/lifted.py` and `scripts/stage0b_mu.py` opens by stating it.
+
+**Where it lives:** `src/rngrn/eval/lifted.py` module docstring.
+
+---
+
+### D-MU-1 — the finite-mu cloud perturbs PHYSICAL KINETIC PARAMETERS, not entries of the reduced Jacobian
+
+**Date:** 2026-08-03. **Status:** DECIDED (forced, with a stated cost).
+
+`eval/analysis.py::_draw_JD_cloud` — the basis of every `turing_volume` number to date —
+perturbs entries of the REDUCED Jacobian `J` directly. That cannot be used on a lifted
+system: the 21×21 `J_full` is *built from* `(KA, KR, alpha, beta, delta)` and `x*`, so a
+perturbed reduced `J` corresponds to no lifted system at all and cannot be lifted. The
+perturbation therefore acts one level down — independent lognormal factors on `KA, KR,
+alpha, beta, delta, D`, with `x*` re-solved and the Jacobian re-derived per draw. This is
+Tica et al.'s own perturbation model, which `analysis.py`'s docstring already names as the
+alternative to its own.
+
+What is preserved by construction: every factor is lognormal hence strictly positive, and
+every perturbed quantity is strictly positive under the model's link functions, so no sign
+flips and no structural zero is created — the two properties that made the original scheme
+correct.
+
+**THE COST, STATED:** absolute volumes under this scheme are NOT comparable to the QSS
+tables in `docs/ROBUSTNESS_MEASUREMENT.md` §4.2 or to the §3.2 calibration table. Measured
+on the two recovered networks at the same 400 draws / seed 0: the repo's reduced-J scheme
+gives `turing_volume_4p8pct` 0.657 / 0.655 and `_10pct` 0.390 / 0.450 for sample_0003 /
+sample_0004, where this scheme gives 0.265 / 0.215 and 0.150 / 0.095. Perturbing kinetic
+parameters moves `x*` as well as `J`, so it is strictly harsher. **Every finite-mu number is
+therefore read against its OWN mu→0 column, computed on the SAME draws from the reduced
+Jacobian** — along a curve the perturbation model is held fixed and only `mu` varies, so the
+mu-dependence is isolated even where the absolute level is not comparable.
+
+**Where it lives:** `src/rngrn/eval/lifted.py::draw_param_cloud`, `robustness_vs_mu`.
+**Evidence:** `experiments/figures_report/stage0b/arrays/robust.json`,
+`qss_repo_scheme_volumes.json`.
+
+---
+
+### D-MU-2 — the strict test, on the FULL 21×21 lifted Jacobian; the trace test is not merely loose here, it is broken
+
+**Date:** 2026-08-03. **Status:** DECIDED.
+
+Verdict: `max Re eig(J_full) < 0` at `k = 0` AND `max_{k>0} sigma_full(k) > 1e-9`, with
+diffusion `diag(D_1..D_N, 0, ..., 0)` — only `x` diffuses, promoter states are DNA-bound.
+
+`eval/analysis.py::turing_ok` uses `trace(J) < 0`, which Stage 0 measured overcounting by
+64×. On a LIFTED system it is worse than loose: `tr(J_full)` is dominated by the `-1/mu`
+gate diagonal and stays negative at ANY `mu`, so it would report "uniform state stable" for
+a system that has already lost stability. It is never used here.
+
+Separately, a Turing-unstable mode whose leading eigenvalue has `Im ≠ 0` is a travelling
+wave, not the stationary pattern this project claims to recover. `frac_stationary` is
+reported beside `frac_turing` everywhere and the two are never merged. **Measured: 0 of 8000
+draws was oscillatory at any `mu` on the swept axis** — the distinction did not bind here,
+but it is instrumented so it cannot silently start binding.
+
+**Where it lives:** `src/rngrn/eval/lifted.py::verdicts_from_J`, `turing_verdict_lifted`.
+
+---
+
+### D-MU-3 — the gate substep is solved EXACTLY at frozen x, so the integrator structurally cannot fake a dead pattern
+
+**Date:** 2026-08-03. **Status:** DECIDED.
+
+The gates relax at rate `1/mu`, so an explicit scheme needs `dt << mu` and a `mu = 1e-3` run
+costs ~1000× the QSS one. A stiff integrator that silently damped the instability would
+produce "the pattern died at finite `mu`" as an ARTEFACT — the most dangerous failure mode
+available in this unit. It is removed structurally rather than tested away: at frozen `x`
+the gate block is LINEAR in `G` and is integrated in closed form.
+
+* **nc1** — diagonal: `G ← G_inf + (G − G_inf) exp(−(1+u) dt/mu)`, `G_inf = u/(1+u)`.
+* **competitive** — per row the `2N` gates obey `dw/dt = (a − (I + a 1ᵀ)w)/mu`, and
+  `A = I + a 1ᵀ` is a RANK-ONE update of the identity whose exponential is closed form:
+  `exp(−Aτ) = e^{−τ}(I + ((e^{−Sτ}−1)/S) a 1ᵀ)`, `S = Σa`, with `w_inf = a/(1+S)` — which
+  IS the QSS occupancy. No linear solve, no `expm`, unconditionally stable, and it reduces
+  EXACTLY to the QSS scheme as `mu → 0`.
+
+The `x` substep reuses `eval/numerics.py`'s validated cached-coefficient ETDRK4 (rfft) under
+Strang splitting, and `dt`/horizon follow `eval/rollout.py::simulate`'s own growth-rate-aware
+policy, so the QSS and lifted runs of a model use the SAME `dt` and horizon and are directly
+comparable.
+
+**Evidence:** exact substep vs 2×10⁵-substep explicit Euler of the same ODE, both forms:
+max abs error **< 1e-5** (`tests/test_lifted.py::test_gate_step_is_exact`). dt-halving and
+the `mu → 0` QSS cross-check: `experiments/figures_report/stage0b/arrays/dtconv.json`,
+figure `g5_dt_convergence.png`.
+
+---
+
+### D-MU-4 — `J_full(mu)` is obtained by scaling the GATE ROWS of `J_full(1)` by `1/mu`, exactly
+
+**Date:** 2026-08-03. **Status:** DECIDED (implementation, measured exact).
+
+`mu` enters the lifted RHS only as an overall `1/mu` on the `2N²` gate equations; the `x`
+equations do not contain it. So every gate ROW of the Jacobian carries exactly one factor
+`1/mu` and the `x` rows carry none. A whole `mu` axis therefore costs ONE vmapped autodiff
+Jacobian per draw plus one eigen-scan per `mu` point, instead of one autodiff per point.
+
+**Evidence:** vs a fresh autodiff Jacobian at `mu` = 1e-3, 0.1, 7.3, both forms: relative
+deviation **< 1e-12** (`tests/test_lifted.py::test_rescale_mu_matches_autodiff`).
+
+A companion fact, also measured and also load-bearing: the lifted FIXED POINT is the QSS one
+at EVERY `mu` (worst `max|f_lift(z*)|` over 8 systems × 7 `mu` from 1e-6 to 1e3: **1.28e-8**),
+so `mu` moves stability and dynamics and never the steady state, and every comparison across
+`mu` is apples-to-apples.
+
+---
+
+### D-MU-5 — ONE finite `mu` (1e-3) plus a one-decade stress point (1e-2); the rest of the axis is context, not a claim
+
+**Date:** 2026-08-03. **Status:** DECIDED (scope, set by the owner).
+
+The owner scoped this unit to robustness AT finite `mu`, with timescale *separation* as a
+problem explicitly out of scope. Two values are named and defended and nothing else is
+claimed on:
+
+* `mu = 1e-3` (**headline**). `mu` = (TF-promoter binding time)/(protein turnover time),
+  dimensionless. Live-cell single-molecule tracking gives specific TF-DNA dwell times ~10 s
+  — Chen J. et al. (2014) *Cell* 156:1274-1285 measure Sox2 at 12.0-14.6 s specific,
+  0.75-0.9 s non-specific. Measured morphogen clearance in patterning tissue gives mean
+  lifetimes ~1.4-1.9×10⁴ s — Müller P. et al. (2012) *Science* 336:721-724 report
+  Cyclops/Squint/Lefty1/Lefty2 half-lives of 95-218 min. 10/2×10⁴ ≈ 5×10⁻⁴, rounded up one
+  notch. `configs/bio_box.yaml`'s cited `delta` row `[0.4, 5.0]` puts one model time unit at
+  0.4-5 protein lifetimes, which is inside the rounding.
+* `mu = 1e-2` (**stress**). One decade slower gates than measured; if the verdict holds here
+  it holds at any defensible `mu`.
+
+**[ORDER OF MAGNITUDE]** this is not pinned better than a decade and no figure pretends
+otherwise. Schwanhäusser et al. (2011) *Nature* 473:337-342's median protein half-life of
+46 h in cultured NIH3T3 is an order of magnitude LONGER than the developmental anchor and
+would push `mu` DOWN, so the value used is the conservative (larger-`mu`) choice.
+
+**Where it lives:** `scripts/stage0b_mu.py::MU_FINITE`.
+
+---

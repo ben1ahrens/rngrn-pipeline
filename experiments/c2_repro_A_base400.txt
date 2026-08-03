@@ -1,0 +1,9 @@
+
+=== c2_A_base400  (2 targets, K up to 8) ===
+target         r=0.02   r=0.05    r=0.1  ndistinct@0.05
+sample_0000     0.250    0.250    0.125               7
+sample_0001     0.250    0.250    0.125               7
+MEAN within     0.250    0.250    0.125
+within@n=2      0.522    0.516    0.500   (size-matched to the control)
+CROSS ctrl      0.525    0.512    0.518   (group size 2, 2000 draws)
+GAP            -0.003    0.004   -0.018   (3.1 needs within(K=8) >= 0.75 AND gap >= 0.25)

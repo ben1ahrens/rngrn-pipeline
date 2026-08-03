@@ -90,8 +90,9 @@ A seed that raises counts as a **failure**, never as a silent drop from the deno
 
 ## 3. The pass conditions
 
-A target **passes** only if all criteria below hold — five as originally written, six since
-the dated §3.6 amendment of 2026-08-03. A **form** (competitive / `nc1`)
+A target **passes** only if all **five** criteria below hold. (A sixth, §3.6, was added and
+withdrawn on 2026-08-03 without any measurement being made against it; it is retained there
+as future work and binds nothing.) A **form** (competitive / `nc1`)
 passes only if ≥ **4 of 6** held-out targets pass. The overall claim requires **both** forms
 to pass.
 
@@ -285,7 +286,36 @@ separated L from the parameter vector — their `x̂ = x·√(c₂/D_u)` folds l
 into one variable, and their code hard-codes L via `dx` — so there is no prior result to
 inherit here.
 
-### 3.6 Robustness under finite timescale separation — added 2026-08-03
+### 3.6 Robustness under finite timescale separation — added AND WITHDRAWN 2026-08-03
+
+> **WITHDRAWN THE SAME DAY IT WAS ADDED, AT THE OWNER'S DIRECTION, BEFORE ANY MEASUREMENT
+> EXISTED AGAINST IT. This is NOT a pass condition. It is future work.**
+>
+> The owner first raised finite-`mu` robustness to the essential criterion, then scoped it
+> out: *"For now, let's stick to finite mu. Separation of time scales is a whole nother
+> problem. My previous work leads me to believe that training under the QSS is sufficient to
+> discover circuits that pattern under finite mu."* and *"Just note work on mu for future
+> work if we have time."*
+>
+> **Nothing was measured against this section before it was withdrawn** — the unit building
+> the machinery was stopped mid-run and its code is parked, unvalidated, on branch
+> `feature/rngrn-c-mu` (commit `17e9ad2`). No run, no number, and no decision anywhere in
+> this repository was judged by §3.6.
+>
+> **Why the text is retained rather than deleted.** A pre-registration whose withdrawn
+> sections vanish is not a pre-registration. Keeping it visible means a reader can see
+> exactly what was considered, when, and on whose authority it was set aside — which is the
+> whole function of this document. It is retained *verbatim as originally written* below.
+>
+> **Scope note, so the record is not misread.** §3.2 continues to bind and is unaffected. It
+> is measured on the QSS Jacobian, and this section is the standing statement of what that
+> does *not* cover: the lifted finite-`mu` system's robustness is **unmeasured in this
+> project**. Any claim of robustness made under §3.2 is a claim about the QSS reduction, and
+> should be worded that way in the paper.
+
+---
+
+*Original text, as written before withdrawal:*
 
 **Added at the owner's explicit direction, before any finite-`mu` number existed.** The
 owner's words: *"what I really care about is the robustness of the circuit when finite mu is

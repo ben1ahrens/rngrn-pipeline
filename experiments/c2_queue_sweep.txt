@@ -24,3 +24,14 @@ c2_I_turing2|0,1,2,3,4,5,6,7|sample_0000,sample_0001|4|-o train.adam_steps=400 -
 c2_J_turing32|0,1,2,3,4,5,6,7|sample_0000,sample_0001|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=32.0
 c2_G_steps2000|0,1,2,3,4,5,6,7|sample_0000,sample_0001|4|-o train.adam_steps=2000 -o loss.weights.param_prior=1.0
 c2_A2_base400_slow|0,1,2,3,4,5,6,7|sample_0002,sample_0003,sample_0004|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0
+# ---- APPENDED after reading c2_D_turing8 (18:32). turing=8 took the Turing rate 1/16 ->
+# 14/16 but kstar_fft_rel_err went 0.979/0.403 -> 4.765/6.889 and the raw D ratio exploded
+# to ~1e5: the Turing term and the k* term are in DIRECT competition and weight 8 simply
+# wins that competition by cheating on wavelength. These arms raise BOTH so the balance is
+# held while the whole pair outweighs anchor(2.0)+prior(1.0), and bracket the turing weight
+# from below. Ranked by the pre-registered criteria, a cell that is Turing at the WRONG k*
+# fails 3.3 and is not a candidate.
+c2_K_turing4|0,1,2,3,4,5,6,7|sample_0000,sample_0001|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=4.0
+c2_L_t8k8|0,1,2,3,4,5,6,7|sample_0000,sample_0001|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=8.0
+c2_M_t4k4|0,1,2,3,4,5,6,7|sample_0000,sample_0001|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=4.0 -o loss.weights.kstar=4.0
+c2_N_t8k16|0,1,2,3,4,5,6,7|sample_0000,sample_0001|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=16.0

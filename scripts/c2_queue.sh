@@ -12,7 +12,12 @@ set -uo pipefail
 WT=/home/benja/projects/personal/rngrn/worktrees/c-tune-nc1
 cd "$WT"
 
-while IFS='|' read -r name seeds targets workers overrides; do
+# READ THE QUEUE ON FD 3, NOT STDIN. With `done < "$1"` the cell's python process inherits
+# stdin = the queue file and CONSUMES it: on 2026-08-03 an 10-cell queue ran cell 1 and then
+# printed "QUEUE DONE", silently dropping 9 cells. c2_cell.sh additionally gives the CLI
+# `< /dev/null`. Belt and braces, because a queue that lies about being finished is worse
+# than one that crashes.
+while IFS='|' read -r -u 3 name seeds targets workers overrides; do
   case "$name" in ''|\#*) continue ;; esac
   root="experiments/$name"
   echo "### $(date -Is) START $name  [$overrides]"
@@ -27,5 +32,5 @@ Run records and target reports for one measurement cell. Committed per cell so a
 session exit costs one cell rather than the unit.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>" || echo "### nothing to commit for $name"
-done < "$1"
+done 3< "$1"
 echo "### QUEUE DONE"

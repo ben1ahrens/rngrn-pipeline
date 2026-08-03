@@ -30,7 +30,7 @@ for t in ${TARGETS_CSV//,/ }; do
       --dataset-id three_gene_qvar --sample-key "$t" --form nc1 \
       --seeds $SEEDS --workers "$WORKERS" \
       -o train.batched=true -o train.device=cuda -o model.dispersion_backend=cubic \
-      -o train.n_restarts=64 -o train.lbfgs_steps=0 "$@" > /dev/null
+      -o train.n_restarts=64 -o train.lbfgs_steps=0 "$@" > /dev/null < /dev/null
   rc=$?
   echo "=== TARGET $ROOT $t rc=$rc secs=$(( $(date +%s) - t0 )) ==="
 done

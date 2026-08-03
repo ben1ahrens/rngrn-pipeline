@@ -412,6 +412,17 @@ through 7 independent functions (the 3 diagonal entries, the 3 2×2 principal mi
 det J). 9 entries − 7 constraints = **2**, exactly the dimension of the diagonal-similarity
 group modulo its scalar centre.
 
+**Two load-bearing premises checked against the code rather than assumed.** First, D really
+is diagonal in the dispersion: `model.py::dispersion` builds
+`M = J.unsqueeze(0) - k2 * torch.diag_embed(Dvec).unsqueeze(0)`, so the commutation argument
+in (b) is exact and not an approximation of an off-diagonal D. Second, the dimension count's
+"7 independent functions" is not this document's algebra imposed on the code — it is the
+code's own reduction. `model.py::_sigma_max_cubic`, the backend every cell in this unit runs
+(`dispersion_backend=cubic`), computes σ from exactly *"the characteristic polynomial of a
+3x3 … whose coefficients (trace, sum of principal 2x2 minors, determinant)"* are formed from
+M. The optimiser's entire view of J is those three coefficient families evaluated along the
+k-grid, which is where the 7 comes from.
+
 **This is verified numerically, not asserted** (`c1_gauge.py` BLOCK 1), on *real* recovered
 (J, D) from the committed `legacy_control` runs — max |Δσ(k)| over the k-grid:
 

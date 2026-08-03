@@ -514,3 +514,49 @@ comparison is not like-for-like. A statistic this coarse can also agree by the m
 inductive bias rather than from the target, which is exactly what §3.1's control exists to
 catch — so **it means nothing until read against the size-matched cross-target control**,
 which requires ≥ 2 targets in the same runs-root and is measured in §9.
+
+### 8.5 The one J property that does separate patterning, measured on all 24 committed runs
+
+`STATE_OF_THE_SCIENCE.md` §10 measured the Jacobian diagonal at **init**: negative at every
+one of 200 converged default inits, against 88/88 real `three_gene` systems that have a
+positive one. The same quantity is available at the **recovered solution** for every run
+this unit has committed, and it separates the outcome perfectly:
+
+| cell | target | seeds with max diag(J) > 0 | seeds scored Turing |
+|---|---|---|---|
+| `baseline` | qvar `sample_0000` | 1/8 (seed 3, +0.2276) | 1/8 (seed 3) |
+| `detach` | qvar `sample_0000` | 1/8 (seed 3, +0.2535) | 1/8 (seed 3) |
+| `legacy_control` | `three_gene_val` | **8/8** (+0.334 … +0.499) | **8/8** |
+
+Pooled 2×2 over all 24 runs:
+
+| | scored Turing | not Turing |
+|---|---|---|
+| **some J_ii > 0** | **10** | **0** |
+| **all J_ii < 0** | **0** | **14** |
+
+**Perfect separation, 24 of 24, with no off-diagonal cell.** The 14 non-patterning runs sit
+at max diag(J) between −0.014 and −0.521, and every one of the 10 patterning runs is
+positive.
+
+**This is a necessary condition being confirmed, not an empirical surprise, and it is
+reported that way.** Diffusion-driven instability with a diagonal D requires at least one
+positive diagonal Jacobian entry — a standard result, not a finding of this project. What
+the measurement adds is the *population* statement: on `three_gene_qvar` the optimiser
+crosses into self-activating territory in **2 of 16** runs, while on the legacy sample it
+does so in **8 of 8**. The reachability gap of §7.1 is, at the level of the recovered
+network, exactly a self-activation gap.
+
+The practical consequence is an instrument rather than a claim: `max diag(J) > 0` is a
+one-number, zero-cost proxy for whether a configuration is reaching the patterning region,
+and it is continuous (the *value*, not just the sign) where `turing_frac` is a floored count
+of 8. It is used below as a secondary readout beside the pooled restart rate, never in place
+of a pre-registered criterion.
+
+It also ties the two jobs together. §8.4 found that what the seeds *do* agree on is the sign
+of the diagonal (0.875–1.000) and what they do not agree on is the off-diagonal pair senses
+(0.500). The diagonal is the part the objective must pin to pattern at all, and it is
+pinned; the off-diagonal is the part σ(k) leaves loose, and it is loose. That is a single
+coherent picture of both failures, and it predicts that **an axis which raises the Turing
+rate will not, on its own, move criterion 3.1** — which is exactly what §7.2 measured and
+what the `turing8` cell tests directly.

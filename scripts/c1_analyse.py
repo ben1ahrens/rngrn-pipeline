@@ -162,6 +162,46 @@ def sign_key(J, rtol):
     return tuple(int(v) for v in s.ravel())
 
 
+def block_perm(reps):
+    """DIAGNOSTIC ONLY. The modal fraction after quotienting by the node-label permutation.
+
+    `topology_consistency` compares sign structures ENTRYWISE, so two seeds that recovered
+    the SAME network with its three nodes in a different order score as two distinct
+    structures. Nothing in the objective pins the node ordering -- the loss is a function of
+    sigma(k), which is permutation-invariant -- so this symmetry is real and unbroken, and
+    with N=3 there are 6 relabelings.
+
+    THIS IS NOT A SUBSTITUTE FOR CRITERION 3.1 AND MUST NOT BE READ AS ONE. The
+    pre-registered statistic is the raw modal fraction at rtol 0.05 and it stays the number
+    reported against the 0.75 bar. This column exists to say HOW MUCH of a 3.1 failure is
+    the relabeling symmetry and how much is a genuinely different network.
+    """
+    import itertools
+
+    import numpy as np
+    print("\n=== PERM — DIAGNOSTIC: modal fraction after quotienting by node relabeling ===")
+    print("    (NOT criterion 3.1. 3.1 is the raw column in the REPRO block above.)")
+    hdr = f"{'cell':<14}{'sample':<12}{'K':>3}" + "".join(
+        f"{'raw@' + str(t):>10}{'canon@' + str(t):>12}" for t in RTOLS)
+    print(hdr)
+    print("-" * len(hdr))
+    for (cell, samp), r in sorted(reps.items()):
+        Js = [d.get("recovered", {}).get("J") for _, d in results_of(r)]
+        Js = [np.asarray(J, dtype=float) for J in Js if J is not None]
+        if not Js:
+            continue
+        row = f"{cell:<14}{samp:<12}{len(Js):>3}"
+        for t in RTOLS:
+            raw = Counter(sign_key(J, t) for J in Js)
+            canon = Counter(
+                min(sign_key(J[np.ix_(list(p), list(p))], t)
+                    for p in itertools.permutations(range(J.shape[0])))
+                for J in Js)
+            row += (f"{raw.most_common(1)[0][1] / len(Js):>10.3f}"
+                    f"{canon.most_common(1)[0][1] / len(Js):>12.3f}")
+        print(row)
+
+
 def block_repro(reps):
     groups = {}   # (cell, sample) -> [J, ...]
     for key, r in sorted(reps.items()):
@@ -208,6 +248,7 @@ def main():
     block_table(reps)
     block_restarts(reps)
     block_repro(reps)
+    block_perm(reps)
 
 
 if __name__ == "__main__":

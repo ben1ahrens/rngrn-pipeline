@@ -280,3 +280,90 @@ configurations: **4 of 1024 restarts** across `baseline` and `detach` reach `sig
 on `sample_0000`. The remaining rate axes must move the *init* or the *parameterisation*,
 not the gradient path — which is where `lowbasal` and `d_init_from_kstar` sit, and is why
 `lowbasal` was promoted before this cell finished.
+
+---
+
+## 7. Cell `legacy_control` — the control that reframes the unit
+
+Baseline configuration **unchanged**, `three_gene_val/sample_0000`, K = 8, `git_sha 4246d6f`,
+`config_id d3aab01611ae`, separate runs-root `experiments/tune_comp_legacy`, **370 s**.
+Per `PREREGISTRATION.md` §1 this supports **no claim**; it is read only against the
+`three_gene_qvar` baseline as a control, and its numbers are never pooled with qvar's.
+
+| statistic | `baseline` (qvar `sample_0000`) | **`legacy_control`** (`three_gene_val`) |
+|---|---|---|
+| `turing_frac` | 0.125 (1/8) | **1.000 (8/8)** |
+| pooled restarts `sig_max_pos > 0` | **2 / 512** (0.0039) | **174 / 512 (0.3398)** |
+| pooled `sig_max_pos` p90 | −0.0413 | **+0.2217** |
+| winner `sig_max` median | −0.0304 | **+0.2887** |
+| `robustness_n_used` | 1 | **8** |
+| `turing_volume_10pct` / `4p8pct` median | 1.000 / 1.000 (n=1) | 0.992 / 1.000 (n=8) |
+| `kstar_fft_rel_err` median | 0.979 | 0.068 |
+| **`trivial_kstar_err`** | **1.000** | **1.3e-16 — LEAKED** |
+| `kstar_spread` | 2.170 | **0.0147** |
+| **`topology_consistency`** | **0.125** | **0.125** |
+| `mean_agreement` | 0.579 | 0.397 |
+| `n_distinct_structures` | 8 | **8** |
+| wall clock, same settings | 1275 s | **370 s** |
+
+### 7.1 Nothing regressed. `three_gene_qvar` is harder by ~87× in reachability.
+
+Same code, same config, same K, same 400 steps, same 64 restarts: **8 of 8** seeds reach the
+Turing regime on the legacy sample against **1 of 8** on the qvar one, and at the restart
+level **174/512 against 2/512**. That is the answer the control was run for. The 0.125 is
+not a regression against the 0.3684 library benchmark — on legacy data this configuration
+now *exceeds* that benchmark — it is a property of `three_gene_qvar`.
+
+And `trivial_kstar_err = 1.3e-16` on the legacy sample is the documented leak, measured
+here rather than assumed: an image-blind predictor using `L` alone is **exact** on this
+target, so the legacy `kstar_fft_rel_err` of 0.068 carries no information about the model
+and is not comparable to the qvar number beside it. This is exactly why §1 forbids legacy
+k\* claims, and it is why the 0.3684 benchmark could never have been a fair target.
+
+### 7.2 THE FINDING: criterion 3.1 is NOT downstream of the Turing rate
+
+The unit's brief states that "reproducibility is downstream of the Turing rate — lift the
+Turing rate and 3.1 follows". **That is refuted by this control.** On the legacy sample:
+
+* every one of 8 seeds reaches the Turing regime (`turing_frac` 1.000),
+* all 8 agree on k\* to 1.5 % (`kstar_spread` 0.0147 on a k\* of ~0.41),
+* and `topology_consistency` is still **0.125**, with **8 distinct sign structures** — the
+  worst possible value, identical to the value on the target where 7 of 8 seeds collapse to
+  k\*→0.
+
+Eight seeds that all pattern, all agree on the wavelength, and no two of which recover the
+same network. **The Turing rate and the reproducibility of J are separate failures**, and
+lifting the first will not lift the second. Anything in this project that reads
+`turing_frac` as a proxy for 3.1 is reading it wrong.
+
+### 7.3 How much of that is the node-label symmetry — a diagnostic, not a criterion
+
+Nothing in the objective pins the node ordering: the loss is a function of σ(k), which is
+invariant under relabeling the three nodes, so a seed may recover the *same* network with
+its nodes permuted. `topology_consistency` compares sign structures entrywise and therefore
+counts those as different structures. With N = 3 there are 6 relabelings.
+
+Quotienting by them (`scripts/c1_analyse.py`, PERM block — **diagnostic only**):
+
+| cell | target | raw @0.02 | canon @0.02 | raw @0.05 | canon @0.05 | raw @0.10 | canon @0.10 |
+|---|---|---|---|---|---|---|---|
+| `baseline` | qvar `sample_0000` | 0.250 | 0.625 | **0.125** | 0.125 | 0.250 | 0.500 |
+| `detach` | qvar `sample_0000` | 0.125 | 0.250 | **0.250** | 0.375 | 0.250 | 0.375 |
+| `legacy_control` | `three_gene_val` | 0.125 | 0.250 | **0.125** | 0.375 | 0.250 | 0.500 |
+
+**The pre-registered statistic is the raw column at rtol 0.05 and it stays the number read
+against the 0.75 bar.** The canonical column is reported because it says how much of the
+failure is relabeling and how much is a genuinely different network — and the answer is
+*some, but nowhere near enough*: the best canonical value anywhere in this table is 0.625,
+and 3.1 fails on every row of both columns. The symmetry is a real confound in the
+estimator and is worth recording for the paper; it is **not** a rescue, and no bar moves.
+
+### 7.4 The cost profile, and the first evidence on the C2 cost anomaly
+
+At **identical** settings the legacy sample took **370 s** and the qvar sample **1275 s** —
+a **3.4×** spread, on the same GPU, same 8 seeds, same 4 workers. The cheap target is the
+one where all 8 seeds pattern; the expensive one is the one where 7 of 8 collapse to k\*→0.
+That is the direction the unit brief flagged as significant: the expensive targets are the
+non-patterning ones, so the cost anomaly and the Turing-rate problem look like one problem —
+the steady-state solve grinding on a flattening, near-singular Jacobian. Two targets is not
+a measurement of that; `sample_0003` (which patterns) is the next data point.

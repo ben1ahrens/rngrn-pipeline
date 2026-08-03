@@ -1,0 +1,251 @@
+{
+  "loss": 0.2689397171974655,
+  "kstar_model": 0.005874471220477074,
+  "kstar_obs": 0.2437235610238537,
+  "restarts": [
+    {
+      "restart": 0,
+      "total": 0.30806034389002757,
+      "sig_max": -0.14321662036755578,
+      "sig_max_pos": -0.15984995957722614,
+      "kstar_model": 0.005874471220477074,
+      "rel_err": 0.9758969868497895
+    },
+    {
+      "restart": 1,
+      "total": 0.37739494657441575,
+      "sig_max": -0.259946934622083,
+      "sig_max_pos": -0.2698443207572703,
+      "kstar_model": 0.005874471220477074,
+      "rel_err": 0.9758969868497895
+    },
+    {
+      "restart": 2,
+      "total": 0.3554233545012935,
+      "sig_max": -0.2321633913379586,
+      "sig_max_pos": -0.24381981006658315,
+      "kstar_model": 0.005874471220477074,
+      "rel_err": 0.9758969868497895
+    },
+    {
+      "restart": 3,
+      "total": 0.2689397171974655,
+      "sig_max": -0.10443169346734582,
+      "sig_max_pos": -0.11700514616080371,
+      "kstar_model": 0.005874471220477074,
+      "rel_err": 0.9758969868497895
+    },
+    {
+      "restart": 4,
+      "total": 0.3098872608272143,
+      "sig_max": -0.18434426671082693,
+      "sig_max_pos": -0.19185279509155562,
+      "kstar_model": 0.005874471220477074,
+      "rel_err": 0.9758969868497895
+    },
+    {
+      "restart": 5,
+      "total": 0.4377037887430699,
+      "sig_max": -0.28843722276322753,
+      "sig_max_pos": -0.30284720843262425,
+      "kstar_model": 0.005874471220477074,
+      "rel_err": 0.9758969868497895
+    },
+    {
+      "restart": 6,
+      "total": 0.3053349765472357,
+      "sig_max": -0.17144400039126462,
+      "sig_max_pos": -0.1795965672831189,
+      "kstar_model": 0.005874471220477074,
+      "rel_err": 0.9758969868497895
+    },
+    {
+      "restart": 7,
+      "total": 0.39267635611760704,
+      "sig_max": -0.2009121764862155,
+      "sig_max_pos": -0.2161382559378094,
+      "kstar_model": 0.005874471220477074,
+      "rel_err": 0.9758969868497895
+    }
+  ],
+  "recovered": {
+    "KA": [
+      [
+        0.4978418297061235,
+        0.05864150401923141,
+        0.11773332461638238
+      ],
+      [
+        0.24333716827415092,
+        0.058447196621038325,
+        0.06490990322244676
+      ],
+      [
+        0.5357566262349339,
+        0.19359610349555065,
+        0.07335940382738734
+      ]
+    ],
+    "KR": [
+      [
+        0.3217481202426106,
+        0.1223340704798315,
+        0.11685244554791273
+      ],
+      [
+        0.16898842965077404,
+        0.03867318792379294,
+        0.16445710457038404
+      ],
+      [
+        0.35642381474579937,
+        0.08018488247840151,
+        0.3185383728104779
+      ]
+    ],
+    "alpha": [
+      [
+        1.124639749137546,
+        0.5951916522344856,
+        0.33129271539510274
+      ],
+      [
+        0.7580517403312024,
+        0.34267044653480044,
+        0.5006233952856624
+      ],
+      [
+        1.1684262114702755,
+        0.5106815378246505,
+        0.5551497486130863
+      ]
+    ],
+    "delta": [
+      0.47223611705868485,
+      0.7167517355379645,
+      1.0237775889387142
+    ],
+    "beta": [
+      0.1207969721497068,
+      0.2823674950133695,
+      0.35808537767563975
+    ],
+    "D": [
+      0.31015507984611396,
+      1.0343293980544592,
+      0.31195449767635786
+    ],
+    "D_model": [
+      0.31015507984611396,
+      1.0343293980544592,
+      0.31195449767635786
+    ],
+    "x_star": [
+      0.5484902316510085,
+      0.472939461784026,
+      0.5007067701116674
+    ],
+    "J": [
+      [
+        -0.10821455077441544,
+        0.006949712107324011,
+        0.004895810042759034
+      ],
+      [
+        0.14688679669683893,
+        -0.7053299526586859,
+        0.01623732376050081
+      ],
+      [
+        0.3750033016676139,
+        0.03746662001165779,
+        -1.0376871442328133
+      ]
+    ]
+  },
+  "metric": {
+    "morphology_bank": "default_centroids",
+    "morphology_pred_target": "labyrinth",
+    "morphology_margin_target": 1.2614965156943894,
+    "morphology_skew_target": 0.23269252175452787,
+    "morphology_kurtosis_target": -1.624627690088778,
+    "morphology_ang_conc_target": 0.2754288072231735,
+    "morphology_ang_entropy_target": 0.7538279444283466,
+    "morphology_scored": "target_only",
+    "kstar_model": 0.005874471220477074,
+    "kstar_true": 0.24161891117478512,
+    "kstar_rel_err": 0.975687038767311,
+    "kstar_fft_true": 0.282,
+    "kstar_fft_rel_err": 0.9791685417713579,
+    "trivial_kstar_err": 1.0,
+    "kstar_fft_bin_width": 0.33333333333333337,
+    "recovered_turing": false,
+    "recovered_sig_max": -0.10442122681585908,
+    "recovered_tr0": -1.8512316476659145,
+    "turing_volume_1pct": 0.0,
+    "turing_volume_4p8pct": 0.0,
+    "turing_volume_10pct": 0.0,
+    "turing_volume_20pct": 0.0,
+    "repro_sign_vector": "[-1, 0, 0, 1, -1, 0, 1, 0, -1]",
+    "repro_N": 3,
+    "repro_kstar": 0.005874471220477074,
+    "repro_D_ratio": 3.334878147305053,
+    "repro_sign_zero_rtol": 0.05,
+    "plausibility_alpha_min": 0.33129271539510274,
+    "plausibility_alpha_max": 1.1684262114702755,
+    "plausibility_alpha_in_box": false,
+    "plausibility_alpha_source": "docs/GOAL_tica_equivalent.md \u00a72.2 \u2014 \"The generator priors recorded earlier in the project (alpha 0.5-10, delta 0.4-5, D-ratio ~8-250) are the working plausibility box for the RNGRN's own parameters.\" This is the project's own recorded working box, not an external wet-lab measurement; there is no independent literature citation for this dimensionless model-internal scale.\n",
+    "plausibility_delta_min": 0.47223611705868485,
+    "plausibility_delta_max": 1.0237775889387142,
+    "plausibility_delta_in_box": true,
+    "plausibility_delta_source": "docs/GOAL_tica_equivalent.md \u00a72.2 \u2014 same working-box record as `alpha` above.\n",
+    "plausibility_beta_min": 0.1207969721497068,
+    "plausibility_beta_max": 0.35808537767563975,
+    "plausibility_beta_in_box": null,
+    "plausibility_beta_source": "UNCITED",
+    "plausibility_d_ratio_value": 3.3156418828990266,
+    "plausibility_d_ratio_in_box": true,
+    "plausibility_d_ratio_source": "Centre 7.5 and the \"measured ratio\" framing: docs/STATE_OF_THE_SCIENCE.md \u00a711 \u2014 \"The canonical measured ratio is Nodal/Lefty in live zebrafish: the activator Nodal diffuses ~7.5x slower than the inhibitor Lefty.\" low=1.0 is the classical Turing (1952) requirement that the inhibitor diffuse faster than the activator (D_ratio > 1) for a two-species reaction-diffusion instability \u2014 Turing, A.M. (1952) Phil. Trans. R. Soc. Lond. B 237:37-72. high=60.0 is a REASONED PROXY (not itself a measured ratio bound, flagged as such) taken from the same STATE_OF_THE_SCIENCE.md \u00a711 paragraph's cited absolute-diffusivity spread across measurement regimes (\"~60 um^2/s FCS-local to ~1-2 um^2/s FRAP-global\", i.e. roughly two orders of magnitude) as a ceiling on how much differential diffusion is physiologically plausible.\n",
+    "plausibility_n_scored": 3,
+    "plausibility_score": 0.6666666666666666,
+    "lgen_system_id": "0",
+    "lgen_L": 78.01357861389891,
+    "lgen_nondim": false,
+    "lgen_q_model": 0.07293888369806695,
+    "lgen_D_ratio": 3.334878147305053,
+    "lgen_J_sign": "-+++-+++-",
+    "n_true": 3,
+    "n_model": 3,
+    "subblock_sign_match": 0.4444444444444444,
+    "subblock_fro_rel_err": 0.6292732918200971,
+    "sign_match_frac": 0.4444444444444444,
+    "sign_match_frac_aligned": 0.4444444444444444,
+    "sign_match_frac_identity": 0.4444444444444444,
+    "best_perm": "(0, 1, 2)",
+    "n_permutations_searched": 1,
+    "scoring_mode": "permutation_aligned",
+    "rollout_status": "unpatterned",
+    "rollout_grid": 96,
+    "rollout_L": 78.01357861389891,
+    "rollout_integrator": "etdrk4_rfft",
+    "rollout_dt": 0.19207563555412246,
+    "rollout_nsteps": 1994,
+    "rollout_nsteps_run": 1000,
+    "rollout_stopped_reason": "collapsed",
+    "rollout_sig_max": -0.10442122681585908,
+    "rollout_seconds": 1.9006042390001312,
+    "rollout_amplitude": 3.344833844454035e-13,
+    "rollout_kstar": NaN,
+    "rollout_patterned": false,
+    "arm": "fully_observed",
+    "observed_idx": "[0, 1, 2]"
+  },
+  "provenance": {
+    "git_revision": "570f3c8",
+    "python": "3.11.15",
+    "platform": "Linux-6.6.114.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "torch": "2.13.0+cu130",
+    "cuda_available": true,
+    "device": "cuda:NVIDIA GeForce RTX 5070 Ti Laptop GPU"
+  }
+}

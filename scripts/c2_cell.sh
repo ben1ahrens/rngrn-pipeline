@@ -19,7 +19,19 @@ SEEDS=${SEEDS_CSV//,/ }
 # (sample_0002: >54 min for 4 of 8 seeds against ~90 s for all 8 of sample_0000). Without a
 # cap one pathological target eats the whole unit. A timed-out target is REPORTED as such,
 # never silently dropped from a denominator.
-TIMEOUT=${C2_TIMEOUT:-1800}
+# 3600 s, and DELIBERATELY IDENTICAL to competitive's (scripts/c1_queue5.sh in c-tune-comp).
+# The two units had chosen independently -- nc1 1800 s defaulted and overridden to 2400 s at
+# launch, competitive 7200 s -- for no principled reason, and it biased the comparison
+# between the forms. A timed-out target yields rc=124 and NO target report: a MISSING
+# measurement, not a measured failure. PREREGISTRATION section 2 forbids a seed being a
+# silent drop from the denominator, and a target dropped for cost is the same error one level
+# up, with section 3 reading ">= 4 of 6 targets". nc1 is BOTH the binding form AND the more
+# expensive one -- the ~30x cost spread tracks non-patterning and nc1 patterns less -- so the
+# smaller budget fell on the form that needed it most, and nc1/sample_0003 was already lost
+# that way. 3600 s is ~3.5x the ~1030 s observed for well-behaved targets (legacy 370 s,
+# qvar/sample_0003 1024 s, nc1/sample_0001 1053 s), so a timeout now means GENUINELY
+# pathological rather than unlucky.
+TIMEOUT=${C2_TIMEOUT:-3600}
 
 cd "$WT"
 for t in ${TARGETS_CSV//,/ }; do

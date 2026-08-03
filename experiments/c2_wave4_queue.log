@@ -1,0 +1,2 @@
+### 2026-08-03T21:03:02+01:00 START c2_P_t8k8_consol  [-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=8.0]
+=== CELL experiments/c2_P_t8k8_consol target=sample_0003 overrides: -o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=8.0 ===

@@ -1,0 +1,34 @@
+# C2 wave 3. Written after re-reading the WAVE-2 RESULTS, which contain a correction that
+# the wave-2 commit message got wrong and that the relaunch brief inherited:
+#
+#   927a77a says c2_L_t8k8 was "a single override -o loss.weights.turing=8.0". IT WAS NOT.
+#   The frozen config of every c2_L_t8k8 run has BOTH loss.weights.turing=8.0 AND
+#   loss.weights.kstar=8.0. The turing-8-alone arm is c2_D_turing8 (kstar left at 1.0).
+#   Read side by side, sample_0000, K=8, the two arms say something the single number hid:
+#
+#     arm                       turing   kfft(3.3 bar 0.083)   topo(3.1 bar 0.75)
+#     c2_A_base400  t1  k1      0/8      0.979                 0.250
+#     c2_D_turing8  t8  k1      6/8      4.765                 0.125
+#     c2_L_t8k8     t8  k8      6/8      0.115                 0.250
+#
+#   The Turing weight buys the RATE and pays for it in WAVELENGTH; the k* weight buys the
+#   wavelength back at no measured cost in rate (6/8 both arms) -- 4.765 -> 0.115 is a 41x
+#   move on the criterion that c2_D_turing8 was failing by 57x. So the working point is the
+#   PAIR, not the turing weight alone, and 3.3 is now the binding shortfall at 0.115 vs
+#   0.083 rather than a blowout.
+#
+# ORDER IS BY VALUE, because a kill costs the tail:
+#   1. CONSOLIDATE. t8k8 rests on ONE target. Three more, K=8 each.
+#   2. THE k* WEIGHT, at fixed turing=8 -- the axis that 3.3 now hangs on.
+#   3. THE TURING CURVE {2,4,16,32} at fixed kstar=8, so the owner sees whether 8 is a peak
+#      or a plateau edge. Held at kstar=8 rather than kstar=1 because the kstar=1 column is
+#      already refuted by 3.3 and a curve along a refuted line measures nothing usable.
+#
+# name|seeds|targets|workers|overrides
+c2_P_t8k8_consol|0,1,2,3,4,5,6,7|sample_0003,sample_0001,sample_0004|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=8.0
+c2_R_t8k32|0,1,2,3,4,5,6,7|sample_0000,sample_0003|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=32.0
+c2_R_t8k16|0,1,2,3,4,5,6,7|sample_0000,sample_0003|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=16.0
+c2_Q_t2k8|0,1,2,3,4,5,6,7|sample_0000|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=2.0 -o loss.weights.kstar=8.0
+c2_Q_t4k8|0,1,2,3,4,5,6,7|sample_0000|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=4.0 -o loss.weights.kstar=8.0
+c2_Q_t16k8|0,1,2,3,4,5,6,7|sample_0000|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=16.0 -o loss.weights.kstar=8.0
+c2_Q_t32k8|0,1,2,3,4,5,6,7|sample_0000|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=32.0 -o loss.weights.kstar=8.0

@@ -25,7 +25,14 @@ cd "$WT"
 for t in ${TARGETS_CSV//,/ }; do
   echo "=== CELL $ROOT target=$t overrides: $* ==="
   t0=$(date +%s)
-  timeout "$TIMEOUT" $VENV -m rngrn.cli --runs-root "$ROOT" target-report \
+  # EVERY trainer invocation goes through scripts/guarded_run.sh. Five sessions were ended
+  # by the WSL2 VM's global OOM killer because two agents each ran a 5-process pool; the
+  # guard takes one flock shared across ALL worktrees, waits for MemAvailable >= 8 GiB and
+  # raises its own oom_score_adj so a TRAINER is killed rather than the session.
+  # The timeout is INSIDE the guard on purpose: waiting for the lock is the guard WORKING,
+  # and must not be charged against a budget meant for pathological TRAINING cost.
+  bash scripts/guarded_run.sh timeout "$TIMEOUT" \
+      $VENV -m rngrn.cli --runs-root "$ROOT" target-report \
       --config configs/nc1_m3_registry.yaml \
       --dataset-id three_gene_qvar --sample-key "$t" --form nc1 \
       --seeds $SEEDS --workers "$WORKERS" \

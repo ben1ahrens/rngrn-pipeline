@@ -129,6 +129,157 @@ on both arms, and that is stated wherever it is done.
 
 ---
 
+## 2. A CORRECTION TO THE RECORD, made before anything is built on it
+
+Commit `927a77a` describes `c2_L_t8k8` as *"a single override `-o loss.weights.turing=8.0`
+from the committed baseline"*. **It is not.** The frozen config of every one of that cell's
+eight runs carries **both** `loss.weights.turing: 8.0` **and** `loss.weights.kstar: 8.0`
+(`experiments/c2_L_t8k8/runs/*/config/frozen_config.yaml`), which is what
+`experiments/c2_queue_sweep2.txt` line 1 actually asked for. The turing-8-**alone** arm is
+`c2_D_turing8`, where `kstar` stays at its base 1.0. The mis-description propagated into the
+relaunch brief, so it is corrected here rather than quietly fixed.
+
+The correction matters because reading the two arms side by side says something the single
+number hid. `sample_0000`, K = 8, 400 steps, prior ON, identical compute shape:
+
+| arm | turing | kstar | **turing seeds** | **kfft** (3.3 bar 0.083) | topo (3.1 bar 0.75) | plaus |
+|---|---|---|---|---|---|---|
+| `c2_A_base400` | 1 | 1 | **0/8** | 0.979 | 0.250 | 1.000 |
+| `c2_D_turing8` | 8 | 1 | **6/8** | **4.765** | 0.125 | 1.000 |
+| `c2_L_t8k8` | 8 | 8 | **6/8** | **0.115** | 0.250 | 1.000 |
+
+The Turing weight buys the **rate** and pays for it in **wavelength**; the k\* weight buys
+the wavelength back **at no measured cost in rate** — 6/8 in both arms, and
+4.765 → 0.115 is a 41× move on the criterion `c2_D_turing8` was failing by 57×. The working
+point is therefore the **pair**, not the Turing weight alone, and §3.3 becomes a
+**shortfall of 1.4×** (0.115 vs 0.083) rather than a blowout. `c2_D_turing8` is not a
+candidate configuration under §3.3 however good its rate looks.
+
+---
+
+## 5. CRITERION 3.1 — the mechanism (JOB B)
+
+`scripts/c2_initbias.py`. §3.1 was failing with within-target ≈ cross-target and the doc
+read that as *"what agreement there is comes from the model's inductive bias"*. That
+reading is now **measured, and it is wrong in a specific and useful way.**
+
+### 5.1 Two instrument defects, fixed before any conclusion
+
+1. **The size-matched control was saturated.** `c2_repro.py` matches the control's group
+   size to `min(K, n_targets)`, which with two targets in a root is **2**. At group size 2
+   the modal fraction can only be 0.5 or 1.0 — its floor is **0.500** and it has almost no
+   power, so "within 0.516 vs cross 0.512" is two numbers pinned to the same floor, not a
+   measured equality. `c2_initbias.py compare` draws the cross-target group at the
+   **pre-registered K = 8** with a cap of `ceil(K/n_targets)` seeds per target, keeping the
+   group both size-matched and genuinely mixed.
+2. **There was no zero.** The absolute floor of the K = 8 modal fraction is **1/8 = 0.125**
+   (eight mutually distinct structures). Nothing in the record read the statistic against it.
+
+### 5.2 The measurement, `c2_A_base400`, K = 8, `sample_0000` + `sample_0001`
+
+| rtol | within K=8 | cross K=8 | gap | **init-only K=8** | floor |
+|---|---|---|---|---|---|
+| 0.02 | 0.250 | 0.243 | +0.007 | **0.733** | 0.125 |
+| 0.05 | 0.250 | 0.215 | +0.035 | **0.265** | 0.125 |
+| 0.10 | 0.125 | 0.183 | −0.058 | 0.185 | 0.125 |
+
+`init-only` is the same statistic over **256 untrained models**, built with the identical
+`RNGRN(N, form, seed=_restart_seed(model_seed, r))` construction `recover()` uses, solved
+to their own steady state and Jacobian-probed. **No frame is read and nothing is trained**,
+so it is agreement the data cannot be credited with.
+
+### 5.3 What it says — and it is not what the record said
+
+* **The trained model sits just above the ABSOLUTE FLOOR, not on an inductive-bias
+  plateau.** 0.250 against 0.125 at K = 8: essentially the level of "one coincidental pair
+  in eight". The gap being ~0 is therefore not *"the model reproduces its own bias"* — it
+  is **there is almost no agreement of any kind, within or across.**
+* **The init is 3× MORE topologically reproducible than the trained model.** 0.733 vs 0.250
+  at rtol 0.02. The untrained init distribution is nearly deterministic in sign — the single
+  structure `-+++-+++-` occupies 188/256 draws — and **400 Adam steps destroy that
+  concentration**. Reproducibility is not something training fails to add; it is something
+  training **removes**.
+* **Training genuinely moves J** (`c2_initbias.py moved`, n = 40 runs across all three
+  cells): `‖J_rec − J_init‖/‖J_init‖` = 0.63 … 1.80, and the recovered structure is
+  identical to its own init's in **0/40 runs at every one of rtol 0.02/0.05/0.10**. So the
+  H1 "training never leaves the init basin" story is **refuted**; what is left is H3 — the
+  objective does not pin the sign structure, and each seed's descent ends somewhere
+  different. σ(k) = max Re eig(J − k²D) is a scalar function of a 9-entry J plus 3
+  diffusivities; it cannot be expected to identify 3⁹ sign patterns, and the measurement is
+  consistent with it identifying essentially none of them.
+
+### 5.4 Node relabeling is real bookkeeping and it is NOT the explanation
+
+Nothing in the objective pins node order — σ(k) is invariant under `J → PJPᵀ, D → PDPᵀ` —
+so quotienting by the 6 relabelings (`canon_key`, lexicographic minimum over `S₃`) is the
+honest upper bound on how much of the shortfall is bookkeeping. On `c2_A_base400`:
+
+| rtol | within (quotiented) | cross (quotiented) | gap |
+|---|---|---|---|
+| 0.02 | 0.375 | 0.395 | −0.020 |
+| 0.05 | 0.312 | 0.324 | −0.011 |
+| 0.10 | 0.312 | 0.324 | −0.012 |
+
+The quotient lifts within-target 0.250 → 0.312 at rtol 0.05 — and lifts the **control by
+the same amount**, 0.215 → 0.324, so the gap stays at zero and even turns slightly
+negative. Relabeling is a genuine ~0.06 accounting artefact and it explains **none** of the
+failure. Consistent with C1's legacy measurement (0.125 → 0.375, still short of 0.75).
+**The pre-registered raw statistic at rtol 0.05 remains the number read against the bar.**
+
+### 5.5 The one thing that did move the init, and why it is a lead not a result
+
+The Jacobian-diagonal defect of `STATE_OF_THE_SCIENCE` §10 reproduces exactly on `nc1`:
+**0 of 256** default inits has any positive Jacobian diagonal entry, against 88/88 real
+`three_gene` systems that do — and patterning needs self-activation. `init='low_basal'`
+takes that to **80/249**. It also *lowers* the init's topological concentration (rtol 0.02
+K=8 modal 0.733 → 0.235), i.e. it buys J-diversity at the cost of the trivially-high init
+agreement. **Not measured under training in this unit** — recorded as the highest-value
+untried axis, not as a claim.
+
+---
+
+## 6. THE NEAR-IMMOBILE THIRD NODE IS SYSTEMATIC (JOB C)
+
+`scripts/c2_immobile.py`. A bare D ratio has no scale, so "immobile" is defined physically:
+a species is immobile **at the recovered pattern's own wavenumber** when
+`q_i = D_i · k*_model² / |J_ii| ≪ 1`, i.e. its diffusive loss at k\* is a small correction
+to its own diagonal reaction rate. **q is only read on Turing seeds** — when k\*_model
+collapses to ~0 (baseline `sample_0000`: 0.00587 on 8/8 seeds) q → 0 for *every* species and
+would measure the collapse, not the mechanism.
+
+| root | target | Turing seeds | q<0.1 | q<0.01 | med q_min | med D_lo/D_mid | med raw D ratio | med **scored** d_ratio |
+|---|---|---|---|---|---|---|---|---|
+| `c2_A_base400` | `sample_0001` | 1/8 | 1/1 | 1/1 | 6.6e−3 | 0.098 | 77.3 | 7.58 |
+| `c2_D_turing8` | `sample_0000` | 6/8 | 5/6 | 5/6 | 4.4e−3 | 0.0002 | 39 862 | 7.82 |
+| `c2_D_turing8` | `sample_0001` | 8/8 | 8/8 | 5/8 | 6.7e−3 | 0.0001 | 113 821 | 7.78 |
+| `c2_L_t8k8` | `sample_0000` | 6/8 | 3/6 | 0/6 | 8.1e−2 | 0.0195 | 566 | 8.54 |
+
+**17 of 21 Turing seeds are below q = 0.1 and 11 of 21 below q = 0.01.** So yes — `nc1`
+finds the immobile-third-node route systematically, and `plausibility_score = 1.0` in every
+cell is being earned that way: the *scored* d_ratio sits at 7.50–8.54, on the prior centre
+of 7.5, while the *raw* max/min ratio spans 38.6 to 113 821. That is not the scorer being
+gamed by accident — Stage 0 measured the same construction giving a 17× acceptance gain in
+the biological box and 127/127 generator systems staying strictly Turing when their slowest
+diffuser is immobilised (`docs/BIO_VIABILITY.md`), which is Tica et al.'s mechanism for
+relaxing differential diffusion.
+
+**And it is the link between JOB A and JOB C.** The immobile node is *how* `turing=8` alone
+bought its rate, and it is *why* that arm's wavelength blew up: D_lo/D_mid 0.0002 with a raw
+ratio of 39 862 is a system whose k\* is set by a near-singular diffusion matrix. Adding
+`kstar=8` suppresses the mechanism by two orders of magnitude (D_lo/D_mid 0.0002 → 0.0195,
+raw ratio 39 862 → 566, med q_min 4.4e−3 → 8.1e−2) **at no cost in rate** (6/8 in both), and
+that is exactly the 41× recovery of `kfft`. The near-immobile node earns its own section in
+the paper, *and* it is the thing the k\* term has to be strong enough to police.
+
+---
+
 ## 4. No-op checks, per axis
 
 *(filled in below as cells land)*
+
+`c2_initbias.py` is a NEW instrument and its axes are proven live rather than assumed:
+`floor` distinguishes `init=default` (positive-diagonal 0/256) from `init=low_basal`
+(80/249) and the two give different modal fractions at every rtol, so the `init` argument
+is not being ignored; `moved` returns a different winning restart index per seed (0…63, **18**
+distinct values over 40 runs), so the `_restart_seed(model_seed, r)` reconstruction tracks
+the run rather than returning a constant.

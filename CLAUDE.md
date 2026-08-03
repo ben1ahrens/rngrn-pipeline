@@ -183,7 +183,8 @@ wins over the doc (§8).*
   iteration counts on a GPU affordable. This is the standing direction of travel.
 - **CPU runs at short step counts are plumbing checks, not results.** A short run verifies
   that a config resolves, data loads, and scoring routes. It recovers nothing meaningful.
-  20 cores are available; multiprocessing over seeds is the CPU throughput lever.
+  Multiprocessing over seeds is the CPU throughput lever; scale worker counts to the
+  machine's actual usable cores (e.g. `len(os.sched_getaffinity(0))`), not a fixed number.
 
 ## 8. Evidence discipline
 

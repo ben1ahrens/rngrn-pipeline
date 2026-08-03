@@ -50,7 +50,7 @@ if __name__ == "__main__":
     ap.add_argument("--dataset", default="three_gene_val")
     ap.add_argument("--sample", default="sample_0000")
     ap.add_argument("--seeds", type=int, default=16)
-    ap.add_argument("--workers", type=int, default=18)
+    ap.add_argument("--workers", type=int, default=len(os.sched_getaffinity(0)))
     ap.add_argument("--budgets", type=int, nargs="+", default=[400, 2000, 8000])
     ap.add_argument("--out", default="experiments/exp07_long_training.json")
     a = ap.parse_args()

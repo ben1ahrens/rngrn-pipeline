@@ -18,7 +18,7 @@ Q2  PER-SEED vs ENSEMBLE ACCURACY. exp07 and exp08 report DIFFERENT statistics a
 
 FIREWALL: inputs are the frame, its L and observed_idx. k*_true is scoring-only.
 """
-import argparse, json, time
+import argparse, json, os, time
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np, torch, h5py
 import _runlog
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     ap.add_argument("--samples", type=int, default=6)
     ap.add_argument("--seeds", type=int, default=8)
     ap.add_argument("--steps", type=int, default=4000)
-    ap.add_argument("--workers", type=int, default=18)
+    ap.add_argument("--workers", type=int, default=len(os.sched_getaffinity(0)))
     ap.add_argument("--out", default="experiments/exp09_anchor_ensemble.json")
     a = ap.parse_args()
     run = _runlog.start("exp09_anchor_and_ensemble", vars(a))

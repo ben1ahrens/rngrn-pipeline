@@ -957,6 +957,39 @@ unchanged, but without it `apply_overrides` fails loud on an unknown key and
 
 ---
 
+### D-EVID-6 — the pre-push hook tested a DIFFERENT worktree's source
+
+**Date found:** 2026-08-03 (unit c-bioviab). **Fixed:** 2026-08-03, same unit.
+**Status:** SUPERSEDED (defect; now fixed).
+
+`.githooks/pre-push` falls back to `../turing-training/.venv/bin/python` when the current
+worktree has no `.venv` of its own — which is every worktree. That venv was created by an
+**editable install**, which writes `turing-training`'s absolute `src` path into a `.pth`
+file. So from any other worktree the hook ran `pytest` against
+`../turing-training/src/rngrn`, **not against the source being pushed.**
+
+**MEASURED, not inferred.** The four tests added in this unit for the `param_prior` wiring
+FAILED under the hook and PASS under `PYTHONPATH=$PWD/src` — because the hook was exercising
+a tree that does not contain the change. Directly:
+
+```
+hook would import: .../worktrees/turing-training/src/rngrn
+with PYTHONPATH  : .../worktrees/c-bioviab/src/rngrn
+```
+
+The failure mode is worse than a false red: a worktree whose change BREAKS something that
+`turing-training/src` does not contain would have been green-lit. This is the same class of
+defect as D-EVID-2 — a hook that reads as protection while protecting nothing — and it was
+active for every worktree push since the sibling-venv fallback was added.
+
+**Fix:** the hook now exports `PYTHONPATH="$repo_root/src"` before running pytest
+(PYTHONPATH takes precedence over `.pth` entries) and PRINTS the resolved `rngrn` path, so
+which tree was tested is visible in the push output instead of having to be inferred.
+
+**Where it lives:** `.githooks/pre-push`.
+
+---
+
 ### D-BIO-1 — `beta` for the box-viability sampler is the GENERATOR's own basal draw, and is never scored
 
 **Date:** 2026-08-03. **Status:** DECIDED (scope: the Stage-0 sampler only).

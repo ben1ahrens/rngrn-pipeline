@@ -33,7 +33,18 @@ else
     exit 1
 fi
 
+# TEST THE TREE BEING PUSHED, not whatever a .pth points at. The sibling venv above was
+# created by an EDITABLE install, which writes that worktree's absolute src path into a
+# .pth file — so from any OTHER worktree `pytest` silently imported
+# ../turing-training/src/rngrn and tested code that is not the code being pushed. MEASURED
+# on unit c-bioviab: 4 tests for a change made in THIS worktree failed under the hook and
+# passed under PYTHONPATH, because the hook was exercising the other tree. A hook that
+# green-lights a push after testing different source is the same class of defect as
+# D-EVID-2 (the hook that printed "skipping tests" and exited 0).
+# PYTHONPATH takes precedence over .pth entries, so this pins it.
+export PYTHONPATH="$repo_root/src${PYTHONPATH:+:$PYTHONPATH}"
 echo "pre-push: running test suite with $PY"
+echo "pre-push: importing rngrn from $("$PY" -c 'import rngrn,os;print(os.path.dirname(rngrn.__file__))')"
 start=$(date +%s)
 "$PY" -m pytest -q
 status=$?

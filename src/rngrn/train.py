@@ -224,6 +224,12 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        model_seed=cfg.model.seed,                       # unit 10
                        dispersion_backend=cfg.model.dispersion_backend,  # unit 10
                        d_init_from_kstar=cfg.model.d_init_from_kstar,   # unit B4
+                       # unit C1: `model.init` round-tripped into frozen_config.yaml and was
+                       # written onto the run-index `model_init` column, but was NEVER handed
+                       # to recover() -- so `-o model.init=low_basal` was a silent NO-OP and
+                       # the index column asserted an init the run had not used. Threading it
+                       # is byte-identical on the default path (init="default").
+                       init=cfg.model.init,
                        batched=cfg.train.batched,                        # unit b2
                        device=cfg.train.device,                          # unit b2
                        # unit 5: the biological prior's own knobs. These were already

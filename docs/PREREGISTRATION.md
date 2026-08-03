@@ -90,7 +90,8 @@ A seed that raises counts as a **failure**, never as a silent drop from the deno
 
 ## 3. The pass conditions
 
-A target **passes** only if all five criteria below hold. A **form** (competitive / `nc1`)
+A target **passes** only if all criteria below hold — five as originally written, six since
+the dated §3.6 amendment of 2026-08-03. A **form** (competitive / `nc1`)
 passes only if ≥ **4 of 6** held-out targets pass. The overall claim requires **both** forms
 to pass.
 
@@ -283,6 +284,98 @@ construction* and therefore cannot be allowed to claim credit for it. Endres et 
 separated L from the parameter vector — their `x̂ = x·√(c₂/D_u)` folds length and diffusion
 into one variable, and their code hard-codes L via `dx` — so there is no prior result to
 inherit here.
+
+### 3.6 Robustness under finite timescale separation — added 2026-08-03
+
+**Added at the owner's explicit direction, before any finite-`mu` number existed.** The
+owner's words: *"what I really care about is the robustness of the circuit when finite mu is
+introduced. That is the most essential thing that needs to hold."*
+
+Amending this way **adds** a criterion and **tightens** the claim; it weakens no threshold
+and moves no bound. §3.2 is retained verbatim above. This section is dated so that the git
+history shows it was fixed before the runs it judges, exactly as §3.5a was.
+
+#### What this measures, and why §3.2 alone does not
+
+The RNGRN trains on a **quasi-steady-state** reaction (`model.py::_reaction_raw`): promoter
+occupancy is assumed to equilibrate *instantaneously* with transcription-factor
+concentration, so the gates never appear as state variables. Real gene regulation does not
+do that — TF–promoter binding is fast but finite, and `mu` parameterises the separation
+between that fast binding and the slow protein production/degradation the model resolves.
+
+`eval/dynamical.py::lift_check` makes the gates explicit fast variables and has existed
+since the scaffold, but it is called from exactly one place — `tests/test_science.py:71`, a
+2-species model at `mu = 1e-4` — and it only checks that the *production algebra* converges
+to the QSS expression as `mu → 0`. **The lift has never been simulated in space, never run
+at finite `mu`, never coupled to diffusion, and never asked whether a pattern forms or
+survives perturbation.** Every `turing_volume_*` number in this project is therefore
+computed on the **QSS** Jacobian, and says nothing about the system the biology actually
+runs.
+
+The lifted state is `(x, G_A, G_R)` of dimension `N + 2N²` (21 at N=3). Only `x` diffuses —
+promoter states are bound to DNA — so the diffusion matrix is `diag(D_x, 0, …, 0)`. The
+lifted system's **fixed points are identical to the QSS fixed points at every `mu`**, since
+setting `dG/dt = 0` recovers the QSS algebraic relations exactly. So `mu` changes stability
+and dynamics, never the steady state, and the QSS and finite-`mu` measurements are
+comparable at the same `x*` by construction.
+
+#### The criterion
+
+> §3.2's bars, recomputed on the **lifted finite-`mu` Jacobian** rather than the QSS one:
+> median `turing_volume_10pct` ≥ **0.90** and median `turing_volume_4p8pct` ≥ **0.95**,
+> holding at **every `mu` across the cited biological band**, not at a point estimate.
+>
+> A draw counts as Turing only if the leading unstable mode is **stationary**. The
+> oscillatory fraction is reported separately and never folded in.
+
+*Calibration — inherited, not invented.* The two numbers are §3.2's, which are calibrated
+against all 127 generator systems at 400 draws each (population mean 0.879 / median 0.935 at
+10 %; 4.8 % is Tica et al.'s measured experimental parameter CV). No new threshold is
+introduced here: the bar is the same height, moved onto the harder system. That is
+deliberate — inventing a softer number for the finite-`mu` case would be the exact move §5
+forbids.
+
+*Why "across the band" and not "at `mu_bio`".* `mu_bio` is a ratio of literature timescales
+(TF–DNA residence seconds against protein turnover tens of minutes to hours) and will not be
+pinned better than an order of magnitude. A criterion evaluated at a point estimate of a
+quantity known only to a decade is a criterion evaluated at an arbitrary point. Requiring it
+to hold across the whole defensible band is what makes the claim mean something, and the
+band's width is set by the literature rather than chosen here. **The band itself is an input
+to this criterion and is marked UNCALIBRATED until Stage 0b's citations land**; the band is
+recorded in `docs/DECISIONS.md` with its sources before any pass/fail is read against it.
+
+*The shape matters as much as the value.* `turing_volume` against `mu` is reported as a
+**curve**, per form, with the 0.90 and 0.95 lines and the biological band drawn on it. A
+circuit that clears the bar at `mu_bio` but cliff-edges just above it is not robust in the
+sense being claimed, and a point value cannot show that. Graceful degradation and a cliff
+are different results and are reported as such.
+
+*Two failure routes, distinguished.* Explicit slow gates classically introduce delay-driven
+oscillation, so the uniform state can go unstable via a Hopf bifurcation *before* the `k > 0`
+band closes. Which of the two eats the volume is reported, because they carry different
+biological meanings — a Hopf route says the circuit oscillates rather than patterning; a
+closing band says it relaxes to uniformity.
+
+*`mu` is itself uncertain.* Perturbing `(alpha, delta, D, K)` at fixed `mu` understates the
+real exposure. Both are reported: the standard parameter cloud at each fixed `mu`, and a
+cloud in which `mu` is drawn from its own band alongside the parameters. **The second is the
+one this criterion is read against.**
+
+*Strict test only.* `max Re eig(J) < 0` for uniform stability, never `tr(J) < 0`. Stage 0
+measured the trace test overcounting by 64× on 80,000 box-constrained draws, with all 1,196
+extra acceptances being uniform instabilities rather than Turing patterns.
+
+*Integrator honesty, stated in advance because it is the dangerous failure mode.* The gates
+relax at rate `1/mu`, so a stiff integrator that numerically damps the instability would
+manufacture a "pattern died at finite `mu`" result as an **artefact**. Any finite-`mu`
+simulation supporting this criterion must show `dt`-convergence and must reproduce the QSS
+field at `mu ≤ 1e-4` before its finite-`mu` runs are quoted.
+
+*Applies to both forms and to the recovered networks, not only synthetic draws.* The
+circuits carrying the claim — currently `three_gene_qvar` `sample_0003` and `sample_0004`,
+prior-ON, the two that are simultaneously `plausibility_score = 1.0` and patterned — are
+evaluated at full depth. If this criterion fails, it fails; §5 applies unchanged and the
+shortfall is reported against the bar as written.
 
 ---
 

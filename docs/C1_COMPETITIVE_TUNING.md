@@ -571,3 +571,117 @@ pinned; the off-diagonal is the part σ(k) leaves loose, and it is loose. That i
 coherent picture of both failures, and it predicts that **an axis which raises the Turing
 rate will not, on its own, move criterion 3.1** — which is exactly what §7.2 measured and
 what the `turing8` cell tests directly.
+
+---
+
+## 9. JOB A — cell `turing8` (`loss.weights.turing=8.0`). The rate problem is SOLVED on this target.
+
+`sample_0000`, K = 8 (seeds 0…7), `git_sha 774ec7c`, `config_id 366484bd1f8c`, **2611 s**.
+**One** override from `baseline` (`config_id 30105ae5c671`); the shared execution block and
+everything else identical. All 8 run records are present and non-empty (21.3–21.7 KB each),
+`seed_errors` is `{}`, and 0 seeds raised — this is a complete K = 8, not a partial cell.
+
+The axis was proven LIVE on both the serial and the batched path before the cell was run
+(§1). It is **not** in this unit's original eight axes; it was promoted on C2's cross-unit
+measurement of the same override moving `nc1` from 0.0625 to 0.750.
+
+### 9.1 The rate, against the `baseline` control
+
+| statistic | `baseline` | **`turing8`** | |
+|---|---|---|---|
+| **`turing_frac`** | 0.125 (seed 3 only) | **1.000 — 8 of 8 seeds** | **8×** |
+| pooled restarts `sig_max_pos > 0` | 2 / 512 (0.0039) | **18 / 512 (0.0352)** | **9×** |
+| pooled `sig_max_pos` p90 | −0.0413 | **−0.0188** | |
+| pooled `sig_max_pos` best | +0.1869 | **+0.3562** | |
+| **winner's `sig_max` (median)** | −0.0304 | **+0.1801** | **crosses zero** |
+| seeds with `max diag(J) > 0` | 1 / 8 | **8 / 8** | |
+| `recovered_frac` | 1.000 (0 raised) | 1.000 (0 raised) | |
+| `robustness_n_used` | **1** | **8** | 3.2 becomes computable |
+
+**This is the largest rate movement measured anywhere in C1**, and it moves the *sensitive*
+readout as well as the scored one, which `detach` did not: `detach` left the pooled restart
+count at exactly 2/512, and this takes it to 18/512.
+
+**But the two numbers must not be conflated, and the headline is the weaker of the two.**
+`turing_frac` = 1.000 is a statistic over the **restart ensemble**: each seed runs
+`n_restarts = 64` and the loss-argmin selects one. Per-restart reachability went from 0.39 %
+to 3.5 % — a 9× improvement, not an 8× one — and at 3.5 % the chance that 64 independent
+restarts contain at least one Turing member is ≈ 90 %. So `turing_frac` = 1.000 says two
+things jointly: the regime is now reachable often enough that 64 restarts nearly always find
+it, **and** the loss-argmin reliably selects it when present. The winner's median `sig_max`
+crossing from −0.0304 to +0.1801 is the cleanest single statement of that. **A claim of
+"8/8 seeds pattern" is conditional on `n_restarts = 64` and should always be quoted with
+it.** The underlying regime is still reached by only 1 restart in 28.
+
+### 9.2 The pre-registered criteria, in §3 priority order
+
+| # | criterion | bar | `baseline` | **`turing8`** | verdict |
+|---|---|---|---|---|---|
+| 3.1 | `topology_consistency` @rtol 0.05 | ≥ 0.75 | 0.125 | **0.125** | **FAILS — and did not move at all** |
+| 3.1 | within − cross-target gap | ≥ 0.25 | – | *(needs a 2nd qvar target — §10)* | not yet computable |
+| 3.2 | median `turing_volume_10pct` | ≥ 0.90 | 1.000 (n=1) | **1.000 (n=8)** | **meets bar, now on a real n** |
+| 3.2 | median `turing_volume_4p8pct` | ≥ 0.95 | 1.000 (n=1) | **1.000 (n=8)** | **meets bar, now on a real n** |
+| 3.3 | `kstar_fft_rel_err` median | ≤ 0.083 | 0.979 | **0.245** | **FAILS** (4.0× better, still 3× the bar) |
+| 3.3 | `trivial_kstar_err` | reported | 1.000 | **1.000** | not leaked — the k\* number is real |
+| 3.3 | `morphology_match_frac` | – | 0.000 | 0.714 | |
+| 3.4 | `plausibility_score` mean | = 1.0 | 0.458 | **0.375** | **FAILS**, and moves the wrong way |
+
+§3.2 is the first criterion in this project to clear its bar on `three_gene_qvar` with
+`robustness_n_used = 8` rather than 1 — at the baseline the medians were computed over the
+single patterning seed and were not measurements of anything.
+
+`plausibility_score` **falling** 0.458 → 0.375 while the rate rises is the trade-off
+`PREREGISTRATION.md` §3.4 recorded *in advance* as the expected consequence of a D-ratio
+prior centred at 7.5 against generators that sample 7.9–251. It is reported as a result, not
+as a surprise, and the prior's centre does not move. `D_lo/D_mid` (median) falls 0.512 →
+0.193, i.e. the recovered systems became more strongly differentially-diffusive — which is
+what buys the instability and simultaneously what costs the plausibility score.
+
+### 9.3 THE FINDING: the rate moved 8×, and criterion 3.1 did not move AT ALL
+
+`topology_consistency` is **0.125 in both arms**, with **8 distinct sign structures** in
+both, and `mean_agreement` moves the *wrong* way (0.579 → 0.409).
+
+This is the **third independent confirmation** that 3.1 is not downstream of the Turing
+rate, and it is the strongest of the three because it is the only one on the PRIMARY dataset
+with the rate problem actually solved rather than absent:
+
+1. `legacy_control` (§7.2): 8/8 pattern, k\* agreeing to 1.5 %, `topology_consistency` 0.125.
+2. C2's `nc1` `turing=8.0` cell: rate ×12, `topology_consistency` unchanged at 0.250.
+3. **this cell**: rate ×8 on qvar `sample_0000`, `topology_consistency` unchanged at 0.125.
+
+Eight seeds that now *all* reach the Turing regime, all with a self-activating node, and no
+two of which recover the same network. **Anything that reads `turing_frac` as a proxy for
+reproducibility is reading it wrong**, and the earlier brief's claim that lifting the rate
+would carry 3.1 with it is refuted on the primary dataset.
+
+### 9.4 What the gauge instrument says about this cell
+
+`c1_gauge.py` on `turing8`, beside `baseline`:
+
+| block | `baseline` | `turing8` |
+|---|---|---|
+| ladder @0.05: raw → +perm → +transp → +balance | 0.125 → 0.125 → 0.125 → 0.375 | 0.125 → 0.250 → 0.250 → 0.375 |
+| entry magnitude q50 (vs the rtol 0.05 cut) | 0.0512 | **0.1625** |
+| entries within a factor 3 of the cut | 0.333 | **0.208** |
+| BLOCK 4 `diag` / `pairs` / `3-cycle` / `all 7` | 0.875 / 0.500 / 0.750 / 0.500 | **1.000** / 0.500 / 0.625 / 0.375 |
+
+Two things worth recording. First, the estimator's worst pathology is **relieved** here: the
+median entry magnitude moves off the rtol cut (0.0512 → 0.1625) and the fraction of
+coin-flip entries drops from a third to a fifth. So `turing8`'s 0.125 is a *better-measured*
+0.125 than `baseline`'s — the failure is more real, not less.
+
+Second, §8.5's prediction holds exactly. **All 8 seeds now agree on the diagonal sign
+pattern (1.000, up from 0.875), and the off-diagonal pair senses stay pinned at 0.500.**
+The rate lever fixed precisely the part of J that patterning requires and the objective
+therefore constrains, and did nothing to the part σ(k) leaves loose. `max diag(J)` per seed
+is now positive for all eight (+0.043 … +0.370) against baseline's 1 of 8, which extends
+§8.5's perfect separation to **32 of 32** committed runs with still no off-diagonal cell.
+
+### 9.5 Status
+
+`turing8` is the best configuration C1 has measured and it is adopted as the base for the
+remaining cells. It does not make the target pass: **3.1 and 3.3 and 3.4 all fail**, and
+under `PREREGISTRATION.md` §3 a target passes only if all five criteria hold. What it does
+is convert 3.2 from uncomputable to met, cut the k\* error 4-fold, and — most usefully —
+remove the Turing rate as a confound so that the remaining failures can be attributed.

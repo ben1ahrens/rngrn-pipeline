@@ -213,3 +213,70 @@ predictor score 0.0 % median k\* error. Without a control, 0.125 vs 0.3684 canno
 **It is a CONTROL and nothing else.** `PREREGISTRATION.md` §1 forbids legacy data from
 supporting any k\* claim, and its numbers are never pooled with `three_gene_qvar` numbers
 anywhere in this document.
+
+---
+
+## 6. Cell `detach` — `loss.detach_xstar=true`. **The hypothesis does NOT hold.**
+
+`sample_0000`, K = 8 (seeds 0…7), `git_sha a71efae`, `config_id 2bfcb176aafc`, 1275 s.
+One override from `baseline` (`config_id 30105ae5c671`); everything else identical.
+
+**The hypothesis under test.** `scripts/exp05` detached x\* for the dispersion-side terms
+and measured `turing_frac` 0.3684; every library run has had it off, and the two had never
+been compared. `STATE_OF_THE_SCIENCE.md` §2.4 traces the k\*-anchor's degenerate minimum:
+while the model is non-Turing, σ(k) peaks at k = 0 and the anchor loss can be reduced by
+**flattening σ** rather than relocating its peak. A gradient path through x\* into the
+dispersion terms gives the optimiser one more way to do that flattening, so detaching it
+was a live mechanistic explanation for the k\*→0 attractor.
+
+### 6.1 The numbers, against the baseline control
+
+| statistic | `baseline` | `detach` | |
+|---|---|---|---|
+| **`turing_frac`** | **0.125** (seed 3) | **0.125** (seed 3) | **no change** |
+| pooled restarts with `sig_max_pos > 0` | **2 / 512** | **2 / 512** | **no change** |
+| pooled `sig_max_pos` p90 | −0.0413 | −0.0430 | slightly worse |
+| pooled `sig_max_pos` best | +0.1869 | +0.2068 | |
+| `recovered_frac` | 1.000 (0 raised) | 1.000 (0 raised) | |
+| `topology_consistency` | 0.125 | 0.250 | 2 of 8 seeds vs 1 of 8 |
+| `mean_agreement` | 0.579 | 0.464 | **down** |
+| `n_distinct_structures` | 8 | 7 | |
+| `kstar_fft_rel_err` median | 0.979 | 0.979 | |
+| `trivial_kstar_err` | 1.000 | 1.000 | not leaked |
+| `plausibility_score` mean | 0.458 | 0.500 | |
+| `turing_volume_10pct` / `4p8pct` median | 1.000 / 1.000 (**n = 1**) | 1.000 / 1.000 (**n = 1**) | |
+
+### 6.2 The decisive detail
+
+The seven non-Turing seeds return `kstar_model = 0.00587` **to five significant figures in
+both arms**, and the same seed (3) is the only Turing seed in both. The runs are genuinely
+different — seed 3's `kstar_model` moves 0.22024 → 0.22511, `D_lo/D_mid` 0.512 → 0.463, and
+`config_id` differs — but the degenerate attractor is reached *identically* with and without
+a gradient path through x\*.
+
+**So the answer to the question this unit was asked to settle is: it does not hold.**
+Detaching x\* does not lift the Turing rate, does not change the pooled reachability rate
+(2/512 either way), and does not perturb the k\*→0 fixed point at all. Whatever produced
+exp05's 0.3684, `detach_xstar` is not it. The direction of the p90 (−0.0413 → −0.0430) is
+if anything mildly against detaching.
+
+### 6.3 What moved, and why none of it is a win
+
+`topology_consistency` 0.125 → 0.250 is **two seeds agreeing instead of one**, out of eight,
+on a criterion whose bar is 0.75. On K = 8 that is one seed of movement and is not
+distinguishable from noise; `mean_agreement` moves the *other* way (0.579 → 0.464), which is
+what one expects when the change is noise rather than signal. `morphology_match_frac`
+0.0 → 1.0 is **n = 1 compared seed** in both arms (morphology is scored `compared` only on
+Turing-reaching seeds, of which there is one), and `morphology_distance` 1.259 → 1.108 —
+a single seed flipping a boolean. Neither is reportable as an effect.
+
+**Criterion 3.1 fails in both arms** (0.125 and 0.250 against 0.75), and 3.2's medians rest
+on `robustness_n_used = 1` in both, so they are not yet measurements of anything.
+
+### 6.4 The consequence for the unit
+
+The reachability reading in §3.2 stands and is now measured on two independent
+configurations: **4 of 1024 restarts** across `baseline` and `detach` reach `sig_max_pos > 0`
+on `sample_0000`. The remaining rate axes must move the *init* or the *parameterisation*,
+not the gradient path — which is where `lowbasal` and `d_init_from_kstar` sit, and is why
+`lowbasal` was promoted before this cell finished.

@@ -186,6 +186,38 @@ wins over the doc (§8).*
   Multiprocessing over seeds is the CPU throughput lever; scale worker counts to the
   machine's actual usable cores (e.g. `len(os.sched_getaffinity(0))`), not a fixed number.
 
+### 7a. HOST RAM IS THE BINDING RESOURCE. Launch trainers through `scripts/guarded_run.sh`.
+
+Five sessions died between 2026-07-29 and 2026-08-03, each killing hours of GPU compute.
+Diagnosed from `/var/log/syslog`: the **Linux global OOM killer**, five times, with
+**free swap 0 kB and ~90 MiB free RAM at every single event**. Not GPU, not Node, not
+disk, not a UI action — `grep -icE "Xid|NVRM"` returns 0, the `claude` process was only
+0.26–0.50 GiB RSS, and `/` is 7 % full. Two of the kills took down `setsid nohup` sweeps
+that were detached precisely to survive a session exit, which is what proves the event
+was system-wide rather than process-tree-local.
+
+The arithmetic: each trainer is **1.47–1.68 GiB RSS**, and 17–21 ran concurrently. Two
+agents × (1 parent + `--workers 4`) × ~1.6 GiB ≈ **16 GiB** against a VM `MemTotal` of
+**15.34 GiB** — over the ceiling before anything else loads.
+
+**Therefore: run every trainer invocation as `bash scripts/guarded_run.sh <cmd…>`.** It
+serialises sweeps across *all* worktrees with one `flock` (per-agent limits cannot help —
+the overcommit is the sum over agents, and no agent can see the others), waits for a
+`MemAvailable` floor, and raises its own `oom_score_adj` so the kernel kills a trainer
+rather than the session. Before that last part, trainers sat at adj 0 while session
+`systemd`/`dbus-daemon` sat at 100–200, so a memory spike took down the whole user
+session instead of one cell — exactly backwards.
+
+Two things that do **not** fix this, recorded so they are not re-attempted:
+- **The 20 → 14 core reduction.** `processors=` does not affect the memory ceiling, and
+  the queue scripts pass `--workers` explicitly, so fewer cores does not shrink the pool.
+  Failure #5 occurred *after* that change was applied.
+- **Per-agent worker limits alone.** See above: the sum across agents is what matters.
+
+The ceiling itself is a **Windows-side** fix and is not ours to make:
+`/mnt/c/Users/benja/.wslconfig` sets `processors=14` but has **no `memory=` key**, so
+WSL2 silently defaults to 50 % of the 31.4 GiB host. Raising it needs `wsl --shutdown`.
+
 ## 8. Evidence discipline
 
 The single most important rule in this file.

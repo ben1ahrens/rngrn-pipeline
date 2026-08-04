@@ -694,16 +694,32 @@ as D-EVID-4 (`train.seed`) and D-EVID-5 (`param_prior`): the knob does nothing a
 evidence record says it did something. D9 had *documented* this as a known limitation since
 2026-07-29 without fixing it; unit C1 fixed it, and the fix reached this branch only now.
 
-**Consequence for recorded results — 2 rows, and they are already labelled.** Of 154
+**Consequence for recorded results: NONE — all four `low_basal` rows are genuine.** Of 154
 consolidated run rows, **4 carry `model_init: low_basal`**, all `three_gene_qvar/sample_0000`,
-seed 0, in `experiments/runs.jsonl`:
-- 2 at `git_sha 570f3c8` — **BEFORE** the fix. The record says `low_basal`; the run used
-  `default`. Not usable as low-basal evidence.
-- 2 at `git_sha 1a2363b` — **AFTER** the fix. Genuine.
+seed 0, in `experiments/runs.jsonl`: two at `git_sha 570f3c8`, two at `git_sha 1a2363b`.
+Everything else is `model_init: default`, where the no-op was harmless by construction.
 
-Everything else in the ledger is `model_init: default`, where the no-op was harmless by
-construction. (`570f3c8` is on no branch — an orphaned pre-rewrite commit — but the rows
-still carry it honestly, which is what made this separable at all.)
+> **CORRECTED before publication of this entry.** A first draft of this paragraph claimed the
+> `570f3c8` pair predated the fix and so "used `default`" while the record said `low_basal`.
+> **That was wrong**, and the error is worth recording because the instrument was wrong, not
+> just the answer: I tested `git merge-base --is-ancestor 326822c 570f3c8`, which fails —
+> but it fails because **`570f3c8` is a REBASE TWIN of the fix commit**, not its predecessor.
+> Ancestry is the wrong test for a rewritten hash. Three checks settle it:
+> `git show 570f3c8:src/rngrn/train.py` carries `init=cfg.model.init` at line 232;
+> `git diff 570f3c8 326822c -- src/rngrn/train.py` is **empty**; and the two pairs' losses
+> agree **bit-for-bit** at `1.7522335969650809` and `0.8104004347760894`. Sixteen significant
+> figures cannot coincide across two different inits.
+>
+> **The real finding is the opposite one.** Those four rows are **two pairs of deterministic
+> re-runs** — the same computation recorded twice. They must be **de-duplicated, not
+> discarded**: `build_table("experiments")` reports them as `n_seeds=2, n_unique_seeds=1,
+> seeds=[0,0]`, i.e. one run counted twice in every mean. The `n_unique_seeds` column added
+> hours earlier under D-EVID-15 is what surfaced it, which is the column doing exactly the
+> job it was added for.
+
+`570f3c8` is on no branch — an orphaned pre-rewrite commit — but the run rows still carry it
+verbatim, and that honesty is what made the pairing recoverable at all. A run row's `git_sha`
+must never be normalised to "the equivalent commit on a branch".
 
 **Ledger sweep redone.** D-EVID-10 audited 13 tracked run rows. Consolidation takes that to
 **154 rows / 130 result files** across 12 experiment roots. Re-swept:
@@ -1937,7 +1953,10 @@ measured so far.
 the loss drop lands by step 35 and the last Turing flip by 270, a 400-step budget may
 already be generous, and measuring 200/300/400 is a config-only answer to "can this run
 faster" that requires no code change and no comparability argument.
-## D-C1-GAUGE — the J-degeneracy of the objective, and what it does and does not explain
+
+---
+
+### D-C1-GAUGE — the J-degeneracy of the objective, and what it does and does not explain
 *Decided by unit C1 (competitive tuning), 2026-08-03, under the threshold-setting authority
 recorded in `PREREGISTRATION.md` §0. Evidence: `scripts/c1_gauge.py`,
 `docs/C1_COMPETITIVE_TUNING.md` §8, computed on 24 already-committed runs.*
@@ -1973,7 +1992,7 @@ after seeing that the current one fails is exactly what `PREREGISTRATION.md` §5
 it is ever adopted it goes in a new dated section that says plainly it was added after
 seeing results.
 
-## D-C1-DIAG — `max diag(J) > 0` adopted as a secondary readout, not as a criterion
+### D-C1-DIAG — `max diag(J) > 0` adopted as a secondary readout, not as a criterion
 *Same unit and date. Evidence: `docs/C1_COMPETITIVE_TUNING.md` §8.5.*
 
 A positive Jacobian diagonal entry separates patterning perfectly across all 24 committed
@@ -1984,7 +2003,7 @@ proxy for rate progress, beside the pooled per-restart `sig_max_pos` rate, becau
 `turing_frac` is a floored count over K = 8 and cannot rank two failing configurations. It
 replaces no pre-registered criterion.
 
-## D-C1-TURINGW — `loss.weights.turing` promoted to the lead rate axis
+### D-C1-TURINGW — `loss.weights.turing` promoted to the lead rate axis
 *Same unit and date.*
 
 The axis is not in C1's original eight and had never been tried by this unit. C2 measured

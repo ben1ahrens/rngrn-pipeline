@@ -23,8 +23,8 @@
 #
 #   setsid nohup bash scripts/c1_queue3.sh > experiments/tune_comp_reports/queue3.log 2>&1 </dev/null &
 set -uo pipefail
-WT=/home/benja/projects/personal/rngrn/worktrees/c-tune-comp
-VENV=/home/benja/projects/personal/rngrn/worktrees/turing-training/.venv/bin/python
+WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # THIS worktree, never a hardcoded one (D-EVID-16)
+VENV="$WT/.venv/bin/python"
 export PYTHONPATH=$WT/src KMP_AFFINITY=disabled OMP_NUM_THREADS=1
 cd "$WT"
 

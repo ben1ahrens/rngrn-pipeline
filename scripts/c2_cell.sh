@@ -8,8 +8,8 @@
 # NOT -e: a target that times out must be RECORDED and the cell must continue to the next
 # target, rather than aborting the queue on one pathological sample.
 set -uo pipefail
-WT=/home/benja/projects/personal/rngrn/worktrees/c-tune-nc1
-VENV=/home/benja/projects/personal/rngrn/worktrees/turing-training/.venv/bin/python
+WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # THIS worktree, never a hardcoded one (D-EVID-16)
+VENV="$WT/.venv/bin/python"
 export PYTHONPATH=$WT/src KMP_AFFINITY=disabled OMP_NUM_THREADS=1
 
 ROOT="$1"; SEEDS_CSV="$2"; TARGETS_CSV="$3"; WORKERS="$4"; shift 4

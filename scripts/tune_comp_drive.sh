@@ -6,7 +6,7 @@
 # Each cell differs from `baseline` by EXACTLY ONE override, so a difference between two
 # cells is attributable. The shared block below is never varied.
 set -uo pipefail
-WT=/home/benja/projects/personal/rngrn/worktrees/c-tune-comp
+WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # THIS worktree, never a hardcoded one (D-EVID-16)
 cd "$WT"
 
 run_cell () {   # run_cell <cell> "<samples>" "<seeds>" [extra -o ...]

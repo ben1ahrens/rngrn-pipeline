@@ -101,3 +101,65 @@ def test_model_init_is_threaded_from_config_into_recover(monkeypatch):
     assert seen.get("init") == "low_basal", (
         "train.fit() did not hand model.init to recover(); the run index would record an "
         f"init the run never used. saw init={seen.get('init')!r}")
+
+
+# ======================================================================================
+# CALL-SITE GUARDS for the other two fragile kwargs in train.fit (D-EVID-16).
+#
+# `init=` above was guarded; `arm_id=` and `D=result.D_phys` were NOT. All three are
+# single-line additions inside a long call or dict — exactly what CLAUDE.md §11 says a
+# line-granularity merge drops silently, as it previously did to `resid`, the anchor
+# weight and `model_seed`, with the suite green. Unit tests over synthetic rows cannot
+# see it; only a spy on the real call site can.
+# ======================================================================================
+def test_morphology_rollout_is_handed_the_PHYSICAL_D(monkeypatch):
+    """D-EVID-14 regression guard, at the call site.
+
+    `_morphology_rollout` must pass `result.D_phys`, not fall back to `model.D`: on the
+    nondim path the latter is D/L**2 while the rollout integrates on a box of physical
+    size L, so diffusion is starved by L**2 (3600x at L=60) and the model silently reports
+    unpatterned. tests/test_rollout.py drives `_morphology_rollout` with a stub that has no
+    `D_phys` attribute, so it passes whether or not the kwarg is threaded.
+    """
+    import rngrn.train as T
+    seen = {}
+
+    def _spy(model, **kw):
+        seen.update(kw)
+        raise RuntimeError("stop after capturing kwargs")
+
+    monkeypatch.setattr(T, "simulate", _spy)
+    cfg = _tiny(load_config(os.path.join(CONFIGS, "milestone1_schnak.yaml")))
+    cfg = apply_overrides(cfg, ["solver.morphology_rollout=true"])
+    with pytest.raises(RuntimeError, match="stop after capturing"):
+        T.fit(cfg, runs_root=tempfile.mkdtemp())
+    assert "D" in seen, (
+        "train._morphology_rollout did not pass D= to simulate(); on the non-dimensional "
+        "path the rollout would integrate D/L**2 at physical L and report the model as "
+        "unpatterned, with no error (docs/DECISIONS.md D-EVID-14)")
+
+
+def test_fit_writes_arm_id_onto_the_run_index_row():
+    """D-EVID-13 regression guard, end to end.
+
+    `arm_id` is the seed-independent identity `optim.benchmark` groups on. Drop the line
+    that writes it and every new row silently becomes a LEGACY row, grouped by the
+    seed-dependent `config_id` — re-instating the dead cross-seed aggregation (`n_seeds`
+    pinned at 1, `kstar_identifiability_std` always NaN) with the suite green.
+    tests/test_benchmark_grouping.py injects `arm_id` into synthetic dicts, so it cannot
+    catch this.
+    """
+    import json
+    import rngrn.train as T
+    runs = tempfile.mkdtemp()
+    cfg = _tiny(load_config(os.path.join(CONFIGS, "milestone1_schnak.yaml")))
+    assert T.fit(cfg, runs_root=runs) is not None
+
+    rows = [json.loads(l) for l in open(os.path.join(runs, "runs.jsonl")) if l.strip()]
+    assert rows, "fit() wrote no run-index row"
+    assert rows[0].get("arm_id"), (
+        "the run-index row carries no arm_id, so optim.benchmark would treat this run as a "
+        "legacy row and never group it with its seed replicates (D-EVID-13)")
+    assert rows[0]["arm_id"] == cfg.arm_id()
+    assert rows[0]["arm_id"] != rows[0]["config_id"], (
+        "arm_id must be the SEED-INDEPENDENT identity, distinct from config_id")

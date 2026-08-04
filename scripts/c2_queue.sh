@@ -9,7 +9,7 @@
 # where each non-comment line of <queuefile> is:
 #   <root_name>|<seeds_csv>|<targets_csv>|<workers>|<override string>
 set -uo pipefail
-WT=/home/benja/projects/personal/rngrn/worktrees/c-tune-nc1
+WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # THIS worktree, never a hardcoded one (D-EVID-16)
 cd "$WT"
 
 # READ THE QUEUE ON FD 3, NOT STDIN. With `done < "$1"` the cell's python process inherits

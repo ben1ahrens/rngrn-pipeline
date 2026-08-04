@@ -10,10 +10,17 @@ soft training-time prior, sharing this module's box loader and D-ratio definitio
 
 FIREWALL: this module reads only the RECOVERED MODEL's own constrained parameters
 (alpha, delta, beta, D — model.py properties). It never reads an answer key, a
-ground-truth Jacobian, or anything from rd_models / data.solver / data.cache. It is safe
-to import from recovery-side code (losses/terms.py does) as well as from scoring-side
-code (validate.py does); tests/test_firewall.py enforces the recovery-side import
-boundary on the modules that matter, and this module imports nothing forbidden.
+ground-truth Jacobian, or anything from rd_models / data.solver / data.cache.
+
+**Corrected 2026-08-04.** This note used to say the module "is safe to import from
+recovery-side code (losses/terms.py does)". BOTH halves were wrong: `losses/terms.py:390`
+explicitly records that it CANNOT import this module, and recovery-side code may not import
+anything under `rngrn.scoring` at all — that is now enforced by
+tests/test_firewall.py::test_recovery_side_does_not_import_the_scoring_package. The rule is
+package-level and does not depend on whether a particular scorer happens to be truth-free
+today, because siblings in this package (overparam.py, permutation.py) are not.
+Recovery-side code that needs the shared D-ratio takes it from `rngrn/utils.py`, which is
+side-neutral by construction.
 
 THE BOX IS DATA, NOT CODE
 --------------------------
@@ -79,32 +86,15 @@ def load_box(path: str = DEFAULT_BOX_PATH) -> dict:
     return box
 
 
-def _to_numpy(x) -> np.ndarray:
-    if hasattr(x, "detach"):
-        x = x.detach().cpu().numpy()
-    return np.asarray(x, dtype=float)
-
-
-def d_ratio_of(D) -> float:
-    """D_ratio = ratio of the two MOST MOBILE species' diffusivities: the largest
-    divided by the second-largest, over ANY number of species N >= 2.
-
-    [IMPL] design choice, not independently validated against an alternative
-    definition (e.g. global max/min). Chosen specifically so a single near-immobile
-    node — the mechanism docs/ROBUSTNESS_MEASUREMENT.md §4.4 measures as making 127/127
-    three_gene systems stay strictly Turing when the SLOWEST diffuser is made immobile
-    — never enters the ratio: for N=2 this reduces to the ordinary max/min ratio; for
-    N>=3 the single smallest D (which an immobile node drives toward 0) is excluded by
-    construction, so D_i -> 0 is never penalised here or in losses/terms.py::param_prior.
-    """
-    D = _to_numpy(D).ravel()
-    if D.size < 2:
-        raise ValueError(f"D_ratio needs at least 2 species, got {D.size}")
-    if np.any(D <= 0):
-        raise ValueError(f"D must be strictly positive, got {D!r}")
-    sorted_D = np.sort(D)
-    lo, hi = sorted_D[-2], sorted_D[-1]
-    return float(hi / lo)
+# `_to_numpy` and `d_ratio_of` MOVED to rngrn/utils.py on 2026-08-04 and re-exported here,
+# so every existing caller (validate.py, scripts/stage0_bio_viability.py, the tests) keeps
+# working unchanged. The move exists because `history.py` runs inside the Adam loop and
+# needs the SAME D-ratio definition, but recovery-side code may not import the scoring
+# package (tests/test_firewall.py::test_recovery_side_does_not_import_the_scoring_package).
+# Copying the function would have let a recorded science decision (docs/DECISIONS.md D2)
+# drift into two versions. Import from `..utils` in new code; this is compatibility, not a
+# second home.
+from ..utils import _to_numpy, d_ratio_of      # noqa: E402,F401  (re-exported)
 
 
 def _in_box(value: float, row: BoxRow) -> Optional[bool]:

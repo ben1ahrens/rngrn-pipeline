@@ -32,17 +32,27 @@ ALL MEMBERS ARE KEPT, thinned — never member 0 relabelled as "the run". On the
 the reported result is the BEST member, whose index is only known after the last step, so
 recording one lane during training would either be the wrong lane or require guessing.
 
-FIREWALL. Recovery-side: numpy only, no answer-key import, nothing here reads truth. Note
-that `recover.py` does NOT import this module — `train.fit` constructs the recorder and passes
-it in, and recovery only calls methods on whatever object it is handed, so the training loop's
-import graph is unchanged. `tests/test_plot_arrays.py::test_history_is_recovery_side_safe`
-audits this module's own imports statically.
+FIREWALL. Recovery-side: nothing here reads truth. This recorder is CALLED FROM INSIDE the
+Adam loop (`recover.py:245`, `:492`), so it is audited as recovery-side — it is on
+`tests/test_firewall.py::RECOVERY_SIDE` and must satisfy every rule the loss terms do. Note
+that `recover.py` does not *import* this module: `train.fit` constructs the recorder and
+passes it in, and recovery only calls methods on whatever object it is handed.
+
+**Corrected 2026-08-04.** This note used to say "numpy only, no answer-key import". The
+answer-key half was true; "numpy only" was not — the module imported `d_ratio_of` from
+`scoring/plausibility.py`, i.e. recovery-side code reaching into the scoring package, which
+no audit covered because `history.py` appeared in none of the four hand-copied RECOVERY_SIDE
+lists. `d_ratio_of` now lives in the side-neutral `rngrn/utils.py` and is imported from
+there, so the shared definition (docs/DECISIONS.md D2) stays single-sourced.
+
+Audited by `tests/test_firewall.py` (import audit + the scoring-package rule + the
+classification completeness check) and `tests/test_plot_arrays.py::test_history_is_recovery_side_safe`.
 """
 from __future__ import annotations
 
 import numpy as np
 
-from .scoring.plausibility import d_ratio_of
+from .utils import d_ratio_of
 
 # The CONSTRAINED physical parameters, with their rank (2 = (N,N) matrix, 1 = (N,) vector).
 # Order fixes the column order of the parameter trace; do not reorder without bumping

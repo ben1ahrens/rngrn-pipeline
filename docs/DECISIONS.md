@@ -148,6 +148,160 @@ be re-checked against `model_seed` before it is quoted.
 `src/rngrn/optim/target_report.py` (`run_target_report`'s per-seed overrides). The new
 `seed` / `model_seed` columns on the run row are what make it visible.
 
+### D-EVID-7 — the k\* leak control was measured against the SECONDARY reference, so the headline column shipped with no control
+
+**Date found / fixed:** 2026-08-04 (multi-agent branch review). **Status:** SUPERSEDED
+(defect; now fixed). **Decided by:** the implementing agent under delegated authority (§10).
+
+`validate.score_recovery` reports two k\* errors against two different references:
+`kstar_fft_rel_err` (**headline**, vs `answer_key.kstar_fft`) and `kstar_rel_err`
+(secondary, vs `answer_key.kstar`). `_leak_instrumentation` was called as
+`_leak_instrumentation(L, out["kstar_true"])` — the **linear** reference only — so the
+image-blind control `trivial_kstar_err` and the resolution floor `kstar_fft_bin_width` were
+both normalised by `kstar`, and **neither controlled the column the claim is gated on**.
+
+**Why it matters.** The legacy generators set `L = clip(6*2*pi/k*, 18, 220)`, so the
+image-blind predictor `k_trivial = 6*2*pi/L` is exact against `kstar` (~1e-16) while
+`kstar_fft` differs from `kstar` by a measured median of **8.4%** (`data/gate.py:59`). A row
+reading `kstar_fft_rel_err = 0.046` beside `trivial_kstar_err = 0.000` therefore looked like
+a 14-order-of-magnitude win over a baseline that had **never been measured on that column**.
+
+**Evidence — this is present in the tracked ledger, not hypothetical.**
+`experiments/stage0_bioviab/runs.jsonl`, `stage0_prior_off_0004`: `trivial_kstar_err =
+0.000` (periods-per-box exactly 6) next to `kstar_fft_rel_err = 0.0458`. The honest control
+for that row is ~4–8%, i.e. the same order as the result.
+
+**Fix:** `_leak_instrumentation(L, kstar_true, kstar_fft_true)` now emits four columns
+paired by reference — `trivial_kstar_err` / `kstar_fft_bin_width` (vs `kstar`) and
+**`trivial_kstar_fft_err` / `kstar_fft_bin_width_rel_fft`** (vs `kstar_fft`). Each is NaN
+when its own reference is absent, never a fallback to the other. `trivial_kstar_err` keeps
+its exact former meaning, so rows recorded before this change stay comparable. The pairing
+is propagated to `optim/benchmark.py` (`COLUMNS`, `DEGRADATION_COLUMNS`, both table
+builders) and `optim/target_report.py` (`_pattern_block`, the per-seed rows). Five tests in
+`tests/test_gate_contract.py` pin it, including that the new column does **not** fall back
+to the linear reference.
+
+**What was rejected and why:** silently renormalising the existing `trivial_kstar_err` onto
+`kstar_fft`. Rejected because it would change the meaning of a column already present on
+every tracked row, making old and new rows non-comparable without saying so — exactly the
+failure §10.4 forbids. Adding a second column keeps both readable.
+
+**Consequence for earlier results:** every k\* claim read against `trivial_kstar_err` on a
+**legacy** (L = 6λ) sample overstates the margin over the image-blind baseline. Re-read them
+against `trivial_kstar_fft_err`. Non-legacy datasets (`three_gene_qvar`,
+`three_gene_multiL`) are unaffected in kind — `scripts/gen_tg3.py` draws periods-per-box
+from 3..14, so the leak relation does not hold there.
+
+**Where it lives:** `src/rngrn/validate.py::_leak_instrumentation`;
+`src/rngrn/optim/benchmark.py`; `src/rngrn/optim/target_report.py`.
+
+### D-EVID-8 — the pre-registered 8.3 % k\* bar is HALF AN FFT BIN, which is not a constant across datasets
+
+**Date:** 2026-08-04. **Status:** OPEN — the resolution below is the owner's, not an
+agent's, because it bears on a pre-registered pass condition (§10).
+
+**Not circular, which was the first thing checked.** `PREREGISTRATION.md` §3.3 derives
+8.3 % as *half an FFT bin*: one bin is 16.7 % of k\*, so ±8.33 % is the estimator's own
+resolution floor. That derivation is independent of the measured median
+`|kstar_fft/kstar − 1| = 0.084`. The near-coincidence of 0.083 and 0.084 is **not**
+circularity — both are ~half a bin, because half-a-bin *is* what FFT quantisation error
+looks like.
+
+**But the consequence is real:** the bar sits exactly at the noise floor, so "passing" means
+"indistinguishable from the FFT's own quantisation". That is the same fact as D-EVID-7 — it
+is *why* an image-blind predictor can pass it.
+
+**And the floor is dataset-dependent.** One bin as a fraction of k\* is `1/(periods per
+box)`. The legacy generators fix that at 6 (hence 16.7 %). `scripts/gen_tg3.py` draws it
+freely from 3..14. Measured over the 13 tracked run rows, `kstar_fft_bin_width` ranges
+**0.100 → 0.333**, i.e. half-bin floors of **5.0 % → 16.7 %**. On **6 of 13 rows the
+pre-registered 8.3 % bar is BELOW the estimator's own resolution** — it demands precision
+the measurement cannot deliver.
+
+**What this does not do:** it does not weaken or amend §3.3. Only the owner may do that.
+
+**Options, for the owner:** (a) keep 8.3 % as a fixed bar and restrict §3.3 claims to
+periods-per-box ≈ 6 samples; (b) make the bar per-sample at
+`kstar_fft_bin_width_rel_fft / 2`, which is what the prereg's own calibration argument
+implies; (c) keep both and report them side by side. Note §1 already excludes legacy data
+from k\* claims, so the honest answer may be that nothing intended for publication changes.
+
+**Where it lives:** `docs/PREREGISTRATION.md` §3.3; the new
+`kstar_fft_bin_width_rel_fft` column (`src/rngrn/validate.py`).
+
+### D-EVID-9 — the firewall audit was a hand-copied name allowlist, so new modules were unaudited by default
+
+**Date found / fixed:** 2026-08-04. **Status:** SUPERSEDED (defect; now fixed).
+**Decided by:** the implementing agent under delegated authority.
+
+`RECOVERY_SIDE` was re-typed verbatim in **four** test files (`test_firewall.py:19`,
+`test_plot_arrays.py:319`, `test_permutation_scoring.py`, `test_morphology_scoring.py`) —
+the same eleven module names each time, deliberately mirrored "so the audits stay
+independent". The cost of that independence was completeness: a module on **no** list is
+audited by **nobody**, and the suite stays green.
+
+Two such modules existed. `eval/lgen_eval.py` (564 lines, added this branch) was on none of
+them. `history.py` was on none of them **and** did
+`from .scoring.plausibility import d_ratio_of` while running inside the Adam loop
+(`recover.py:245`, `:492`) — recovery-side code reaching into the scoring package, whose
+siblings `overparam.py` and `permutation.py` do read the answer key.
+
+**Not a truth leak.** `d_ratio_of` is a pure function of the model's own `D`. The defect is
+that nothing would have caught it if it had not been.
+
+**Fix (three parts):**
+1. `test_every_loss_and_eval_module_is_classified` — every module under `losses/` and
+   `eval/`, plus `history.py`, must be declared `RECOVERY_SIDE` **or** `SCORING_SIDE`.
+   Membership of neither fails. This forces the classification at the moment a module is
+   added. Verified to fire by adding a throwaway module and watching it fail.
+2. `test_recovery_side_does_not_import_the_scoring_package` — the package-level rule
+   `CLAUDE.md` §5 states, enforced in the firewall test itself rather than only in three
+   scorers' own files. `history.py` added to `RECOVERY_SIDE`.
+3. `d_ratio_of` / `_to_numpy` **moved** to the side-neutral `rngrn/utils.py`, re-exported
+   from `scoring/plausibility.py` so every existing caller is unchanged.
+   `FORBIDDEN` gained `data.gate` and `data.registry` — `gate.from_registry` returns the
+   full `(RecoveryInput, AnswerKey)` pair, so importing it was a two-line route to ground
+   truth that passed every previous version of the audit. The names must stay **dotted**:
+   a bare `registry` false-positives on `rngrn/registry.py`, the component registry that
+   `model.py` and `losses/weighting.py` legitimately import.
+
+**What was rejected and why:** copying `d_ratio_of` into `history.py` (the obvious local
+fix). Rejected because the definition is a recorded science decision (D2, largest /
+second-largest, chosen so a near-immobile node never enters the ratio) and two copies would
+drift. Also rejected: sharing one `RECOVERY_SIDE` constant across all four test files —
+the mirroring is deliberate and keeps the audits independent; completeness is what was
+missing, not deduplication.
+
+**Consequence for earlier results:** none. No truth reached recovery; this closes the route,
+it does not correct a number.
+
+**Where it lives:** `tests/test_firewall.py`; `src/rngrn/utils.py`;
+`src/rngrn/scoring/plausibility.py`; `src/rngrn/history.py`.
+
+### D-EVID-10 — ledger sweep: which recorded rows the 2026-08-04 review affects
+
+**Date:** 2026-08-04. **Status:** DECIDED (a measurement, recorded so the next fix does not
+have to redo it). **Decided by:** the implementing agent.
+
+Before changing anything, all **13 tracked run rows** (`experiments/audit_check`,
+`experiments/lgen_transfer`, `experiments/stage0_bioviab`) were swept for the columns the
+review's six headline defects touch. Result:
+
+| defect | affects recorded rows? | evidence |
+|---|---|---|
+| M1 leak control (D-EVID-7) | **YES** | `trivial_kstar_err` on all 13; the 6-periods case is live on `stage0_prior_off_0004` |
+| M2 `turing_ok` uses `tr(J)<0` | **YES** | `recovered_turing` / `recovered_sig_max` on all 13 |
+| M3 sign-rtol sweep is a no-op | no | every row has `repro_sign_zero_rtol = 0.05`; nothing was ever run at 0.02 / 0.10 |
+| M4 cross-seed grouping dead | no *reported* number | max group size is 1 on every index, so no aggregate has been published yet |
+| M5 `morphology_match` species mismatch | **no** | `observed_idx = [0,1,2]` on all 13, so `observed_idx[0] == 0` and the comparison was correct |
+| M6 nondim `D` misread | **no** | `nondim = False` on all 13; no committed config sets it |
+
+**Consequence:** M5 and M6 can be fixed with **zero** comparability impact, and M3/M4 have
+produced no wrong published number yet. Only M1 and M2 touch recorded values, and M2 is the
+larger of the two because it would move `recovered_turing` itself.
+
+**Where it lives:** `experiments/*/runs.jsonl` (tracked).
+
 ---
 
 ## Part 2 — Decisions

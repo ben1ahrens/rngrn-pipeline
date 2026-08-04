@@ -41,8 +41,17 @@ torch build rather than downloading its own. **Always verify:**
 
 The path must be inside *this* worktree. If it is not, nothing you test means anything.
 
-Enable the test gate once per clone: `git config core.hooksPath .githooks`. The pre-push hook
-is the authoritative test run. **GitHub Actions is not a signal here** — `tests.yml` is
+Enable the test gate **once per repository**, not per worktree — local config is shared,
+since a worktree's `.git` is a pointer file: `git config core.hooksPath .githooks`. The
+pre-push hook is the authoritative test run.
+
+> **In the sandbox that write FAILS.** `.git/config` (and each
+> `.git/worktrees/*/config.worktree`) is bind-mounted read-only, so `git config` returns
+> `Device or resource busy`. The rest of `.git/` is writable, which is why commits still
+> work — and why a push can silently skip the authoritative test run. Push with:
+> ```bash
+> git -c core.hooksPath=.githooks push ...
+> ``` **GitHub Actions is not a signal here** — `tests.yml` is
 `workflow_dispatch`-only, the account's Actions billing has lapsed, and runs are skipped and
 reported as failures that have nothing to do with the code. Do not diagnose those as code
 failures.

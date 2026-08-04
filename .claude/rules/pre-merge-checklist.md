@@ -5,7 +5,10 @@ executable form. Every line is a check that has caught a real defect in this rep
 
 ## Tests
 
-- [ ] `git config core.hooksPath .githooks` is set in this clone.
+- [ ] `git config core.hooksPath .githooks` is set — **once per repository**, not per
+      worktree. In the sandbox `.git/config` is bind-mounted read-only, so that write fails
+      with `Device or resource busy`; push with `git -c core.hooksPath=.githooks push ...`
+      instead, or the authoritative test run is **silently skipped**. See `CLAUDE.md` §3.
 - [ ] `.venv/bin/python -c "import rngrn,os;print(os.path.dirname(rngrn.__file__))"` prints a
       path **inside this worktree**. If it does not, every test result below is meaningless —
       an editable install's `.pth` is pinning a sibling tree's `src/`.

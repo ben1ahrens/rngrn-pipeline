@@ -674,6 +674,59 @@ denominator is the surviving-seed count rather than K. Neither may be amended by
 `docs/BIO_VIABILITY.md`, `tests/test_firewall.py`, `tests/test_benchmark_grouping.py`,
 `tests/test_gate_contract.py`, `tests/test_target_report.py`.
 
+### D-EVID-16 — branch consolidation: `model.init` was a silent no-op, and the ledger sweep is redone at 154 rows
+
+**Date:** 2026-08-04. **Status:** DECIDED (a consolidation + one defect fix).
+**Decided by:** the implementing agent under delegated authority, after a read-only survey of
+all 12 worktrees by three explore agents.
+
+**The survey.** Of 32 local branches, **26 were fully merged** into `feature/turing-training`
+— the July wave landed correctly. Five carried unmerged work: `docs/agent-conventions` (2
+commits, 100 % superseded — dropped), `docs/hooks-config` (3; one genuinely missing —
+cherry-picked), `feature/rngrn-c-mu` (2, deliberately PARKED and unvalidated — left
+unmerged), `feature/rngrn-c-tune-nc1` (10) and `feature/rngrn-c-tune-comp` (21).
+
+**The defect: `model.init` was a silent no-op with asserting provenance.** `train.py::fit()`
+never passed `cfg.model.init` to `recover()`. It referenced it in exactly one place — writing
+`model_init` onto the run-index row — so `-o model.init=low_basal` ran the **default** init
+while `frozen_config.yaml` and the `model_init` column both asserted `low_basal`. Same class
+as D-EVID-4 (`train.seed`) and D-EVID-5 (`param_prior`): the knob does nothing and the
+evidence record says it did something. D9 had *documented* this as a known limitation since
+2026-07-29 without fixing it; unit C1 fixed it, and the fix reached this branch only now.
+
+**Consequence for recorded results — 2 rows, and they are already labelled.** Of 154
+consolidated run rows, **4 carry `model_init: low_basal`**, all `three_gene_qvar/sample_0000`,
+seed 0, in `experiments/runs.jsonl`:
+- 2 at `git_sha 570f3c8` — **BEFORE** the fix. The record says `low_basal`; the run used
+  `default`. Not usable as low-basal evidence.
+- 2 at `git_sha 1a2363b` — **AFTER** the fix. Genuine.
+
+Everything else in the ledger is `model_init: default`, where the no-op was harmless by
+construction. (`570f3c8` is on no branch — an orphaned pre-rewrite commit — but the rows
+still carry it honestly, which is what made this separable at all.)
+
+**Ledger sweep redone.** D-EVID-10 audited 13 tracked run rows. Consolidation takes that to
+**154 rows / 130 result files** across 12 experiment roots. Re-swept:
+
+| defect | consolidated impact | evidence |
+|---|---|---|
+| **D-EVID-11** strict `turing_ok` | **0 flips in 129 re-scored runs** | every `recovered.J`/`D_phys` re-scored under σ(0)<0 ∧ max σ(k>0)>0 |
+| **D-EVID-14** dimensionless `D` | **none** | `nondim = False` on all 154 |
+| **M5** morphology species mismatch | **none** | `observed_idx = [0,1,2]` on all 154 |
+| **D-EVID-12** rtol sweep | **no published sweep** | `repro_sign_zero_rtol = 0.05` on all 154 |
+
+So D-EVID-11's "0 of 12" now rests on **0 of 129** — a 10× stronger base, and the strongest
+statement available that the `turing_ok` correction moved no recorded number.
+
+**What the merge did NOT resolve, carried forward:** both new tuning docs
+(`C1_COMPETITIVE_TUNING.md`, `C2_NC1_TUNING.md`) read `kstar_fft_rel_err` against
+`trivial_kstar_err`, which D-EVID-7 established is the wrong control, and both cite the
+"0 % → 82 % Turing-unstable at init" figure D-EVID-11 withdrew. Their *numbers* survive; some
+of their *readings* invert. Correcting them is doc work on evidence that is now in-tree.
+
+**Where it lives:** `src/rngrn/train.py`; `tests/test_smoke.py`; `docs/DECISIONS.md` D9;
+`experiments/**` (12 roots).
+
 ---
 
 ## Part 2 — Decisions
@@ -1003,9 +1056,18 @@ the training-time consequence and reported it rather than reversing the default.
 parameter init (`beta` 1e-4..1e-2, `s` 1e-2..10^-0.3, `alpha` 10^0.3..10^1.5, `delta`
 0.1..10^0.3, gate logit ~N(0, 2.5), D-ratio 10^0.9..10^2.4), ported unmodified from
 `scripts/exp03_turing_first.py::low_basal_init`. `ModelConfig.init` defaults to
-`"default"` everywhere; `train.py`'s `cfg.model.init` is **not** threaded into
-`recover()` (out of the unit's file scope), so today the field round-trips into
-`frozen_config.yaml` but has no effect via the CLI path.
+`"default"` everywhere.
+
+> **FIXED 2026-08-04 by the branch consolidation — see D-EVID-16.** This paragraph used to
+> end: *"`train.py`'s `cfg.model.init` is **not** threaded into `recover()` (out of the
+> unit's file scope), so today the field round-trips into `frozen_config.yaml` but has no
+> effect via the CLI path."* That is an accurate description of a **silent no-op whose
+> provenance asserts the opposite** — the same defect class as D-EVID-4 (`train.seed`) and
+> D-EVID-5 (`param_prior`) — and it was recorded here as a known limitation rather than
+> fixed. Unit C1 fixed it (`init=cfg.model.init` on the `R.recover(...)` call, guarded by
+> `tests/test_smoke.py::test_model_init_is_threaded_from_config_into_recover`), and that fix
+> reached this branch only via the consolidation merge. `-o model.init=low_basal` now does
+> what it says.
 
 **Evidence — at init, low_basal is dramatically more Turing-unstable:** 400 seeds per
 setting (Newton steady state + Jacobian-sign check only, no fit) —

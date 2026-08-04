@@ -51,10 +51,11 @@ pre-push hook is the authoritative test run.
 > work — and why a push can silently skip the authoritative test run. Push with:
 > ```bash
 > git -c core.hooksPath=.githooks push ...
-> ``` **GitHub Actions is not a signal here** — `tests.yml` is
-`workflow_dispatch`-only, the account's Actions billing has lapsed, and runs are skipped and
-reported as failures that have nothing to do with the code. Do not diagnose those as code
-failures.
+> ```
+
+**GitHub Actions is not a signal here** — `tests.yml` is `workflow_dispatch`-only, the
+account's Actions billing has lapsed, and runs are skipped and reported as failures that
+have nothing to do with the code. Do not diagnose those as code failures.
 
 ## 3. A new worktree LOOKS provisioned with datasets but is not
 

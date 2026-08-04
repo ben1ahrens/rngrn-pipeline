@@ -111,9 +111,10 @@ and `docs/` for per-branch handoffs.
   deleted. The account's Actions billing has lapsed, so runs are *skipped* and reported as
   failures that have nothing to do with the code. Do not diagnose those as code failures.
   Restoring CI = uncommenting the two triggers.
-- Current suite: **420 passed, 1 skipped**, all CPU, ~3 minutes to run (measured 2026-08-04 on
-  `feature/turing-training`). Keep them green. The count in this line has been stale before —
-  re-measure it rather than trusting it, and update it when it moves.
+- Current suite: **462 passed, 1 skipped**, all CPU, ~3 minutes to run (measured 2026-08-04 on
+  `feature/turing-training` after the branch consolidation). Keep them green. The count in
+  this line has been stale before — re-measure it rather than trusting it, and update it when
+  it moves.
 
 ## 4. House style
 

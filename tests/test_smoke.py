@@ -79,3 +79,25 @@ def test_data_gen_idempotent(tmp_path):
     d2 = cache.generate(root, spec, system)   # cache hit — no regeneration
     assert d1 == d2
     assert os.path.getmtime(os.path.join(d2, "manifest.json")) == mtime1
+
+
+def test_model_init_is_threaded_from_config_into_recover(monkeypatch):
+    """unit C1 regression: `model.init` was recorded on the run-index `model_init` column
+    and in frozen_config.yaml but never passed to recover(), so `-o model.init=low_basal`
+    silently ran the DEFAULT init while the record asserted otherwise. A config value that
+    reaches the audit trail but not the code is worse than one that does neither."""
+    import rngrn.train as T
+    seen = {}
+
+    def _spy(ri, **kw):
+        seen.update(kw)
+        raise RuntimeError("stop after capturing kwargs")
+
+    monkeypatch.setattr(T.R, "recover", _spy)
+    cfg = _tiny(load_config(os.path.join(CONFIGS, "milestone1_schnak.yaml")))
+    cfg = apply_overrides(cfg, ["model.init=low_basal"])
+    with pytest.raises(RuntimeError, match="stop after capturing"):
+        T.fit(cfg, runs_root=tempfile.mkdtemp())
+    assert seen.get("init") == "low_basal", (
+        "train.fit() did not hand model.init to recover(); the run index would record an "
+        f"init the run never used. saw init={seen.get('init')!r}")

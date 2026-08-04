@@ -1,0 +1,6 @@
+2026-08-03T21:47:32+01:00 START lowbasal/sample_0000 ds=three_gene_qvar seeds=[0 1 2 3 4 5 6 7] timeout=3600s extra=[-o model.init=low_basal]
+guarded_run: END rc=124 MemAvailable=10692MB
+2026-08-03T22:03:00+01:00 FAIL  lowbasal/sample_0000  rc=124 3600s
+2026-08-03T22:03:00+01:00 START turing8_lowbasal/sample_0000 ds=three_gene_qvar seeds=[0 1 2 3 4 5 6 7] timeout=3600s extra=[-o loss.weights.turing=8.0 -o model.init=low_basal]
+/home/benja/.claude-science/conda/envs/python/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 5 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

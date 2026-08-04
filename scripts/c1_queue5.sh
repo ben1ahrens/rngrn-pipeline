@@ -34,11 +34,21 @@
 # numbers but cannot change a conclusion — C1's §8 mechanism result already establishes that
 # the objective constrains J only through sigma(k), fixing 7 of 9 functions of J and pinning
 # the diagonal while leaving the off-diagonal pair senses unconstrained, so NO reweighting of
-# existing terms can move criterion 3.1. What is kept is the one untested REACHABILITY lever:
-# low_basal, which STATE_OF_THE_SCIENCE §10 measures taking Turing-unstable inits from 0 % to
-# 82 %, against a Jacobian diagonal that is negative at every default init while 88/88 real
-# three_gene systems are positive. It is settable from config only because of this branch's
-# no-op fix, and it has never run under training on the post-B3 solver.
+# existing terms can move criterion 3.1. What is kept is the one untested PREREQUISITE lever:
+# low_basal.
+#
+# CORRECTED 2026-08-04 (docs/DECISIONS.md D-EVID-11). This queue was written citing
+# STATE_OF_THE_SCIENCE §10's "0 % to 82 % Turing-unstable inits", and called low_basal a
+# REACHABILITY lever on that basis. That figure is WITHDRAWN: it scored tr(J) < 0, which a
+# uniformly UNSTABLE system satisfies, with k* pinned to the scan floor. Strict: 0/398 =
+# 0.0 % for low_basal, the SAME as default (0/400); the superseded loose criterion now reads
+# 206/398 = 51.8 %. So low_basal is NOT a measured reachability lever.
+#
+# What survives, and the only reason to run this cell, is the POSITIVE JACOBIAN DIAGONAL --
+# 114/398 (28.6 %) vs 0/400 for default, against a diagonal that is negative at every default
+# init while 88/88 real three_gene systems are positive. Necessary for Turing, not sufficient.
+# It is settable from config only because of this branch's no-op fix, and it has never run
+# under training on the post-B3 solver.
 #
 # Completed cells are SKIPped on a non-empty report, so re-running this is free.
 set -uo pipefail

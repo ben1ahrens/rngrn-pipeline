@@ -21,9 +21,15 @@ This document applies **no** pass/fail of its own. The bars live in `PREREGISTRA
 
 The commit message on `570f3c8` states *"Measured so far: baseline and steps2000 cells,
 sample_0000 only, K=8 seeds."* **That is not what is on disk.** Both
-`experiments/tune_comp_reports/{baseline,steps2000}/sample_0000.json` are **zero bytes**,
-and all six `experiments/tune_comp/runs/*/` directories committed alongside them have an
-**empty `results/`** — only `config/frozen_config.yaml` was ever written. The shell
+`experiments/tune_comp_reports/{baseline,steps2000}/sample_0000.json` were committed at
+**zero bytes**, and all six `experiments/tune_comp/runs/*/` directories committed alongside
+them had an **empty `results/`** — only `config/frozen_config.yaml` was ever written.
+*(Verify against the COMMIT, not the tree. `570f3c8` is on no branch — D-EVID-16's orphaned
+pre-rewrite commit — so use its branch twin: `git ls-tree -l 326822c
+experiments/tune_comp_reports/{baseline,steps2000}/` shows both reports as the empty blob
+`e69de29`. The tree has since moved on: `67f995b` dropped the six run dirs, `10be1f9`
+dropped the zero-byte `steps2000` report, and `baseline/sample_0000.json` was OVERWRITTEN by
+`c5c1fad` and now holds this session's §3.1 measurement.)* The shell
 redirect `> $OUT/$S.json` created the file at launch; the session exit killed the process
 before any report was produced.
 
@@ -86,7 +92,7 @@ Every cell is K = 8 independent seeds (0…7) on the stated targets, differing f
 | 1 | 3.1 reproducibility | `topology_consistency` (= modal fraction over all 8 seeds) | ≥ **0.75** |
 | 1 | 3.1 control | within-target *minus* cross-target `mean_agreement` | ≥ **0.25** |
 | 2 | 3.2 robustness | median `turing_volume_10pct` / `turing_volume_4p8pct` | ≥ **0.90** / ≥ **0.95** |
-| 3 | 3.3 pattern | `morphology_match`, `kstar_fft_rel_err`, beside `trivial_kstar_err` | err ≤ **0.083** |
+| 3 | 3.3 pattern | `morphology_match`, `kstar_fft_rel_err`, beside **`trivial_kstar_fft_err`** — the control on the same reference. (`trivial_kstar_err` is still reported because `PREREGISTRATION.md` §3.3 names it, but it is normalised by the LINEAR k\* and is the wrong control for this column — D-EVID-7; only the owner may amend §3.3.) | err ≤ **0.083**, read beside this target's half-bin floor `kstar_fft_bin_width_rel_fft`/2 (D-EVID-8) |
 | 4 | 3.4 viability | `plausibility_score` | = **1.0** |
 | — | §4 rate | `recovered_frac`, `turing_frac` | reported regardless |
 
@@ -118,8 +124,33 @@ Library defaults: `detach_xstar=false`, `param_prior=0.0`, `anchor=2.0`,
 | `mean_agreement` | 0.579 |
 | `turing_volume_10pct` / `4p8pct` (median) | 1.000 / 1.000 — **n = 1 seed** |
 | `kstar_fft_rel_err` (median) | 0.979 |
-| `trivial_kstar_err` | **1.000** — not leaked data |
+| `trivial_kstar_err` (vs the SECONDARY linear reference `kstar` — **not** the control for the row above) | 1.000 |
+| **`trivial_kstar_fft_err`** (the honest control, vs `kstar_fft`; derived below, not stored on these rows) | **0.7136** — not leaked, and the model **LOSES to it** |
+| half-bin resolution floor, `kstar_fft_bin_width_rel_fft`/2 | 0.1428 |
 | `plausibility_score` (mean) | 0.458 |
+
+> **⚠ CORRECTED 2026-08-04 — the control was measured against the WRONG reference, and this
+> reading REVERSES.** See `docs/DECISIONS.md` D-EVID-7. `trivial_kstar_err` is normalised by
+> the LINEAR reference `answer_key.kstar`, while `kstar_fft_rel_err` — the headline, and the
+> column §3.3's bar is read on — is measured against `answer_key.kstar_fft`. Pairing them
+> compares errors against two different denominators. `trivial_kstar_fft_err` is not stored
+> on these rows (they predate the fix), so it is derived here from the row's own stored
+> values (`kstar_true` = 0.2416189, `kstar_fft_true` = 0.282, `kstar_fft_bin_width` =
+> 0.333333): one bin = 2π/L = 0.080540, `k_trivial` = 6·2π/L = 0.483238, so the honest
+> control is **|0.483238 − 0.282| / 0.282 = 0.7136**.
+>
+> **What it said before:** 0.979 beside a control of 1.000 — inviting the read that the model
+> is marginally *ahead* of an image-blind predictor. **What it says now:** at 0.979 against
+> 0.7136 the model is **1.37× WORSE than image-blind** on this target. The k\*→0 collapse
+> identified below is not merely a bad k\* estimate; it is worse than using no image at all.
+>
+> **What survives unchanged:** "not leaked data" — an honest control of 0.7136 is nowhere
+> near zero, so no L↔k\* leak is present here. Nor is this a resolution artefact: the
+> half-bin floor paired with *this* reference is (0.080540/0.282)/2 = **0.1428** (D-EVID-8;
+> **not** `kstar_fft_bin_width`/2 = 0.1667, which is the floor for the linear column), and
+> 0.979 sits **6.9×** above it. `trivial_kstar_err` = 1.000 is retained rather than struck:
+> it is a valid measurement of a different quantity, and D-EVID-7 preserved its meaning
+> deliberately.
 
 Per seed:
 
@@ -167,7 +198,14 @@ and then discarded", and it has a different fix.
 unit: **the RNGRN's Jacobian diagonal is negative at every default init** — 0 of 200
 converged inits had any positive diagonal (mean ≈ −0.63, max −0.27), against 88/88 real
 `three_gene` systems that do — and Turing patterning requires self-activation. The same
-section measures a low-basal init taking Turing-unstable inits from **0 % to 82 %**.
+section also measured a low-basal init taking Turing-unstable inits from 0 % to 82 %.
+**That figure is WITHDRAWN** (2026-08-04, `docs/DECISIONS.md` D-EVID-11): it was produced by
+`turing_ok`'s old `tr(J) < 0` test, which a uniformly **unstable** system satisfies, with k\*
+pinned to the scan floor. Under the strict criterion low_basal is **0/398 = 0.0 %**
+Turing-unstable at init — the same as `default` (0/400) — and the superseded loose criterion
+now reads **206/398 = 51.8 %**, not 82 %. What the init actually buys is the **positive
+Jacobian diagonal** Turing requires: **114/398 (28.6 %) vs 0/400** for `default`. That is
+necessary, not sufficient, and it is the only claim this axis supports.
 
 ---
 
@@ -184,7 +222,7 @@ killed process cannot leave a zero-byte file that a later reader takes for a mea
 | # | cell | the single override | why it is where it is |
 |---|---|---|---|
 | 1 | `detach` | `loss.detach_xstar=true` | the largest untested difference between the library path and the exp05 experiment that measured `turing_frac` 0.3684; a gradient path through x\* lets the optimiser flatten σ(k), which is the k\*→0 attractor's mechanism |
-| 2 | `lowbasal` | `model.init=low_basal` | §3.2's 2/512, plus `STATE_OF_THE_SCIENCE.md` §10's measured 0 %→82 % on the identical statistic |
+| 2 | `lowbasal` | `model.init=low_basal` | §3.2's 2/512, plus `STATE_OF_THE_SCIENCE.md` §10's **positive Jacobian diagonal** separation — 114/398 (28.6 %) vs 0/400 for `default`, a Turing *prerequisite*. **Promoted at queue time on §10's "measured 0 %→82 % on the identical statistic"; that premise is WITHDRAWN (D-EVID-11), and it was not the identical statistic** — the 82 % came from the old `turing_ok`, whose uniform-stability test was `tr(J) < 0` and whose structural test collapsed onto the uniform mode because the scan grid starts at k = 1e-3. §3.2 scores `sig_max_pos > 0` over the instability hinge's support (k ≥ k_min), which excludes that band by construction. Recorded as run, not as it would now be justified. |
 | 3 | `legacy_control` | *(none — `three_gene_val`)* | one-off CONTROL, §5 |
 | 4 | `steps2000` / `steps8000` | `train.adam_steps` | the curve, 2 seeds × 2 targets only |
 | 5 | `dinit` | `model.d_init_from_kstar=true` | the dimensional D init starts ~29× too small |
@@ -199,6 +237,17 @@ already-committed baseline runs, not on any cell — that the binding failure is
 from the init, and §10 names the init as its measured cause. Reordering a queue changes no
 threshold and drops no cell; the pre-registered bars in `PREREGISTRATION.md` §3 are
 untouched.
+
+**Outcome, recorded rather than left pending: `lowbasal` is UNAFFORDABLE at this budget.**
+`lowbasal/sample_0000` hit the harmonised 3600 s per-target cap with **rc=124 and no target
+report** (`experiments/tune_comp_reports/queue5.log`). The honest comparison is to the
+sibling K=8 cells on the same target that DID finish under the cap — `detach` at 1275 s and
+`turing8` at 2611 s — both well inside a budget this one exhausted. The `turing8_lowbasal`
+arm was launched and produced nothing before the session ended; `106904d` removed its empty
+report directory. This is consistent with D9's independent measurement that low_basal's
+Newton solve converges less often, so the steady-state solve grinds. **It is not refuted, it
+is unmeasured, and those are different claims** — and note that under D-EVID-11 the
+reachability premise that motivated it is itself withdrawn.
 
 ## 5. The legacy control, and what it can and cannot say
 
@@ -242,7 +291,8 @@ was a live mechanistic explanation for the k\*→0 attractor.
 | `mean_agreement` | 0.579 | 0.464 | **down** |
 | `n_distinct_structures` | 8 | 7 | |
 | `kstar_fft_rel_err` median | 0.979 | 0.979 | |
-| `trivial_kstar_err` | 1.000 | 1.000 | not leaked |
+| `trivial_kstar_err` (vs the linear `kstar` — wrong reference for the row above, D-EVID-7) | 1.000 | 1.000 | retained per `PREREGISTRATION.md` §3.3 |
+| **`trivial_kstar_fft_err`** (honest control vs `kstar_fft`; derived in §3.1, not stored on these rows) | **0.7136** | **0.7136** | not leaked; **both arms are 1.37× WORSE than image-blind** |
 | `plausibility_score` mean | 0.458 | 0.500 | |
 | `turing_volume_10pct` / `4p8pct` median | 1.000 / 1.000 (**n = 1**) | 1.000 / 1.000 (**n = 1**) | |
 
@@ -299,7 +349,9 @@ Per `PREREGISTRATION.md` §1 this supports **no claim**; it is read only against
 | `robustness_n_used` | 1 | **8** |
 | `turing_volume_10pct` / `4p8pct` median | 1.000 / 1.000 (n=1) | 0.992 / 1.000 (n=8) |
 | `kstar_fft_rel_err` median | 0.979 | 0.068 |
-| **`trivial_kstar_err`** | **1.000** | **1.3e-16 — LEAKED** |
+| `trivial_kstar_err` (vs the linear `kstar` — wrong reference for the row above, D-EVID-7) | 1.000 | 1.3e-16 — **LEAKED against `kstar`** |
+| **`trivial_kstar_fft_err`** (honest control vs `kstar_fft`; derived from each row's stored values) | **0.7136 — model 1.37× WORSE** | **0.0761 — model marginally better, but see §7.1** |
+| half-bin resolution floor, `kstar_fft_bin_width_rel_fft`/2 (D-EVID-8) | 0.1428 | **0.0770** |
 | `kstar_spread` | 2.170 | **0.0147** |
 | **`topology_consistency`** | **0.125** | **0.125** |
 | `mean_agreement` | 0.579 | 0.397 |
@@ -314,11 +366,30 @@ level **174/512 against 2/512**. That is the answer the control was run for. The
 not a regression against the 0.3684 library benchmark — on legacy data this configuration
 now *exceeds* that benchmark — it is a property of `three_gene_qvar`.
 
-And `trivial_kstar_err = 1.3e-16` on the legacy sample is the documented leak, measured
-here rather than assumed: an image-blind predictor using `L` alone is **exact** on this
-target, so the legacy `kstar_fft_rel_err` of 0.068 carries no information about the model
-and is not comparable to the qvar number beside it. This is exactly why §1 forbids legacy
-k\* claims, and it is why the 0.3684 benchmark could never have been a fair target.
+And the legacy leak is real but **not exact against the reference that gates the claim** —
+measured here rather than assumed. `trivial_kstar_err = 1.3e-16` is the image-blind
+predictor's error against the LINEAR reference `kstar`, which is *not* the reference
+`kstar_fft_rel_err` is measured against (D-EVID-7). Against `kstar_fft` the honest control is
+**`trivial_kstar_fft_err` = 0.0761**, so an image-blind predictor using `L` alone is **not**
+exact on this target, and the legacy `kstar_fft_rel_err` of 0.068 in fact sits marginally
+*below* it.
+
+> **⚠ CORRECTED 2026-08-04 — the reasoning is withdrawn; the conclusion survives on other
+> grounds.** The old text argued "the trivial predictor is exact, therefore this number is
+> meaningless". The premise is false (0.0761, not 1.3e-16) and the direction it implied is
+> backwards — the model nominally *beats* its honest control here, 0.0681 against 0.0761.
+> **But the 0.068 still carries no usable information**, for a different reason: the half-bin
+> floor *paired with this column* is `kstar_fft_bin_width_rel_fft`/2 = **7.70 %** (D-EVID-8 —
+> note this is **not** `kstar_fft_bin_width`/2 = 8.33 %, which is the floor for the linear
+> column). Model and control both sit under that floor, and are separated by **0.0080 —
+> about a tenth of a half bin**. The difference is below the FFT estimator's own resolution
+> and must not be reported as a win in either direction.
+
+It likewise remains **not comparable to the qvar number beside it**, whose honest control
+(0.7136) and resolution floor (14.3 %) are entirely different quantities. This is exactly
+why §1 forbids legacy k\* claims. The 0.3684 benchmark was never a fair target either — but
+that now rests on the reachability gap measured directly above (174/512 against 2/512), not
+on the k\* leak.
 
 ### 7.2 THE FINDING: criterion 3.1 is NOT downstream of the Turing rate
 
@@ -621,8 +692,9 @@ it.** The underlying regime is still reached by only 1 restart in 28.
 | 3.1 | within − cross-target gap | ≥ 0.25 | – | *(needs a 2nd qvar target — §10)* | not yet computable |
 | 3.2 | median `turing_volume_10pct` | ≥ 0.90 | 1.000 (n=1) | **1.000 (n=8)** | **meets bar, now on a real n** |
 | 3.2 | median `turing_volume_4p8pct` | ≥ 0.95 | 1.000 (n=1) | **1.000 (n=8)** | **meets bar, now on a real n** |
-| 3.3 | `kstar_fft_rel_err` median | ≤ 0.083 | 0.979 | **0.245** | **FAILS** (4.0× better, still 3× the bar) |
-| 3.3 | `trivial_kstar_err` | reported | 1.000 | **1.000** | not leaked — the k\* number is real |
+| 3.3 | `kstar_fft_rel_err` median | ≤ 0.083 | 0.979 | **0.245** | **FAILS** (4.0× better than `baseline`; 3.0× the pre-registered bar — but this target's half-bin floor on this column's own reference is **0.143**, so the bar is itself sub-resolution here and the honest overshoot is **1.7× the floor**, D-EVID-8) |
+| 3.3 | `trivial_kstar_err` | reported | 1.000 | 1.000 | LINEAR reference — retained per `PREREGISTRATION.md` §3.3, but **not** the control for the row above (D-EVID-7) |
+| 3.3 | **`trivial_kstar_fft_err`** — the control on the headline's own reference, recomputed | reported | **0.7136** | **0.7136** | not leaked; `turing8` beats it by **2.9×**, not the 4.1× the old control implied |
 | 3.3 | `morphology_match_frac` | – | 0.000 | 0.714 | |
 | 3.4 | `plausibility_score` mean | = 1.0 | 0.458 | **0.375** | **FAILS**, and moves the wrong way |
 
@@ -647,7 +719,11 @@ rate, and it is the strongest of the three because it is the only one on the PRI
 with the rate problem actually solved rather than absent:
 
 1. `legacy_control` (§7.2): 8/8 pattern, k\* agreeing to 1.5 %, `topology_consistency` 0.125.
-2. C2's `nc1` `turing=8.0` cell: rate ×12, `topology_consistency` unchanged at 0.250.
+2. C2's `nc1` turing-weight arm (`c2_D_turing8`, `sample_0000`): rate 0/8 → 6/8 while
+   `topology_consistency` moved 0.250 → **0.125** — i.e. it got *worse*, to the K=8 absolute
+   floor. *(Corrected 2026-08-04: the "×12" and the "unchanged 0.250" usually quoted together
+   are `c2_L_t8k8`'s — the `turing=8`+`kstar=8` arm — and the ×12 mixes a two-target pooled
+   baseline with a single-target rate. See `C2_NC1_TUNING.md` §2.)*
 3. **this cell**: rate ×8 on qvar `sample_0000`, `topology_consistency` unchanged at 0.125.
 
 Eight seeds that now *all* reach the Turing regime, all with a self-activating node, and no
@@ -680,11 +756,25 @@ is now positive for all eight (+0.043 … +0.370) against baseline's 1 of 8, whi
 
 ### 9.5 Status
 
-`turing8` is the best configuration C1 has measured and it is adopted as the base for the
-remaining cells. It does not make the target pass: **3.1 and 3.3 and 3.4 all fail**, and
-under `PREREGISTRATION.md` §3 a target passes only if all five criteria hold. What it does
-is convert 3.2 from uncomputable to met, cut the k\* error 4-fold, and — most usefully —
-remove the Turing rate as a confound so that the remaining failures can be attributed.
+`turing8` is the best configuration C1 has measured **on `sample_0000`** and it is adopted
+as the base for the remaining cells. It does not make the target pass: **3.1 and 3.3 and
+3.4 all fail**, and under `PREREGISTRATION.md` §3 a target passes only if all five criteria
+hold. What it does is convert 3.2 from uncomputable to met, cut the k\* error 4-fold, and —
+most usefully — remove the Turing rate as a confound so that the remaining failures can be
+attributed.
+
+**But it does NOT carry to `sample_0003`, the target that already patterns.**
+`turing8/sample_0003` (K = 8, `git_sha 64ec905`, `config_id 6e0dab499bcb`, complete,
+`seed_errors {}`) takes `turing_frac` 0.875 → **1.000** and `robustness_n_used` 7 → **8**,
+but `topology_consistency` falls 0.250 → **0.125** (8 distinct structures) and
+`kstar_fft_rel_err` median goes 0.0169 → **0.277** — from *meeting* §3.3's bar to failing it
+by 3.3×, and from beating the honest image-blind control (`trivial_kstar_fft_err` = 0.1997
+on this target) by 11.8× to **losing to it**. That is the same wavelength-for-rate trade C2
+measured independently on `nc1`.
+
+So `turing8` is the best configuration on the target that does **not** pattern and a
+**regression** on the one that does, and it is a fourth independent case of the rate rising
+while 3.1 stays flat or falls.
 
 ---
 
@@ -748,15 +838,36 @@ topology carrying more information about *this* target than about a different on
 | 3.2 | median `turing_volume_10pct` | ≥ 0.90 | **0.990** (n = 7) | **MEETS** |
 | 3.2 | median `turing_volume_4p8pct` | ≥ 0.95 | **1.000** (n = 7) | **MEETS** |
 | 3.3 | `kstar_fft_rel_err` median | ≤ 0.083 | **0.0169** | **MEETS** |
-| 3.3 | `trivial_kstar_err` (reported beside it) | — | **0.143** | **not leaked** |
+| 3.3 | `trivial_kstar_err` (reported beside it, per `PREREGISTRATION.md` §3.3) | — | 0.143 | LINEAR reference — **not** the control for the row above (D-EVID-7) |
+| 3.3 | **`trivial_kstar_fft_err`** — the control matching the headline column, recomputed | — | **0.1997** | **not leaked — the model beats it 11.8×** |
+| 3.3 | half-bin resolution floor, `kstar_fft_bin_width_rel_fft`/2 (D-EVID-8) | — | **0.0667** | the 0.083 bar sits *above* the floor here, so the MEETS verdict is real |
 | 3.3 | `morphology_match_frac` | true | 0.143 (1 of 7 compared) | **FAILS** |
 | 3.4 | `plausibility_score` mean | = 1.0 | 0.417 | **FAILS** |
 
-**`kstar_fft_rel_err` = 0.0169 against a bar of 0.083, with `trivial_kstar_err` = 0.143
-beside it, is the first genuine k\* result in this project.** The model is 8.5× better than
-the image-blind `L`-only predictor on this target, so — unlike every legacy number, where
-the trivial predictor is exact to 1.3e−16 — this one carries real information about the
-image. `kstar_spread` across the 8 seeds is 0.079.
+**`kstar_fft_rel_err` = 0.0169 against a bar of 0.083, with the correctly-referenced control
+`trivial_kstar_fft_err` = 0.1997 beside it, is the first genuine k\* result in this
+project.** The model is **11.8× better** than the image-blind `L`-only predictor on this
+target, so — unlike every legacy number, where the trivial predictor is exact against the
+*linear* k\* — this one carries real information about the image. `kstar_spread` across the
+8 seeds is 0.079.
+
+> **⚠ CORRECTED 2026-08-04 — the ratio was computed against the WRONG control, and it was
+> UNDERSTATED.** See `docs/DECISIONS.md` D-EVID-7. The published "8.5×" divided
+> `trivial_kstar_err` = 0.143, normalised by `answer_key.kstar` (the LINEAR reference), by
+> `kstar_fft_rel_err` = 0.0169, measured against `answer_key.kstar_fft` — two different
+> denominators. Recomputed from this row's own stored values (`kstar_true` = 0.27170,
+> `kstar_fft_true` = 0.291, `kstar_fft_bin_width` = 0.1429): `k_trivial` = 6·2π/L = 0.23288,
+> so `trivial_kstar_fft_err` = |0.23288 − 0.291| / 0.291 = **0.1997**, and
+> 0.1997 / 0.0169 = **11.8×**, not 8.5×. **The conclusion survives and gets stronger** —
+> which is exactly why it is corrected rather than left alone.
+>
+> **Resolution floor (D-EVID-8).** On this column's own reference the half-bin floor is
+> `kstar_fft_bin_width_rel_fft`/2 = **6.7 %** (`kstar_fft_bin_width`/2 = 7.1 % is the floor
+> for the *linear* column), so the pre-registered 8.3 % bar sits *above* the estimator's
+> resolution on this target under either convention and the MEETS verdict is a real one. But
+> 0.0169 is about a quarter of that floor: the recovered k\* is inside half an FFT bin of the
+> answer key — as close as this estimator can resolve — and must not be over-read as
+> four-digit precision.
 
 So on `sample_0003` the pipeline meets **3.2 (both bars) and 3.3's k\* bar on non-leaked
 data**, and fails **3.1 (both halves), 3.3's morphology requirement, and 3.4**. Under

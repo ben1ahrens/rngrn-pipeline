@@ -64,7 +64,13 @@ job legacy_control $RL three_gene_val sample_0000 "0 1 2 3 4 5 6 7"
 
 # ---- 3. finish the baseline / detach pair on the patterning target ----
 job baseline $R  three_gene_qvar sample_0003 "0 1 2 3 4 5 6 7"
-job detach   $R  three_gene_qvar sample_0003 "0 1 2 3 4 5 6 7"
+# NOTE the override. Without it this line runs a BASELINE and writes the result into the
+# detach cell's report, and the skip-if-non-empty guard makes that permanent. It was the only
+# `job detach` line in any queue script missing it (:60 above, and c1_queue2.sh:67/:75 and
+# c1_queue3.sh:103, all carry it). Nothing in the record is wrong -- detach/ holds only
+# sample_0000.json -- but baseline/sample_0003.json now exists, so on relaunch line 66 SKIPs
+# and this one fires immediately.
+job detach   $R  three_gene_qvar sample_0003 "0 1 2 3 4 5 6 7" -o loss.detach_xstar=true
 
 # ---- 4. the adam_steps curve: 2 seeds x 2 targets only, per the unit spec ----
 job steps2000 $R three_gene_qvar sample_0000 "0 1" -o train.adam_steps=2000

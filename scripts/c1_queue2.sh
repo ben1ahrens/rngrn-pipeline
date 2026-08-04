@@ -14,6 +14,14 @@
 # taking Turing-unstable inits from 0 % to 82 %. `model.init=low_basal` is therefore the
 # axis aimed straight at the statistic that is failing, and it is promoted to run second.
 #
+# CORRECTED 2026-08-04 (docs/DECISIONS.md D-EVID-11) -- the reordering above is LEFT AS THE
+# RECORD of why this queue ran in this order, but the 0 %->82 % premise is WITHDRAWN. It was
+# turing_ok's old tr(J) < 0 verdict, which a uniformly UNSTABLE system satisfies, with k*
+# pinned to the scan floor. Strict: 0/398 = 0.0 %, the same as default (0/400); loose:
+# 206/398 = 51.8 %. low_basal buys the POSITIVE JACOBIAN DIAGONAL (114/398 = 28.6 % vs
+# 0/400), necessary for Turing but not sufficient -- so it is NOT aimed at the
+# sig_max_pos > 0 statistic that is failing. Superseded by c1_queue5.sh; kept for provenance.
+#
 #   setsid nohup bash scripts/c1_queue2.sh > experiments/tune_comp_reports/queue2.log 2>&1 </dev/null &
 set -uo pipefail
 WT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # THIS worktree, never a hardcoded one (D-EVID-16)

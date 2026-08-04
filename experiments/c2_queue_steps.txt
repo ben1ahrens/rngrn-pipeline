@@ -1,0 +1,5 @@
+# C2 step curve, reference arm (= the c2_A_base400 config, only adam_steps moved).
+# At 400 steps topology_consistency is 0.25 with a ZERO gap against the cross-target
+# control, i.e. criterion 3.1's designed-for failure mode. The first question is whether
+# that is non-convergence or the objective itself, and only the step axis answers it.
+c2_G_steps2000|0,1,2,3,4,5,6,7|sample_0000,sample_0001,sample_0002,sample_0003,sample_0004|4|-o train.adam_steps=2000 -o loss.weights.param_prior=1.0

@@ -158,7 +158,7 @@ def _collapsed(amps, sig_max, level, window):
 def simulate(model, L, n=128, T=None, dt=None, seed=0, noise=1e-2, xstar=None,
              integrator="etdrk4", horizon_growth_times=40.0, record_kstar=True,
              max_steps=200000, early_stop=False, check_every=200,
-             saturation_tol=0.01, saturation_window=5, collapse_margin=0.1):
+             saturation_tol=0.01, saturation_window=5, collapse_margin=0.1, D=None):
     """Integrate d x/dt = D lap(x) + f(x) from x* + noise. Returns a result dict.
 
     max_steps : hard bound on the number of steps taken, whatever the horizon implies.
@@ -172,6 +172,11 @@ def simulate(model, L, n=128, T=None, dt=None, seed=0, noise=1e-2, xstar=None,
         `_saturated` for what they mean and why they are not calibrated.
     collapse_margin : the collapse rule fires below this fraction of the amplitude
         threshold `patterned` itself is decided by. See `_collapsed`.
+    D : PHYSICAL diffusivities, overriding `model.D`. Pass `result.D_phys` for anything
+        that came out of `recover()`: on the non-dimensional path `model.D` holds D/L**2
+        and applying it at the physical `L` starves diffusion by L**2 (3600x at L=60), so
+        the model silently fails to pattern and `rollout_status` reads 'unpatterned'
+        (D-EVID-14). None keeps `model.D`, which is correct on the dimensional path.
 
     Result keys added by unit 7: `nsteps_run` (steps actually taken; `nsteps` remains the
     PLANNED count), `stopped_reason` in {'horizon', 'saturated', 'collapsed',
@@ -192,7 +197,12 @@ def simulate(model, L, n=128, T=None, dt=None, seed=0, noise=1e-2, xstar=None,
 
     rng = np.random.default_rng(seed)
     N = model.N
-    D = model.D.detach().cpu().numpy()
+    # D-EVID-14: `D` must be the PHYSICAL diffusivity, because this rollout integrates on a
+    # box of physical size `L`. `recover(nondim=True)` leaves `model.D` holding D/L**2, so a
+    # caller with a RecoveryResult passes `D=result.D_phys`. Falling back to `model.D` is
+    # correct only on the dimensional path, where the two are identical.
+    D = (model.D.detach().cpu().numpy() if D is None
+         else np.asarray(D, dtype=float).reshape(-1))
     if xstar is None:
         from ..losses.terms import steady_state
         xs, _ = steady_state(model); xstar = xs.detach().cpu().numpy()

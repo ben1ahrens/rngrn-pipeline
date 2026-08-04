@@ -96,6 +96,13 @@ def linear_stability(model, xstar):
 # k-grid for the robustness cloud's own dispersion scan. Deliberately separate from
 # turing_ok's default kgrid (this one matches scripts/exp11_robustness_baseline.py, the
 # already-validated baseline this module is read against).
+#
+# [UNCALIBRATED] the 4.0 cap is ABSOLUTE, in rad/length — the same class of defect unit B4
+# removed from recover._kgrid_for. It is adequate for the registered L range (18..220 ->
+# k* 0.17..2.09) and is kept as-is so numbers stay comparable to the exp11 baseline, but it
+# is not scale-free and nothing tests its boundary. It is also the mechanism that made
+# D-EVID-14 so loud: a D scaled down by L**2 pushes the unstable band far outside this
+# window, so the cloud reported ~0 rather than merely a shifted k*.
 _CLOUD_KGRID = np.concatenate([[0.0], np.linspace(1e-3, 4.0, 250)])
 
 # Noise levels the run index reports at. 4.8% is Tica et al.'s measured experimental
@@ -157,21 +164,30 @@ def _perturb_cloud(J, D, sigma_log, rng, n_samples, kgrid=_CLOUD_KGRID):
     )
 
 
-def _model_JD(model, xstar=None):
+def _model_JD(model, xstar=None, D=None):
     """(J, D) at the model's own steady state, as numpy. Solves for x* once if xstar is
     not supplied (a caller that already has it, e.g. a RecoveryResult, should pass it to
-    avoid a redundant Newton solve)."""
+    avoid a redundant Newton solve).
+
+    ALWAYS PASS `D` FOR A RECOVERED MODEL (D-EVID-14). `recover(nondim=True)` optimises on
+    the unit box, where the learned parameter is D_hat = D/L**2, and it returns the model
+    UNCHANGED — so `model.D` is dimensionless there while `RecoveryResult.D_phys` holds the
+    physical value. Everything in this module works at the PHYSICAL length scale, so
+    reading `model.D` on that path is wrong by L**2 (3600x at L=60) and produces a
+    plausible wrong number rather than an error.
+    """
     if xstar is None:
         from ..losses.terms import steady_state
         xs, _ = steady_state(model)
     else:
         xs = torch.as_tensor(np.asarray(xstar, float))
     J = model.jacobian(xs, create_graph=False).detach().cpu().numpy()
-    D = model.D.detach().cpu().numpy()
-    return J, D
+    if D is None:
+        D = model.D.detach().cpu().numpy()
+    return J, np.asarray(D, dtype=float)
 
 
-def robustness_cloud(model, n_samples=200, sigma_log=0.1, seed=0, xstar=None):
+def robustness_cloud(model, n_samples=200, sigma_log=0.1, seed=0, xstar=None, D=None):
     """Log-normal multiplicative perturbation cloud around the recovered model's
     PHYSICAL (J, D); fraction still strictly Turing, and k* spread among survivors.
 
@@ -192,7 +208,7 @@ def robustness_cloud(model, n_samples=200, sigma_log=0.1, seed=0, xstar=None):
         0.5% of draws at 10% noise, 9.8% at 20%, up to ~70% for a single sample) stays
         visible instead of being silently used.
     """
-    J, D = _model_JD(model, xstar)
+    J, D = _model_JD(model, xstar, D)
     rng = np.random.default_rng(seed)
     res = _perturb_cloud(J, D, sigma_log, rng, n_samples)
     return dict(frac_turing=res["frac_strict"], n=n_samples, n_turing=res["n_strict"],
@@ -201,7 +217,7 @@ def robustness_cloud(model, n_samples=200, sigma_log=0.1, seed=0, xstar=None):
                 frac_loose_only=res["frac_loose_only"])
 
 
-def robustness_volumes(model, n_samples=200, seed=0, xstar=None):
+def robustness_volumes(model, n_samples=200, seed=0, xstar=None, D=None):
     """Strict-criterion local Turing volume at Tica et al.'s four noise levels (1%,
     4.8% — their measured experimental parameter CV, 10%, 20%), against the recovered
     model's own PHYSICAL (J, D). Read against the generator-system baseline in
@@ -215,7 +231,7 @@ def robustness_volumes(model, n_samples=200, seed=0, xstar=None):
     number here uses the same direct-(J, D) perturbation as the baseline, so the two
     are comparable to each other, not to Tica's raw percentages.
     """
-    J, D = _model_JD(model, xstar)
+    J, D = _model_JD(model, xstar, D)
     out = {}
     for label, sigma in ROBUSTNESS_SIGMA_LEVELS.items():
         rng = np.random.default_rng(seed)

@@ -587,7 +587,13 @@ def overparam_report(
     J_rec = result.model.jacobian(
         torch.as_tensor(np.asarray(result.xstar, dtype=float)),
         create_graph=False).detach().cpu().numpy()
-    D_rec = result.model.D.detach().cpu().numpy()
+    # PHYSICAL diffusivities. recover(nondim=True) returns the model unchanged, so
+    # `model.D` holds D/L**2 there while `result.D_phys` holds the physical value; the
+    # reported D_observed_max / D_extra_max would otherwise be wrong by L**2 (D-EVID-14).
+    # Identical on the dimensional path, where D_phys == model.D by construction.
+    _D_phys = getattr(result, "D_phys", None)
+    D_rec = (result.model.D.detach().cpu().numpy() if _D_phys is None
+             else np.asarray(_D_phys, dtype=float))
     n_model = int(np.asarray(J_rec).shape[0])
     n_true = int(answer_key.n_species_true)
     obs = _as_index_tuple(observed_idx, n_model)

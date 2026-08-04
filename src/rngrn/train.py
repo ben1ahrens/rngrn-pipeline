@@ -84,7 +84,12 @@ def _morphology_rollout(cfg: Config, result, ri):
             f"got shape {frame.shape}. Set solver.morphology_rollout=false for this source.")
     n_grid = int(frame.shape[1])
 
-    res = simulate(result.model, L=float(ri.L), n=n_grid, seed=cfg.train.seed,
+    # D=result.D_phys, not model.D: this rollout integrates on a box of PHYSICAL size ri.L,
+    # and recover(nondim=True) leaves model.D holding D/L**2. Applying that at physical L
+    # starves diffusion by L**2 (3600x at L=60), so the model silently fails to pattern and
+    # morphology is never scored (D-EVID-14). Identical on the dimensional path.
+    D_phys = getattr(result, "D_phys", None)
+    res = simulate(result.model, L=float(ri.L), n=n_grid, seed=cfg.train.seed, D=D_phys,
                    noise=cfg.solver.noise, xstar=result.xstar,
                    integrator=cfg.solver.morphology_integrator,
                    horizon_growth_times=cfg.solver.horizon_growth_times,

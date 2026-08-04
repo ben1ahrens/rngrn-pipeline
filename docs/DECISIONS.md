@@ -520,6 +520,70 @@ deleting it is housekeeping for the owner.
 `src/rngrn/optim/benchmark.py` (`_group_key`, `COLUMNS`, `build_table`);
 `src/rngrn/train.py`; `tests/test_benchmark_grouping.py`.
 
+### D-EVID-14 — three physics consumers read the DIMENSIONLESS `model.D` on the non-dimensional path
+
+**Date found / fixed:** 2026-08-04 (multi-agent branch review, M6). **Status:** SUPERSEDED
+(defect; now fixed). **Decided by:** the implementing agent under delegated authority (§10).
+
+`recover(nondim=True)` optimises on the unit box, where the learned parameter is
+`D_hat = D / L**2`. `recover()` returns the model **unchanged** (`recover.py`'s "back to
+physical units" block converts the *reported* values into `RecoveryResult.D_phys` and
+leaves `model.theta_D` alone — correctly, since rewriting it would corrupt the objective's
+own parameterisation). So `result.model.D` is dimensionless on that path while
+`result.D_phys` is physical.
+
+Three consumers read `result.model.D` and then applied it at the **physical** length scale:
+
+| site | consequence |
+|---|---|
+| `validate.py` → `robustness_volumes` | a **wrong number**: the unstable band moves outside `_CLOUD_KGRID`'s absolute 4.0 cap, so the cloud reports ~0 |
+| `train.py` → `_morphology_rollout` → `simulate` | diffusion starved by L\*\*2, so `patterned=False`, `rollout_status='unpatterned'`, morphology never scored |
+| `scoring/overparam.py` | `D_observed_max` / `D_extra_max` reported 1/L\*\*2 off |
+
+`validate.py` already did this correctly for `turing_ok` (it reads `result.D_phys` with a
+`model.D` fallback), two lines above the `robustness_volumes` call that did not — so the
+correct pattern was present and simply not applied.
+
+**Reproduced** on the branch's own Turing fixture (`tests/test_rollout.py::turing_model`,
+L = 60, D = [0.467, 3.338, 0.299]):
+
+| `turing_volume_` | 1 % | 4.8 % | 10 % | 20 % |
+|---|---|---|---|---|
+| physical D | 1.000 | 0.995 | **0.835** | 0.595 |
+| dimensionless D | 0.000 | 0.005 | **0.010** | 0.015 |
+
+A maximally robust circuit reported as maximally fragile, with no error raised.
+
+**Fix:** `analysis._model_JD`, `robustness_cloud`, `robustness_volumes` and
+`rollout.simulate` all take an explicit `D=`, defaulting to `model.D` (correct on the
+dimensional path, where `D_phys == model.D` by construction). `validate.score_recovery`
+passes the `D_rec` it already computes; `_morphology_rollout` passes `result.D_phys`;
+`overparam_report` reads `result.D_phys` with the same fallback.
+
+**Consequence for earlier results: none.** All 13 tracked run rows carry `nondim=False`
+(D-EVID-10), and no committed config or script sets `nondim: true`. Nothing recorded is
+affected — this is a latent defect fixed before it could produce a number. The natural
+trigger is `PREREGISTRATION.md` §3.5b, which is precisely the work that would have run it.
+
+**What was rejected and why:** (a) rewriting `model.theta_D` to the physical value inside
+`recover()` so `model.D` is always physical — rejected because the model *is* the object the
+non-dimensional objective was optimised in; mutating it would make the returned model
+inconsistent with the loss that produced it and silently change what a reloaded checkpoint
+means; (b) a module-level "always convert" helper that inspects `result.nondim` — rejected
+because it would still be something a caller must remember to call, i.e. the same failure
+mode one level up. An explicit `D=` parameter puts the units question in the signature,
+where a reviewer sees it.
+
+**Also marked here:** `_CLOUD_KGRID`'s absolute 4.0 cap is now flagged `[UNCALIBRATED]`.
+It is the same class of defect unit B4 removed from `recover._kgrid_for` (an absolute band
+in rad/length rather than a scale-free one), it is adequate for the registered L range, and
+it is the reason this defect showed as ~0 rather than as a merely shifted k\*.
+
+**Where it lives:** `src/rngrn/eval/analysis.py` (`_model_JD`, `robustness_cloud`,
+`robustness_volumes`, `_CLOUD_KGRID`); `src/rngrn/eval/rollout.py::simulate`;
+`src/rngrn/validate.py`; `src/rngrn/train.py`; `src/rngrn/scoring/overparam.py`;
+`tests/test_nondim_units.py`.
+
 ---
 
 ## Part 2 — Decisions

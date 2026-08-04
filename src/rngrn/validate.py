@@ -362,7 +362,12 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
     #    log-normal parameter cloud, at Tica's four noise levels. See
     #    eval.analysis.robustness_volumes and docs/ROBUSTNESS_MEASUREMENT.md section 4
     #    for the perturbation model and the baseline to read this against.
-    out.update(robustness_volumes(result.model, xstar=result.xstar))
+    #    D_rec is the PHYSICAL diffusivity (result.D_phys where available). Passing it is
+    #    load-bearing on the nondim path, where model.D holds D/L**2: measured on the
+    #    branch's Turing fixture at L=60, reading model.D turns turing_volume
+    #    1.000/0.995/0.835/0.595 into 0.000/0.005/0.010/0.015 — maximally robust reported
+    #    as maximally fragile, with no error (D-EVID-14).
+    out.update(robustness_volumes(result.model, xstar=result.xstar, D=D_rec))
 
     # unit 3 (repro-metric): per-run fields consumed by optim.benchmark's cross-seed
     # topology reproducibility aggregation (scoring/reproducibility.py). Computed

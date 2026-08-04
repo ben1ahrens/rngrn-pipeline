@@ -447,6 +447,79 @@ wired up as-is.
 `PREREGISTERED_SIGN_ZERO_RTOLS`); `tests/test_reproducibility_scoring.py`;
 `tests/test_target_report.py`.
 
+### D-EVID-13 — every cross-seed aggregation was dead: `build_table` grouped on `config_id`, which hashes the seed
+
+**Date found / fixed:** 2026-08-04 (multi-agent branch review, M4). **Status:** SUPERSEDED
+(defect; now fixed). **Decided by:** the implementing agent under delegated authority (§10).
+
+`optim/benchmark.build_table` promises "one row per (config × target), **averaged over
+seeds**". Its `_group_key` included `row["config_id"]`, and `Config.config_id()` is a SHA of
+`asdict(self)` — the **whole** config, `train.seed` included. Both `optim/sweep.py:63` and
+`optim/target_report.py:493` set `train.seed` per seed via `apply_overrides`. So every
+K-seed replicate landed in its **own group of one**.
+
+Consequences, on every row of that table:
+- `n_seeds` was always **1**;
+- `kstar_identifiability_std` — defined as the spread of recovered k\* *across* seeds, and
+  computed only `if len(kstars_ok) > 1` — was always **NaN**.
+
+`docs/HANDOFF_identifiability.md:176` and `docs/IDENTIFIABILITY_EXPERIMENTS.md:107` both
+instruct the reader to weigh that column "as seriously as the means". It could never be
+computed. `degradation_table` keys differently (`arm`, dataset, `n_true`, `n_model`) and was
+unaffected, which is why the defect was invisible in the one table anyone had run.
+
+**Reproduced:** `train.seed=0 → a36b4723c040`, `seed=1 → f94d58ade69e`, `seed=2 →
+23cad61cdcc3`.
+
+**Fix.** New `Config.arm_id()` — the same hash with the seed fields (`train.seed`,
+`model.seed`) held at a fixed sentinel. `model.seed` is included because it defaults to
+`None` meaning "derive from `train.seed`", so leaving it in would reintroduce the seed
+dependence whenever it is set explicitly. Verified on the real code path: three configs
+built exactly as `sweep.py`/`target_report.py` build them share `arm_id = 7688d6ecb934`
+while their `config_id`s all differ, and changing `data.sample_key` still separates them.
+
+`arm_id` is now written on every run row (`train.py`, both the meta and the index row) and
+`_group_key` keys on it. The table reports `arm_id` in place of `config_id` — a row of that
+table is an *arm* aggregated over seeds, and `config_id` is per-run by construction — plus
+**`seeds`**, the sorted list actually aggregated, because `n_seeds` alone cannot be audited:
+a group of 3 built from seeds `[0,0,0]` would otherwise be indistinguishable from one built
+from `[0,1,2]`.
+
+**`sample_key` is now in the group key explicitly.** It never was — it reached the key only
+via `config_id`. Simply dropping `config_id` and keying on the coarse tuple would have
+**pooled different targets into one mean**, a worse defect than the one being fixed. It is
+also covered by `arm_id` (it is part of the config), so the two agree; both are present
+because the failure mode is severe and silent.
+
+**Legacy rows keep splitting per seed.** A row written before `arm_id` existed carries no
+seed-independent identity, so `_group_key` falls back to `config_id` and the row reports
+`arm_id = None`. Deliberate: guessing a grouping risks pooling genuinely different configs,
+and an honest ungrouped row beats a plausible wrong mean. Confirmed against the tracked
+ledger — all 10 `stage0_bioviab` rows come back as `arm_id=None, n_seeds=1`.
+
+**Consequence for earlier results:** none, and this was already measured. D-EVID-10 found
+max group size 1 on every tracked index, so **no cross-seed aggregate has ever been
+published** — there is nothing to retract. What was missing is the capability. Note the
+corollary: **`kstar_identifiability_std` and the §3.1 sweep both require targets re-run
+after today**, since existing rows carry neither `arm_id` nor `repro_J_vector` (D-EVID-12).
+
+**What was rejected and why:** (a) keying on an enumerated tuple of row fields
+(`source, dataset, sample_key, N, m, form, strategy, adam_steps, …`) — retroactively
+groupable, but two configs differing in any field not enumerated (a loss weight, a staging
+fraction) would pool silently, trading a visible defect for an invisible one; (b) reading
+each run's `config/frozen_config.yaml` at aggregation time to recompute an exact arm
+identity — retroactive and exact, but couples the aggregator to the run-directory layout and
+breaks for pruned directories; (c) dropping config identity from the key entirely — pools
+different step budgets and loss weights into one mean, breaking the function's own contract.
+
+**Still open:** `reproducibility_table` shares `_group_key` and so inherits the fix, but it
+remains uncalled repo-wide with no CLI flag (see D-EVID-12's closing note). Wiring it up or
+deleting it is housekeeping for the owner.
+
+**Where it lives:** `src/rngrn/config.py::Config.arm_id`;
+`src/rngrn/optim/benchmark.py` (`_group_key`, `COLUMNS`, `build_table`);
+`src/rngrn/train.py`; `tests/test_benchmark_grouping.py`.
+
 ---
 
 ## Part 2 — Decisions

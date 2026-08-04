@@ -28,7 +28,11 @@ from ..scoring import reproducibility as REPRO
 # `kstar_fft_rel_err_mean` pairs with `trivial_kstar_fft_err_mean`, `kstar_rel_err_mean`
 # with `trivial_kstar_err_mean`. Pairing the headline with the linear control is the
 # category error that made an unmeasured baseline read as a 14-order-of-magnitude win.
-COLUMNS = ["config_id", "source", "dataset", "N", "m", "form", "strategy", "n_seeds",
+# `arm_id` replaces `config_id` here (D-EVID-13): a row of this table is an ARM aggregated
+# over its seeds, and config_id is per-run because it hashes train.seed. `seeds` records
+# WHICH seeds went in, because `n_seeds` alone cannot be audited.
+COLUMNS = ["arm_id", "source", "dataset", "sample_key", "N", "m", "form", "strategy",
+           "n_seeds", "seeds",
            "kstar_fft_rel_err_mean", "trivial_kstar_fft_err_mean",
            "kstar_rel_err_mean", "trivial_kstar_err_mean",
            "recovered_turing_frac", "sign_match_frac_mean",
@@ -44,7 +48,29 @@ def _dataset_of(row):
 
 
 def _group_key(row):
-    return (row.get("config_id"), row.get("source"), _dataset_of(row),
+    """Identity of an experiment ARM + target, so K seed replicates land in ONE group.
+
+    THIS USED TO KEY ON `config_id` (D-EVID-13). `Config.config_id()` hashes the whole
+    config INCLUDING `train.seed`, and both `optim/sweep.py` and `optim/target_report.py`
+    set that per seed — so every K-seed replicate became K groups of one, `n_seeds` was
+    always 1, and `kstar_identifiability_std` (the spread ACROSS seeds) was always NaN. The
+    column two docs instruct the reader to weigh "as seriously as the means" could never be
+    computed. `degradation_table` was unaffected because it keys differently, which is why
+    the defect was invisible.
+
+    `arm_id` is the same hash with the seed fields neutralised, so it groups replicates
+    while still separating anything that genuinely differs — including `data.sample_key`,
+    which never appeared in this key on its own and reached it only via `config_id`. Keying
+    on the coarse tuple below WITHOUT an arm identity would pool different targets and
+    different step budgets into one mean: a worse defect than the one being fixed.
+
+    LEGACY ROWS (written before `arm_id` existed) fall back to `config_id`. They then still
+    split per seed, exactly as before. That is deliberate: such a row carries no
+    seed-independent identity, and guessing one risks pooling genuinely different configs.
+    An honest ungrouped row beats a plausible wrong mean.
+    """
+    identity = row.get("arm_id") or ("legacy_config_id", row.get("config_id"))
+    return (identity, row.get("source"), _dataset_of(row), row.get("sample_key"),
             row.get("N"), row.get("m"), row.get("form"), row.get("strategy"))
 
 
@@ -57,16 +83,21 @@ def build_table(runs_root="experiments", backend="jsonl") -> list[dict]:
 
     table = []
     for key, members in groups.items():
-        cfg_id, source, dataset, N, m, form, strategy = key
+        identity, source, dataset, sample_key, N, m, form, strategy = key
+        arm_id = identity if isinstance(identity, str) else None   # None => legacy row
         turing = [1.0 if x.get("recovered_turing") else 0.0 for x in members]
         signs = [x["sign_match_frac"] for x in members if _isnum(x.get("sign_match_frac"))]
         losses = [x["loss"] for x in members if _isnum(x.get("loss"))]
         # identifiability: spread of recovered k* across seeds that all landed in-regime
         kstars_ok = [x["kstar_model"] for x in members
                      if x.get("recovered_turing") and _isnum(x.get("kstar_model"))]
+        # WHICH seeds, not just how many — n_seeds alone cannot be audited, and a group of
+        # 3 built from seeds [0,0,0] would be indistinguishable from one built from [0,1,2].
+        seeds = sorted(x["seed"] for x in members if x.get("seed") is not None)
         table.append(dict(
-            config_id=cfg_id, source=source, dataset=dataset, N=N, m=m, form=form,
-            strategy=strategy, n_seeds=len(members),
+            arm_id=arm_id, source=source, dataset=dataset, sample_key=sample_key,
+            N=N, m=m, form=form,
+            strategy=strategy, n_seeds=len(members), seeds=json.dumps(seeds),
             kstar_fft_rel_err_mean=_col_mean(members, "kstar_fft_rel_err"),   # headline
             trivial_kstar_fft_err_mean=_col_mean(members, "trivial_kstar_fft_err"),
             kstar_rel_err_mean=_col_mean(members, "kstar_rel_err"),           # secondary

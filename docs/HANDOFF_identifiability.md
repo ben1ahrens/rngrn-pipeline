@@ -187,7 +187,11 @@ layout — no conversion.
    Experiment-B verdict depends on it.
 2. **Tune recovery on the controls first** (`expA_control_full`), where the problem is easiest.
    An experiment arm is only interpretable once its control recovers sensibly. Knobs: TUNING.md.
-3. **Then run the experiment arms** with several seeds; read `kstar_identifiability_std`
+3. **Then run the experiment arms** with several seeds. NOTE: `kstar_identifiability_std`
+   was NaN on every row until 2026-08-04 — `build_table` grouped on `config_id`, which
+   hashes `train.seed`, so seeds never aggregated (`DECISIONS.md` D-EVID-13). Fixed, but
+   runs recorded before that date cannot be regrouped and must be re-run to read it. Read
+   `kstar_identifiability_std`
    (spread across in-regime seeds) as seriously as the means — this is a degenerate inverse
    problem.
 4. **Consider ≥2 hidden species** (N=4, m=2) if you want the permutation machinery to be

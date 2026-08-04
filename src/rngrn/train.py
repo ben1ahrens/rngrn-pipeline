@@ -167,7 +167,7 @@ def _save_run_arrays(cfg: Config, rdir: str, run_id: str, ri, result, J_rec,
                  if metric.get("morphology_scored") == "compared" else None)
     best_member = _best_restart(result.restarts)
     meta = dict(run_id=run_id, git_sha=provenance()["git_revision"],
-                config_id=cfg.config_id(), source=cfg.data.source,
+                config_id=cfg.config_id(), arm_id=cfg.arm_id(), source=cfg.data.source,
                 dataset_id=cfg.data.dataset_id, sample_key=cfg.data.sample_key,
                 form=cfg.model.form, N=cfg.model.N, m=cfg.model.m,
                 seed=int(cfg.train.seed), arm=metric.get("arm"),
@@ -338,7 +338,10 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     row = {k: (v if isinstance(v, (int, float, bool, str)) or v is None else str(v))
            for k, v in metric.items()}          # flat scalars only, for sqlite/jsonl
     row.update(
-        run_id=run_id, config_id=cfg.config_id(),
+        # config_id identifies THIS RUN (it hashes train.seed); arm_id identifies the ARM
+        # this run is a seed replicate OF. optim.benchmark groups on arm_id — grouping on
+        # config_id put every replicate in its own group of one (D-EVID-13).
+        run_id=run_id, config_id=cfg.config_id(), arm_id=cfg.arm_id(),
         source=src, dataset_label=dataset_label,
         dataset_hash=(cfg.data.dataset_hash or getattr(ri, "dataset_hash", None)),
         dataset_id=cfg.data.dataset_id, sample_key=cfg.data.sample_key,

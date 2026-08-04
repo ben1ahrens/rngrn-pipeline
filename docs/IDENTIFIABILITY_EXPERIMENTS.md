@@ -132,6 +132,16 @@ Use several seeds: rank arms by a seed aggregate and read `kstar_identifiability
 spread across seeds that all landed in-regime. For a degenerate inverse problem the spread
 matters as much as the mean.
 
+> **Fixed 2026-08-04 — this column was NaN on every row until today** (`DECISIONS.md`
+> D-EVID-13). `benchmark.build_table` grouped on `config_id`, which hashes `train.seed`, so
+> every K-seed replicate became K groups of one: `n_seeds` was always 1 and the spread had
+> nothing to spread over. Grouping now keys on the seed-independent `arm_id`, and the table
+> also records `seeds` — the list actually aggregated.
+>
+> **Runs recorded before today carry no `arm_id` and cannot be regrouped**, so they still
+> report one row per seed with `arm_id = null`. Reading this column requires targets re-run
+> after 2026-08-04.
+
 ## Status
 
 Harness only — wired, dry-run on CPU, **not tuned**. The dry run uses 6 Adam steps and

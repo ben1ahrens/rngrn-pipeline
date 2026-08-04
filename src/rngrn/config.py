@@ -215,6 +215,33 @@ class Config:
     def config_id(self) -> str:
         return hashlib.sha256(self.canonical().encode()).hexdigest()[:12]
 
+    # Seed fields neutralised by `arm_id`. `model.seed` is included because it defaults to
+    # None meaning "derive from train.seed" (see ModelConfig.seed), so leaving it in would
+    # reintroduce the seed dependence through the back door whenever it is set explicitly.
+    _ARM_ID_SEED_FIELDS = (("train", "seed"), ("model", "seed"))
+
+    def arm_id(self) -> str:
+        """Identity of the EXPERIMENT ARM: this config with the seeds neutralised.
+
+        `config_id` hashes the whole config, seeds included — correct for "which exact run
+        was this", and wrong for "which runs are replicates of each other". `optim/sweep.py`
+        and `optim/target_report.py` set `train.seed` per seed, so keying a cross-seed
+        aggregation on `config_id` puts every replicate in its own group of one: `n_seeds`
+        was always 1 and `kstar_identifiability_std` — the spread ACROSS seeds — was always
+        NaN (docs/DECISIONS.md D-EVID-13).
+
+        `arm_id` is that same hash with `train.seed` and `model.seed` held at a fixed
+        sentinel, so K seed replicates of one arm share it while any other difference —
+        `data.sample_key`, `model.N`, a loss weight, a step budget — still separates them.
+        Grouping on it therefore keeps `build_table`'s stated contract, "one row per
+        (config x target), averaged over seeds", instead of silently breaking it.
+        """
+        import copy
+        stripped = copy.deepcopy(self)
+        for section, field_name in self._ARM_ID_SEED_FIELDS:
+            setattr(getattr(stripped, section), field_name, "__ARM_ID_SEED_NEUTRALISED__")
+        return hashlib.sha256(stripped.canonical().encode()).hexdigest()[:12]
+
     def to_yaml(self, path: str):
         with open(path, "w") as fh:
             yaml.safe_dump(asdict(self), fh, sort_keys=False)

@@ -361,6 +361,109 @@ def test_kstar_fft_bin_width_matches_measured_one_sixth():
     assert out["kstar_fft_bin_width"] == pytest.approx(1.0 / 6.0, rel=1e-6)
 
 
+# --------------------------------------------------------------------------------------
+# THE HEADLINE COLUMN NEEDS ITS OWN CONTROL (D-EVID-7)
+#
+# `kstar_fft_rel_err` is measured against `answer_key.kstar_fft`; `trivial_kstar_err` was
+# measured against `answer_key.kstar` (the LINEAR reference) only. On every legacy sample
+# L == 6*2pi/kstar exactly, so the image-blind predictor scored ~0 against the linear
+# reference while scoring several percent against the FFT one — i.e. the headline column
+# shipped beside a control for a DIFFERENT column, reading as a 14-order-of-magnitude win
+# that was never measured. These tests pin the FFT-referenced control.
+# --------------------------------------------------------------------------------------
+def test_trivial_kstar_fft_err_is_measured_against_the_fft_reference():
+    """The control for `kstar_fft_rel_err` must use the SAME denominator it does.
+
+    Constructed so the two references genuinely differ: L is set from the linear k*, so the
+    image-blind predictor is exact against `kstar` and wrong by a known amount against
+    `kstar_fft`. The old single-control behaviour cannot distinguish these.
+    """
+    from rngrn.validate import score_recovery
+    from test_experiment_arms import _Key, _Result
+
+    L = 60.0
+    kstar_true = 6.0 * TWO_PI / L          # leak relation exact -> trivial err 0 vs linear
+    kstar_fft = kstar_true * 1.09          # FFT reference sits 9% away, as measured
+    key = _Key(np.ones((3, 3)), n_true=3, kstar=kstar_true)
+    key.kstar_fft = kstar_fft
+
+    out = score_recovery(_Result(N=3), key, observed_idx=[0, 1], L=L)
+
+    # the legacy column keeps its meaning exactly — comparability with recorded rows
+    assert out["trivial_kstar_err"] == pytest.approx(0.0, abs=1e-9)
+    # the new column tells the truth about the headline reference
+    assert out["trivial_kstar_fft_err"] == pytest.approx(0.09 / 1.09, rel=1e-6)
+    # and it is emphatically NOT the same number
+    assert out["trivial_kstar_fft_err"] > 0.05
+
+
+def test_fft_referenced_control_uses_L_only_not_the_recovered_model():
+    """Image-blind means image-blind: the recovered k* must not move the control."""
+    from rngrn.validate import score_recovery
+    from test_experiment_arms import _Key, _Result
+
+    L = 72.0
+    key = _Key(np.ones((3, 3)), n_true=3, kstar=6.0 * TWO_PI / L)
+    key.kstar_fft = 6.0 * TWO_PI / L * 1.04
+
+    out = score_recovery(_Result(N=3), key, observed_idx=[0, 1], L=L)
+    res2 = _Result(N=3)
+    res2.kstar_model = 999.0
+    out2 = score_recovery(res2, key, observed_idx=[0, 1], L=L)
+
+    assert out2["trivial_kstar_fft_err"] == pytest.approx(out["trivial_kstar_fft_err"])
+    assert out2["kstar_fft_bin_width_rel_fft"] == pytest.approx(out["kstar_fft_bin_width_rel_fft"])
+
+
+def test_fft_bin_width_is_normalised_by_the_fft_reference():
+    """The resolution floor of the headline column is one bin over kstar_fft, not kstar.
+
+    This matters beyond bookkeeping: the pre-registered 8.3% bar is half a bin at
+    periods-per-box 6. `scripts/gen_tg3.py` draws periods-per-box from 3..14, so the floor
+    is dataset-dependent and can exceed the bar.
+    """
+    from rngrn.validate import score_recovery
+    from test_experiment_arms import _Key, _Result
+
+    L = 60.0
+    kstar_fft = 3.0 * TWO_PI / L           # periods-per-box 3 -> one bin is 1/3 of k*
+    key = _Key(np.ones((3, 3)), n_true=3, kstar=6.0 * TWO_PI / L)
+    key.kstar_fft = kstar_fft
+
+    out = score_recovery(_Result(N=3), key, observed_idx=[0, 1], L=L)
+    assert out["kstar_fft_bin_width_rel_fft"] == pytest.approx(1.0 / 3.0, rel=1e-6)
+    # half a bin here is 16.7%, TWICE the pre-registered 8.3% bar
+    assert out["kstar_fft_bin_width_rel_fft"] / 2.0 > 0.083
+
+
+def test_fft_referenced_control_is_nan_when_the_fft_reference_is_absent():
+    """No FFT reference -> NaN, never a silent fallback to the linear one.
+
+    Falling back would resurrect exactly the defect this column exists to fix.
+    """
+    from rngrn.validate import score_recovery
+    from test_experiment_arms import _Key, _Result
+
+    L = 60.0
+    key = _Key(np.ones((3, 3)), n_true=3, kstar=6.0 * TWO_PI / L)   # no kstar_fft attribute
+    out = score_recovery(_Result(N=3), key, observed_idx=[0, 1], L=L)
+
+    assert np.isnan(out["trivial_kstar_fft_err"])
+    assert np.isnan(out["kstar_fft_bin_width_rel_fft"])
+    assert np.isfinite(out["trivial_kstar_err"])        # the linear control still works
+
+
+def test_fft_referenced_control_is_nan_without_L():
+    from rngrn.validate import score_recovery
+    from test_experiment_arms import _Key, _Result
+
+    key = _Key(np.ones((3, 3)), n_true=3, kstar=0.5)
+    key.kstar_fft = 0.55
+    out = score_recovery(_Result(N=3), key, observed_idx=[0, 1])
+    assert np.isnan(out["trivial_kstar_fft_err"])
+    assert np.isnan(out["kstar_fft_bin_width_rel_fft"])
+
+
 def test_trivial_kstar_err_reaches_run_index_on_real_dataset(tmp_path):
     """End-to-end on a REAL registered sample: the leak control reaches runs.jsonl.
 

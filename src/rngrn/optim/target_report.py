@@ -13,8 +13,10 @@ K seeds, it runs recovery K times and emits ONE report combining
     seeds that reached the Turing regime. Read against the generator-system baseline in
     docs/ROBUSTNESS_MEASUREMENT.md section 4.2 (median 0.935 at 10% noise, 1.000 at 4.8%)
     -- never against zero.
-  PATTERN  -- morphology_match/morphology_distance and k*, ALWAYS next to its leak
-    controls (trivial_kstar_err, kstar_fft_bin_width) -- see validate.py's leak note.
+  PATTERN  -- morphology_match/morphology_distance and k*, ALWAYS next to the leak control
+    computed against the SAME reference: kstar_fft_rel_err with trivial_kstar_fft_err and
+    kstar_fft_bin_width_rel_fft; kstar_rel_err with trivial_kstar_err and
+    kstar_fft_bin_width -- see validate.py's leak note (D-EVID-7).
   VIABILITY  -- plausibility_score and the per-parameter in-box flags
     (scoring/plausibility.py).
   the success/convergence RATE itself -- how many of K seeds produced a scored recovery,
@@ -293,16 +295,27 @@ def _robustness_block(turing_rows) -> dict:
 
 
 def _pattern_block(succeeded) -> dict:
-    """PATTERN -- morphology_match / morphology_distance, and k* NEVER without its leak
-    controls (trivial_kstar_err, kstar_fft_bin_width) in the same record. Aggregated over
-    every seed that produced a scored recovery (not gated on Turing -- morphology and k*
-    are meaningful whether or not the recovered model itself patterns)."""
+    """PATTERN -- morphology_match / morphology_distance, and k* NEVER without the leak
+    control computed against ITS OWN reference, in the same record (D-EVID-7). Aggregated
+    over every seed that produced a scored recovery (not gated on Turing -- morphology and
+    k* are meaningful whether or not the recovered model itself patterns).
+
+    The headline `kstar_fft_rel_err_*` pairs with `trivial_kstar_fft_err_mean` and the
+    resolution floor `kstar_fft_bin_width_rel_fft_mean`; the secondary `kstar_rel_err_*`
+    pairs with `trivial_kstar_err_mean` and `kstar_fft_bin_width_mean`. Pairing the headline
+    with the linear control is the defect this split fixes: on legacy samples the L-only
+    predictor is exact against the linear reference and several percent against the FFT one.
+    """
     kstar_fft_mean, kstar_fft_med = _mean_median(
         [r["metric"].get("kstar_fft_rel_err") for r in succeeded])
     kstar_lin_mean, kstar_lin_med = _mean_median(
         [r["metric"].get("kstar_rel_err") for r in succeeded])
     trivial_mean, _ = _mean_median([r["metric"].get("trivial_kstar_err") for r in succeeded])
     binw_mean, _ = _mean_median([r["metric"].get("kstar_fft_bin_width") for r in succeeded])
+    trivial_fft_mean, _ = _mean_median(
+        [r["metric"].get("trivial_kstar_fft_err") for r in succeeded])
+    binw_fft_mean, _ = _mean_median(
+        [r["metric"].get("kstar_fft_bin_width_rel_fft") for r in succeeded])
 
     compared = [r for r in succeeded if r["metric"].get("morphology_scored") == "compared"]
     match_frac = (float(np.mean([bool(r["metric"].get("morphology_match")) for r in compared]))
@@ -314,10 +327,12 @@ def _pattern_block(succeeded) -> dict:
         "kstar_fft_rel_err_median": kstar_fft_med,
         "kstar_rel_err_mean": kstar_lin_mean,
         "kstar_rel_err_median": kstar_lin_med,
-        # LEAK CONTROLS -- always alongside the two headline columns above. See
+        # LEAK CONTROLS -- one per reference, always alongside the column it controls. See
         # validate.score_recovery's leak-instrumentation note: neither k* column above is
-        # evidence of recovery without these read next to it.
-        "trivial_kstar_err_mean": trivial_mean,
+        # evidence of recovery without ITS OWN control read next to it.
+        "trivial_kstar_fft_err_mean": trivial_fft_mean,        # controls kstar_fft_rel_err
+        "kstar_fft_bin_width_rel_fft_mean": binw_fft_mean,     # its resolution floor
+        "trivial_kstar_err_mean": trivial_mean,                # controls kstar_rel_err
         "kstar_fft_bin_width_mean": binw_mean,
         "morphology_n_compared": len(compared),
         "morphology_match_frac": match_frac,
@@ -354,6 +369,8 @@ def _per_seed_audit(seeds, results) -> list:
             "kstar_model": m.get("kstar_model"),
             "kstar_fft_rel_err": m.get("kstar_fft_rel_err"),
             "kstar_rel_err": m.get("kstar_rel_err"),
+            "trivial_kstar_fft_err": m.get("trivial_kstar_fft_err"),
+            "kstar_fft_bin_width_rel_fft": m.get("kstar_fft_bin_width_rel_fft"),
             "trivial_kstar_err": m.get("trivial_kstar_err"),
             "kstar_fft_bin_width": m.get("kstar_fft_bin_width"),
             "morphology_scored": m.get("morphology_scored"),

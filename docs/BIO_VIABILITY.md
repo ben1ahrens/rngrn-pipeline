@@ -446,20 +446,39 @@ is load-bearing rather than cosmetic.
 
 The prior is not free. On the two targets where a k\* comparison is meaningful:
 
-| target | `kstar_fft_rel_err` prior OFF | prior ON | `trivial_kstar_err` |
-|---|---|---|---|
-| sample_0003 | 0.017 | **0.087** | 0.143 |
-| sample_0004 | 0.046 | **0.116** | 0.000 |
+| target | `kstar_fft_rel_err` prior OFF | prior ON | ~~`trivial_kstar_err`~~ | **`trivial_kstar_fft_err`** |
+|---|---|---|---|---|
+| sample_0003 | 0.017 | **0.087** | ~~0.143~~ | **0.1997** |
+| sample_0004 | 0.046 | **0.116** | ~~0.000~~ | **0.0754** |
 
 and `sig_max` drops by an order of magnitude (+0.237 → +0.026, +0.256 → +0.020), i.e. the
 box-constrained solutions are much closer to marginal.
 
-**Read the k\* numbers with their leak control, as `PREREGISTRATION.md` §3.3 requires.**
-On `sample_0004` `trivial_kstar_err = 0.000` — the image-blind predictor is *exact* there —
-so that row's k\* carries no information about the model either way. On `sample_0003`
-(`trivial` = 0.143) the prior-ON error of 0.087 does beat the trivial predictor but sits
-just **above** §3.3's pre-registered 8.3 % bar, while the prior-OFF error of 0.017 is
-comfortably under it.
+> **⚠ CORRECTED 2026-08-04 — the control column was the WRONG ONE, and a conclusion drawn
+> from it has changed.** See `docs/DECISIONS.md` D-EVID-7. `trivial_kstar_err` is
+> normalised by the LINEAR reference `answer_key.kstar`, while `kstar_fft_rel_err` is
+> measured against `answer_key.kstar_fft` — pairing them compares errors against two
+> different denominators. The honest control is `trivial_kstar_fft_err`, recomputed above
+> from these same rows' stored `kstar_true` / `kstar_fft_true`.
+>
+> **What changes:**
+> - **`sample_0004` prior OFF (0.046) DOES beat its honest baseline (0.0754).** The old
+>   text said that row "carries no information about the model either way" because the
+>   trivial error was 0.000. That was an artefact of the wrong denominator — the image-blind
+>   predictor is exact against the *linear* k\*, not against the FFT k\* the claim is gated
+>   on. It is in fact the strongest single k\* number in this table.
+> - **`sample_0004` prior ON (0.116) LOSES to that baseline (0.0754)** — a cost the old
+>   framing hid entirely, and one that *strengthens* §4.4's thesis rather than weakening it.
+> - `sample_0003` is unchanged in direction: both arms still beat their control (now
+>   0.1997), prior-ON still sits above §3.3's 8.3 % bar, prior-OFF still comfortably under.
+>
+> **Also note the resolution floor.** These rows carry `kstar_fft_bin_width` 0.143 and
+> 0.167 — half-bin floors of 7.1 % and 8.3 % — so the pre-registered 8.3 % bar sits at or
+> below the estimator's own resolution on both (D-EVID-8). That is the owner's to settle.
+
+**Read the k\* numbers with the control computed against the SAME reference.**
+`PREREGISTRATION.md` §3.3 still names `trivial_kstar_err`; D-EVID-7 records that this is now
+the wrong column for the headline, and amending a pre-registered condition is owner-only.
 
 This is precisely the trade-off §3.4 anticipated in writing — *"If viability and recovery
 rate trade off, that trade-off is a result and gets reported as one; the centre does not

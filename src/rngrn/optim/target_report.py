@@ -269,6 +269,8 @@ def _reproducibility_block(succeeded, sign_zero_rtol) -> dict:
         "Dratio_spread": float("nan"),
         # §3.1 sensitivity cells, defaulted so every early return emits the same schema
         **{_rtol_key(r): float("nan") for r in PREREGISTERED_SIGN_ZERO_RTOLS},
+        **{_rtol_key(r) + "_status": "not_computed"
+           for r in PREREGISTERED_SIGN_ZERO_RTOLS},
     }
     if len(succeeded) < 2:
         base["reproducibility_status"] = "insufficient_seeds"
@@ -337,11 +339,17 @@ def _sensitivity_cells(succeeded, kstar_list, dratio_list) -> dict:
             J_list = [_sign_matrix_from_metric(r["metric"], rtol) for r in succeeded]
             rep = REPRO.reproducibility_report(J_list, kstar_list, dratio_list, rtol)
             out[_rtol_key(rtol)] = float(rep["topology_consistency"])
-        except Exception:
-            # not swallowed: the reason is already explicit on `reproducibility_error`
-            # for the headline threshold, and NaN here means "this threshold is not
-            # answerable from these rows", which is exactly what a reader needs.
+            out[_rtol_key(rtol) + "_status"] = "ok"
+        except ValueError as exc:
+            # ONLY the documented legacy-schema case is converted into an unavailable cell,
+            # and even then the REASON is recorded (`..._status`) rather than discarded.
+            # A bare `except Exception: nan` here would make a truncated repro_J_vector, a
+            # shape mismatch, a non-finite Jacobian and a scorer bug all render as the same
+            # NaN as "this row predates repro_J_vector" — the fail-loud violation this
+            # module exists to prevent (CLAUDE.md §4). Anything that is not a ValueError
+            # propagates.
             out[_rtol_key(rtol)] = float("nan")
+            out[_rtol_key(rtol) + "_status"] = f"{type(exc).__name__}: {exc}"[:300]
     return out
 
 

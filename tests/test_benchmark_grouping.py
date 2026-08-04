@@ -63,10 +63,34 @@ def test_arm_id_is_invariant_to_the_seed():
     assert a.arm_id() == b.arm_id(), "arm_id must not vary with train.seed"
 
 
-def test_arm_id_is_invariant_to_the_model_seed():
+def test_arm_id_separates_a_PINNED_init_arm_from_a_free_init_arm():
+    """model.seed=None ("derive from train.seed") and model.seed=7 ("hold the init FIXED
+    while train.seed varies") are DIFFERENT EXPERIMENTS, not seed replicates of one.
+
+    Pooling them would mix a degenerate zero cross-seed spread into a real one — which is
+    the shape of D-EVID-4, where a constant model.seed=0 made K "replicates" one draw.
+    """
     a = copy.deepcopy(Config()); a.model.seed = None
     b = copy.deepcopy(Config()); b.model.seed = 7
-    assert a.arm_id() == b.arm_id(), "arm_id must not vary with model.seed either"
+    assert a.arm_id() != b.arm_id(), "a pinned-init arm must not pool with a free-init arm"
+
+
+def test_arm_id_is_constant_across_seeds_within_a_PINNED_init_arm():
+    """Within the pinned arm, train.seed still varies and must still group."""
+    cfgs = []
+    for s in (0, 1, 2):
+        c = copy.deepcopy(Config()); c.model.seed = 7; c.train.seed = s
+        cfgs.append(c)
+    assert len({c.arm_id() for c in cfgs}) == 1
+    assert len({c.config_id() for c in cfgs}) == 3, "precondition: config_id still varies"
+
+
+def test_arm_id_is_constant_across_seeds_within_a_FREE_init_arm():
+    cfgs = []
+    for s in (0, 1, 2):
+        c = copy.deepcopy(Config()); c.model.seed = None; c.train.seed = s
+        cfgs.append(c)
+    assert len({c.arm_id() for c in cfgs}) == 1
 
 
 def test_arm_id_still_separates_genuinely_different_configs():
@@ -151,6 +175,34 @@ def test_legacy_rows_without_arm_id_do_not_silently_pool(tmp_path):
     assert len(table) == 2, "legacy rows must NOT be pooled on a guess"
     assert all(r["arm_id"] is None for r in table)
     assert all(r["n_seeds"] == 1 for r in table)
+
+
+def test_reproducibility_table_still_runs(tmp_path):
+    """`reproducibility_table` has NO callers — which is exactly why it needs a test.
+
+    It shares `_group_key` with `build_table`. Widening that key to an 8-tuple for
+    D-EVID-13 left this function unpacking 7, so it raised `ValueError: too many values to
+    unpack` on EVERY call — while the commit message claimed it "inherits the fix". Nothing
+    caught it: no caller, no test, suite green. Dead code must not be allowed to become
+    broken code silently; if it is deleted, delete this test with it.
+    """
+    from rngrn.optim.benchmark import (reproducibility_table, reproducibility_markdown,
+                                       REPRODUCIBILITY_COLUMNS)
+    rows = [_row(seed=s, kstar=1.0 + 0.1 * s) for s in (0, 1)]
+    for r in rows:                       # the function filters on this key
+        r["repro_sign_vector"] = json.dumps([1, -1, 0, 0, 1, -1, -1, 0, 1])
+        r["repro_N"] = 3
+        r["repro_kstar"] = r["kstar_model"]
+        r["repro_D_ratio"] = 10.0
+    (tmp_path / "runs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    table = reproducibility_table(str(tmp_path), backend="jsonl")
+    assert len(table) == 1 and table[0]["K"] == 2
+    assert table[0]["arm_id"] == "arm_a"
+    # every declared column must actually be produced
+    for col in REPRODUCIBILITY_COLUMNS:
+        assert col in table[0], f"REPRODUCIBILITY_COLUMNS declares {col}, row lacks it"
+    assert isinstance(reproducibility_markdown(table), str)
 
 
 def test_identifiability_std_is_nan_for_a_single_seed(tmp_path):

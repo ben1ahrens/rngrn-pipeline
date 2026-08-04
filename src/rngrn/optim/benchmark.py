@@ -32,7 +32,7 @@ from ..scoring import reproducibility as REPRO
 # over its seeds, and config_id is per-run because it hashes train.seed. `seeds` records
 # WHICH seeds went in, because `n_seeds` alone cannot be audited.
 COLUMNS = ["arm_id", "source", "dataset", "sample_key", "N", "m", "form", "strategy",
-           "n_seeds", "seeds",
+           "n_seeds", "n_unique_seeds", "seeds",
            "kstar_fft_rel_err_mean", "trivial_kstar_fft_err_mean",
            "kstar_rel_err_mean", "trivial_kstar_err_mean",
            "recovered_turing_frac", "sign_match_frac_mean",
@@ -93,11 +93,20 @@ def build_table(runs_root="experiments", backend="jsonl") -> list[dict]:
                      if x.get("recovered_turing") and _isnum(x.get("kstar_model"))]
         # WHICH seeds, not just how many — n_seeds alone cannot be audited, and a group of
         # 3 built from seeds [0,0,0] would be indistinguishable from one built from [0,1,2].
-        seeds = sorted(x["seed"] for x in members if x.get("seed") is not None)
+        seed_vals = [x["seed"] for x in members if x.get("seed") is not None]
+        seeds = sorted(seed_vals)
+        # DUPLICATES ARE WEIGHTED. Run records are append-only and tracked, so re-running a
+        # seed legitimately lands a second row in the same group — and every mean, fraction
+        # and standard deviation below then counts it twice. `n_unique_seeds` makes that
+        # visible rather than leaving `n_seeds=3` to read as three independent draws. Which
+        # duplicate to drop is an ops decision (latest? best? both are defensible), so this
+        # reports the discrepancy instead of silently resolving it.
+        n_unique = len(set(seed_vals))
         table.append(dict(
             arm_id=arm_id, source=source, dataset=dataset, sample_key=sample_key,
             N=N, m=m, form=form,
-            strategy=strategy, n_seeds=len(members), seeds=json.dumps(seeds),
+            strategy=strategy, n_seeds=len(members), n_unique_seeds=n_unique,
+            seeds=json.dumps(seeds),
             kstar_fft_rel_err_mean=_col_mean(members, "kstar_fft_rel_err"),   # headline
             trivial_kstar_fft_err_mean=_col_mean(members, "trivial_kstar_fft_err"),
             kstar_rel_err_mean=_col_mean(members, "kstar_rel_err"),           # secondary
@@ -204,7 +213,7 @@ def _col_mean(members, key):
 # exactly "K seeds recovered on ONE target".
 
 REPRODUCIBILITY_COLUMNS = [
-    "config_id", "source", "dataset", "N", "m", "form", "strategy", "K",
+    "arm_id", "source", "dataset", "sample_key", "N", "m", "form", "strategy", "K",
     "topology_consistency", "mean_agreement", "modal_fraction",
     "kstar_spread", "Dratio_spread",
 ]
@@ -230,6 +239,18 @@ def reproducibility_table(runs_root="experiments", backend="jsonl") -> list[dict
     scoring.reproducibility.per_run_fields) to report anything; groups with fewer are
     SKIPPED (not NaN-padded into the table) because a single seed has nothing to be
     reproducible with — see scoring.reproducibility.reproducibility_report.
+
+    STATUS: this function has NO CALLERS repo-wide and no CLI flag. It is kept working
+    rather than deleted only so that "dead" never quietly becomes "broken" — the D-EVID-13
+    commit widened `_group_key` to an 8-tuple, this unpack still expected 7, and the
+    function raised `ValueError` on every call while that commit's message claimed it
+    "inherits the fix". It did not; it was broken by it, and nothing caught that because
+    there is no caller and no test. Wiring it up or deleting it is still an open decision.
+
+    LIMITATION, unfixed on purpose: `_row_to_sign_matrix` re-thresholds an ALREADY-COLLAPSED
+    sign vector, which is the D-EVID-12 no-op. This table therefore cannot honour a
+    `sign_zero_rtol` other than the one used at score time. Do NOT wire it up without
+    porting `target_report._sign_matrix_from_metric`'s raw-Jacobian path first.
     """
     rows = IO.read_run_index(runs_root, backend=backend)
     groups = defaultdict(list)
@@ -239,7 +260,8 @@ def reproducibility_table(runs_root="experiments", backend="jsonl") -> list[dict
 
     out = []
     for key, members in groups.items():
-        cfg_id, source, dataset, N, m, form, strategy = key
+        identity, source, dataset, sample_key, N, m, form, strategy = key
+        arm_id = identity if isinstance(identity, str) else None
         if len(members) < 2:
             continue
         J_list = [_row_to_sign_matrix(r) for r in members]
@@ -247,7 +269,8 @@ def reproducibility_table(runs_root="experiments", backend="jsonl") -> list[dict
         dratio_list = [float(r["repro_D_ratio"]) for r in members]
         rep = REPRO.reproducibility_report(J_list, kstar_list, dratio_list)
         out.append(dict(
-            config_id=cfg_id, source=source, dataset=dataset, N=N, m=m, form=form,
+            arm_id=arm_id, source=source, dataset=dataset, sample_key=sample_key,
+            N=N, m=m, form=form,
             strategy=strategy, K=rep["K"],
             topology_consistency=rep["topology_consistency"],
             mean_agreement=rep["mean_agreement"],

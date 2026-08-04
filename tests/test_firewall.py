@@ -31,6 +31,14 @@ SCORING_SIDE = [
     "eval/lgen_eval.py",       # cross-L transfer scoring; imports scoring.morphology
 ]
 
+# SIDE-NEUTRAL: imported by BOTH sides, so it must satisfy the recovery-side import rules
+# even though it is not itself part of recovery. `utils.py` holds `d_ratio_of`, moved there
+# so `history.py` (recovery-side) could stop importing the scoring package — which would
+# have been pointless if utils were then free to import the answer key itself. The audit is
+# per-file and non-transitive, so a neutral module in the middle of the chain is exactly
+# where an unaudited hop would hide.
+SIDE_NEUTRAL = ["utils.py"]
+
 # answer-key-side names that must never appear in a recovery-side import.
 # `data.gate` and `data.registry` added 2026-08-04: gate.from_registry returns the full
 # (RecoveryInput, AnswerKey) pair, so a recovery-side module importing it could reach ground
@@ -51,6 +59,18 @@ def _imports(path):
             mod = node.module or ""
             names += [f"{mod}.{a.name}" for a in node.names] + [mod]
     return names
+
+
+@pytest.mark.parametrize("relpath", SIDE_NEUTRAL)
+def test_side_neutral_modules_are_import_clean(relpath):
+    """A module both sides import must be as clean as the recovery side, or it becomes an
+    unaudited hop: recovery -> utils -> anything. The per-file audit cannot see through it.
+    """
+    imports = " ".join(_imports(SRC / relpath))
+    for forbidden in FORBIDDEN + ["scoring", "plotdata", "export"]:
+        assert forbidden not in imports, (
+            f"FIREWALL: side-neutral {relpath} imports '{forbidden}'. It is imported by "
+            f"recovery-side code, so it must not reach the answer key or the scoring side.")
 
 
 @pytest.mark.parametrize("relpath", RECOVERY_SIDE)

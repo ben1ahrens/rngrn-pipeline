@@ -132,6 +132,11 @@ def test_sensitivity_cells_are_nan_when_the_raw_J_is_unavailable():
     assert rep["reproducibility_status"] == "ok"          # the headline still works
     assert math.isnan(rep["topology_consistency_rtol_0p02"])
     assert math.isnan(rep["topology_consistency_rtol_0p10"])
+    # a NaN cell must carry its REASON, so "legacy row" is distinguishable from a bug
+    for k in ("topology_consistency_rtol_0p02_status",
+              "topology_consistency_rtol_0p10_status"):
+        assert "repro_J_vector" in rep[k], rep[k]
+    assert rep["topology_consistency_rtol_0p05_status"] == "ok"
     # the cell that MATCHES the recorded rtol is computable, so it is not NaN
     assert rep["topology_consistency_rtol_0p05"] == pytest.approx(
         rep["topology_consistency"])

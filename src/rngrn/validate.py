@@ -229,11 +229,12 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
     """Grade a RecoveryResult against an AnswerKey. Returns a flat metric dict.
 
     L : the domain size (gate.RecoveryInput.L) of the sample being scored, or None.
-        Used ONLY to compute the image-blind LEAK-instrumentation columns below
-        (`trivial_kstar_err`, `kstar_fft_bin_width`) from L alone — it never reaches the
-        rel-err computation against the answer key. When None (the historical default,
-        still used by any caller not yet updated to pass it) both leak columns are NaN
-        rather than silently omitted, so their absence is visible in the row, not hidden.
+        Used ONLY to compute the image-blind LEAK-instrumentation columns below — all FOUR
+        of them (`trivial_kstar_err`, `kstar_fft_bin_width`, `trivial_kstar_fft_err`,
+        `kstar_fft_bin_width_rel_fft`) — from L alone; it never reaches the rel-err
+        computation against the answer key. When None (the historical default, still used
+        by any caller not yet updated to pass it) all four are NaN rather than silently
+        omitted, so their absence is visible in the row, not hidden.
 
     target_frame : the observed frame that was recovered from. (H, W) or (m, H, W);
         channel 0 is scored, the same channel recovery measures k* from. Given this alone,
@@ -299,20 +300,29 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
     #                                    only; do not tune on it and do not quote it as the
     #                                    headline.
     #
-    #    LEAK GATE — read before trusting either column above. Every generator sets
-    #    L = clip(6*2*pi/k*, 18, 220) (data/staging/tg3/generator.py), so k*_true is
-    #    identically 6*2*pi/L to 1e-6 for 94.8% of all 287 registered samples (and
-    #    periods-per-box is exactly 6.000 for all 127 three_gene samples). An image-blind
-    #    predictor using L ALONE — never looking at the frame — scores 1.4e-14% median
-    #    error on kstar_rel_err, beating measured recovery (3.14%). So no k* number here is
-    #    interpretable at face value: `trivial_kstar_err` (the L-only predictor's relative
-    #    error) is recorded on every row precisely so a reader of runs.jsonl can never see a
-    #    k* error without simultaneously seeing what ignoring the image entirely would have
-    #    scored. Treat any k* column as a GATE (regime / order-of-magnitude sanity), never
-    #    as evidence of recovery, until it clears its own trivial baseline by a wide margin.
-    #    Also see `kstar_fft_bin_width`: one FFT bin is 16.7% of k*, i.e. the configured
-    #    tolerance loss.tau = 0.12 (0.72 of one bin) sits BELOW the FFT estimator's own
-    #    resolution — see TUNING.md.
+    #    LEAK GATE — read before trusting either column above. CORRECTED 2026-08-04
+    #    (D-EVID-7): this note used to say `trivial_kstar_err` meant no k* error could be
+    #    read without "its own" control. It could — that column controls the SECONDARY
+    #    reference only, and pairing it with the headline is the defect D-EVID-7 records.
+    #
+    #    The LEGACY generators set L = clip(6*2*pi/k*, 18, 220), so k*_true is identically
+    #    6*2*pi/L to 1e-6 on 94.8% of the 287 legacy samples, and an image-blind predictor
+    #    using L ALONE scores 1.4e-14% median error on kstar_rel_err — beating measured
+    #    recovery (3.14%). Against the FFT reference the SAME predictor scores several
+    #    percent, because kstar_fft differs from kstar by a measured median of 8.4%.
+    #    So each column carries the control computed against ITS OWN denominator:
+    #        kstar_rel_err      <- trivial_kstar_err,     kstar_fft_bin_width
+    #        kstar_fft_rel_err  <- trivial_kstar_fft_err, kstar_fft_bin_width_rel_fft
+    #    Treat any k* column as a GATE (regime / order-of-magnitude sanity), never as
+    #    evidence of recovery, until it clears ITS OWN control by a wide margin.
+    #
+    #    RESOLUTION FLOOR, and it is NOT a constant. One FFT bin is 1/(periods per box) of
+    #    k*. The legacy generators fix that at 6 (hence the familiar 16.7%, and the
+    #    pre-registered 8.3% half-bin bar), but scripts/gen_tg3.py draws it freely from
+    #    3..14 — measured range on the tracked rows is 10.0%..33.3%, so the floor can EXCEED
+    #    the pre-registered bar. Read kstar_fft_bin_width_rel_fft before kstar_fft_rel_err.
+    #    Separately, loss.tau = 0.12 is INERT (it reaches kstar_anchor and is never read) —
+    #    see TUNING.md.
     out["kstar_model"] = float(result.kstar_model)
     out["kstar_true"] = _rel_ref(answer_key, "kstar")
     out["kstar_rel_err"] = _rel_err(result.kstar_model, out["kstar_true"])
@@ -354,6 +364,12 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
     # (low_basal: 51.8% loose vs 0.0% strict), not on recoveries.
     out["recovered_turing"] = bool(ok)
     out["recovered_turing_loose"] = bool(info["turing_loose"])
+    # SEMANTIC VERSION of the column above. `recovered_turing` changed meaning on
+    # 2026-08-04 without changing name, so a ledger spanning the change holds two
+    # definitions under one column. Rows written before carry NO `turing_criterion`, which
+    # is how a mixed ledger is detected: absent == the superseded tr(J)<0 verdict. Filter
+    # on this before pooling old and new rows into one table (index.good_runs does not).
+    out["turing_criterion"] = "strict_max_re_eig"
     out["recovered_sig_max"] = float(info["sig_max"])
     out["recovered_sig0"] = float(info["sig0"])          # max Re eig(J): the uniform mode
     out["recovered_tr0"] = float(info["tr0"])

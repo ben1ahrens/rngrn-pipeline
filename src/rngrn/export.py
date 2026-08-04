@@ -38,7 +38,11 @@ from . import plotdata as PD
 # the row becomes an observation. The hyperparameters are here deliberately — they are the x
 # axis of a tuning plot, not a measurement of the run.
 RUN_ID_COLS = (
-    "run_id", "config_id", "git_sha", "_ts",
+    # `arm_id` is an IDENTIFIER, not a measurement: it is the seed-independent config
+    # identity optim.benchmark groups on (D-EVID-13). Without it here the tidy export melts
+    # it into an observation row and you cannot group or facet by arm — the one thing it
+    # exists for.
+    "run_id", "config_id", "arm_id", "git_sha", "_ts",
     # what problem
     "source", "dataset_label", "dataset_id", "sample_key", "system", "arm",
     "N", "m", "form", "observed_idx", "hidden_idx",
@@ -52,8 +56,12 @@ RUN_ID_COLS = (
     "d_init_from_kstar", "deterministic", "n_grid", "history_every", "morphology_rollout",
 )
 
+# `n_seeds_requested` is what aggregate_target_report actually emits; this tuple named
+# `n_seeds` (which only benchmark.build_table emits, into a DIFFERENT table), so
+# target_reports_tidy.csv shipped a permanently empty identifier column while the seed count
+# was demoted to an observation row — "group by n_seeds" collapsed to one NaN bucket.
 REPORT_ID_COLS = ("report_id", "config_id", "git_sha", "_ts",
-                  "dataset_id", "sample_key", "form", "n_seeds", "seeds")
+                  "dataset_id", "sample_key", "form", "n_seeds_requested", "seeds")
 
 LGEN_ID_COLS = ("run_id", "git_sha", "_ts", "L", "L_over_L_train", "L_train",
                 "is_L_train", "n", "dx", "grid_rule", "n_grid")

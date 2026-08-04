@@ -215,10 +215,19 @@ class Config:
     def config_id(self) -> str:
         return hashlib.sha256(self.canonical().encode()).hexdigest()[:12]
 
-    # Seed fields neutralised by `arm_id`. `model.seed` is included because it defaults to
-    # None meaning "derive from train.seed" (see ModelConfig.seed), so leaving it in would
-    # reintroduce the seed dependence through the back door whenever it is set explicitly.
-    _ARM_ID_SEED_FIELDS = (("train", "seed"), ("model", "seed"))
+    # Seed fields neutralised by `arm_id`.
+    #
+    # `model.seed` is neutralised ONLY WHEN IT IS None. That is the "derive from
+    # train.seed" case (see ModelConfig.seed), where it varies per replicate and must not
+    # split the group. Set to an INT it is the opposite — ModelConfig.seed's own note says
+    # "set an int only to hold the model init FIXED while train.seed varies", which is a
+    # DIFFERENT EXPERIMENT from the free-init arm, and precisely the shape of D-EVID-4
+    # (a constant model.seed=0 made K "replicates" one draw). Neutralising it there would
+    # pool a pinned-init run with a free-init run on the same target and mix a degenerate
+    # zero spread into a real `kstar_identifiability_std`. So an explicit int is left in
+    # the hash and separates arms, while still being constant across the replicates of
+    # either arm.
+    _ARM_ID_SEED_FIELDS = (("train", "seed"),)
 
     def arm_id(self) -> str:
         """Identity of the EXPERIMENT ARM: this config with the seeds neutralised.
@@ -237,9 +246,13 @@ class Config:
         (config x target), averaged over seeds", instead of silently breaking it.
         """
         import copy
+        SENTINEL = "__ARM_ID_SEED_NEUTRALISED__"
         stripped = copy.deepcopy(self)
         for section, field_name in self._ARM_ID_SEED_FIELDS:
-            setattr(getattr(stripped, section), field_name, "__ARM_ID_SEED_NEUTRALISED__")
+            setattr(getattr(stripped, section), field_name, SENTINEL)
+        # model.seed only when it is DERIVED (None) — see _ARM_ID_SEED_FIELDS above.
+        if stripped.model.seed is None:
+            stripped.model.seed = SENTINEL
         return hashlib.sha256(stripped.canonical().encode()).hexdigest()[:12]
 
     def to_yaml(self, path: str):

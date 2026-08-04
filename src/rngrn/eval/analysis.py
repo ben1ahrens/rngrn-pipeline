@@ -82,11 +82,19 @@ def turing_ok(J, D, kgrid=None, tol=1e-9):
                     turing_loose=bool(tr0 < 0.0 and unstable_struct))
 
 
-def linear_stability(model, xstar):
-    """Full linear-stability readout at a given steady state (numpy)."""
+def linear_stability(model, xstar, D=None):
+    """Full linear-stability readout at a given steady state (numpy).
+
+    `D` : PHYSICAL diffusivities, overriding `model.D`. Pass it for anything reloaded from a
+    checkpoint written on the non-dimensional path, where `theta_D` is log(D/L**2) — see
+    `eval.lgen_eval.physical_model_from_checkpoint`, which does the conversion. None keeps
+    `model.D`, correct on the dimensional path where the two coincide (D-EVID-14).
+    """
     xs_t = torch.as_tensor(np.asarray(xstar, float))
     J = model.jacobian(xs_t, create_graph=False).detach().cpu().numpy()
-    D = model.D.detach().cpu().numpy()
+    if D is None:
+        D = model.D.detach().cpu().numpy()
+    D = np.asarray(D, dtype=float)
     ok, info = turing_ok(J, D)
     info["J"] = J.tolist(); info["D"] = D.tolist()
     info["turing"] = ok

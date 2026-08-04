@@ -489,10 +489,19 @@ def test_trivial_kstar_err_reaches_run_index_on_real_dataset(tmp_path):
 
     rows = [json.loads(l) for l in open(os.path.join(runs, "runs.jsonl"))]
     assert len(rows) == 1
-    if "trivial_kstar_err" not in metric or np.isnan(metric.get("trivial_kstar_err", float("nan"))):
-        pytest.skip("train.fit does not yet thread RecoveryInput.L into score_recovery "
-                    "(L=None default) — see validate.score_recovery's L parameter")
+    # NO SKIP HERE ANY MORE. This used to `pytest.skip("train.fit does not yet thread
+    # RecoveryInput.L into score_recovery")` — a statement that stopped being true at
+    # `train.py`'s `L=ri.L`. This is the ONLY end-to-end check that the leak controls are
+    # populated on a real run row, so a regression would have skipped with a stale
+    # misdiagnosis instead of failing. A guard that disarms itself under the condition it
+    # exists to catch is worse than no guard (CLAUDE.md §8).
+    assert np.isfinite(metric["trivial_kstar_err"]), (
+        "train.fit must thread RecoveryInput.L into score_recovery, or every leak control "
+        "on every row is NaN and no k* number is readable")
     assert np.isfinite(rows[0]["trivial_kstar_err"])
+    # the headline column's own control, added by D-EVID-7, must populate too
+    assert np.isfinite(rows[0]["trivial_kstar_fft_err"])
+    assert np.isfinite(rows[0]["kstar_fft_bin_width_rel_fft"])
 
 
 def test_kstar_fft_lands_on_the_half_bin_grid():

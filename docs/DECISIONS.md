@@ -186,11 +186,19 @@ to the linear reference.
 every tracked row, making old and new rows non-comparable without saying so — exactly the
 failure §10.4 forbids. Adding a second column keeps both readable.
 
-**Consequence for earlier results:** every k\* claim read against `trivial_kstar_err` on a
-**legacy** (L = 6λ) sample overstates the margin over the image-blind baseline. Re-read them
-against `trivial_kstar_fft_err`. Non-legacy datasets (`three_gene_qvar`,
-`three_gene_multiL`) are unaffected in kind — `scripts/gen_tg3.py` draws periods-per-box
-from 3..14, so the leak relation does not hold there.
+**Consequence for earlier results:** every k\* claim read against `trivial_kstar_err`
+overstates the margin over the image-blind baseline wherever the leak relation happens to
+hold. Re-read them against `trivial_kstar_fft_err`.
+
+**Corrected 2026-08-04 — an earlier draft of this paragraph said non-legacy datasets are
+"unaffected in kind", and that was wrong in a way that contradicted this entry's own
+evidence.** `scripts/gen_tg3.py` draws periods-per-box from 3..14 rather than fixing it at
+6, so the leak relation does not hold *by construction* there — but a free draw can still
+land on 6, and it did: the evidence row cited above, `stage0_prior_off_0004`, is
+`three_gene_qvar` and carries `trivial_kstar_err` of exactly 0.000. All 13 tracked rows are
+`three_gene_qvar` / `three_gene_multiL`, and **every one of them was mis-paired**. The
+mitigation on the new generators is statistical, not categorical, and must not be stated as
+categorical.
 
 **Where it lives:** `src/rngrn/validate.py::_leak_instrumentation`;
 `src/rngrn/optim/benchmark.py`; `src/rngrn/optim/target_report.py`.
@@ -214,9 +222,12 @@ is *why* an image-blind predictor can pass it.
 **And the floor is dataset-dependent.** One bin as a fraction of k\* is `1/(periods per
 box)`. The legacy generators fix that at 6 (hence 16.7 %). `scripts/gen_tg3.py` draws it
 freely from 3..14. Measured over the 13 tracked run rows, `kstar_fft_bin_width` ranges
-**0.100 → 0.333**, i.e. half-bin floors of **5.0 % → 16.7 %**. On **6 of 13 rows the
+**0.100 → 0.333**, i.e. half-bin floors of **5.0 % → 16.7 %**. On **7 of 13 rows the
 pre-registered 8.3 % bar is BELOW the estimator's own resolution** — it demands precision
-the measurement cannot deliver.
+the measurement cannot deliver. *(Corrected 2026-08-04: this said "6 of 13". The measured
+floors are 5.00, 5.00, 6.25, 6.25, 7.14, 7.14, 8.33, 8.33, 12.50, 12.50, 16.67, 16.67,
+16.67 %; seven exceed 8.3 %, counting the two 8.33 % rows, which sit at the bar to within
+rounding. Re-measure rather than trusting the tally.)*
 
 **What this does not do:** it does not weaken or amend §3.3. Only the owner may do that.
 
@@ -583,6 +594,85 @@ it is the reason this defect showed as ~0 rather than as a merely shifted k\*.
 `robustness_volumes`, `_CLOUD_KGRID`); `src/rngrn/eval/rollout.py::simulate`;
 `src/rngrn/validate.py`; `src/rngrn/train.py`; `src/rngrn/scoring/overparam.py`;
 `tests/test_nondim_units.py`.
+
+### D-EVID-15 — what the adversarial re-review of D-EVID-7..14 found, including a regression those fixes introduced
+
+**Date:** 2026-08-04. **Status:** DECIDED (a correction round). **Decided by:** the
+implementing agent under delegated authority, after three independent reviews — two Claude
+subagents and an independent Codex 0.144.4 pass. All three re-derived the six diagnoses;
+**all six were confirmed sound.** The objections were to *completeness*, and one was a
+regression the fixes themselves caused.
+
+**1. D-EVID-13 BROKE `reproducibility_table` — and the commit message said the opposite.**
+Widening `_group_key` to an 8-tuple updated `build_table` but left
+`reproducibility_table` unpacking seven, so it raised
+`ValueError: too many values to unpack` on **every** call. Both the commit message and this
+register claimed it "shares `_group_key` and so inherits the fix". It did not; it was broken
+by it, and nothing caught that because the function has zero callers and had zero tests.
+Fixed (unpack, `arm_id`/`sample_key` in `REPRODUCIBILITY_COLUMNS`), plus
+`test_reproducibility_table_still_runs` so **dead code cannot silently become broken code**.
+Its D-EVID-12 limitation — it re-thresholds an already-collapsed sign vector — is now stated
+in its docstring with an explicit "do not wire this up before porting the raw-J path".
+
+**2. D-EVID-14 missed a fourth consumer: `rngrn analyze`.** `cmd_analyze` loaded a raw
+checkpoint and called `linear_stability` and `robustness_cloud` without
+`physical_model_from_checkpoint`, which its sibling `cmd_evaluate` calls twelve lines above
+with a comment saying not doing so "would integrate the wrong diffusivity silently". Measured
+on the Turing fixture: at L=220 a genuinely Turing-unstable circuit prints `turing: false`
+with `sig_max = −0.033`. Fixed; `linear_stability` also gained an explicit `D=`.
+
+**3. D-EVID-7's own DECISIONS entry contradicted its own evidence.** It said the new
+generators are "unaffected in kind". The cited evidence row, `stage0_prior_off_0004`, **is**
+`three_gene_qvar` with `trivial_kstar_err = 0.000` — a free draw from 3..14 can still land
+on 6. The mitigation is statistical, not categorical. Corrected above.
+
+**4. A published conclusion built on the defect was never revisited.**
+`docs/BIO_VIABILITY.md` §4.4 concluded that `sample_0004`'s k\* "carries no information
+about the model either way" because `trivial_kstar_err = 0.000`. Recomputed against the
+honest reference: the control is **0.0754**, so prior-OFF (0.046) **does** beat it — the
+strongest k\* number in that table — while prior-ON (0.116) **loses** to it, a cost the old
+framing hid. Corrected, with both directions stated.
+
+**5. Counts.** "6 of 13 rows" where the resolution floor exceeds the 8.3 % bar is **7 of
+13** (floors: 5.00, 5.00, 6.25, 6.25, 7.14, 7.14, 8.33, 8.33, 12.50, 12.50, 16.67, 16.67,
+16.67 %). The separate claim of "12 tracked run rows that store a Jacobian" was challenged
+and is **correct** — 13 result files, 12 carrying `recovered.J`.
+
+**6. `arm_id` was neutralising `model.seed` unconditionally, pooling two different
+experiments.** `ModelConfig.seed`'s own note says an int "holds the model init FIXED while
+train.seed varies" — a *design* variable, and the shape of D-EVID-4. Now neutralised **only
+when None** (the derived case), so a pinned-init arm and a free-init arm no longer share a
+`kstar_identifiability_std`.
+
+**7. `_sensitivity_cells` violated fail-loud.** A bare `except Exception: nan` made a
+truncated `repro_J_vector`, a shape mismatch and a scorer bug render identically to "this
+row predates the column". Narrowed to `ValueError`, and every cell now carries a
+`..._status` recording the reason rather than discarding it.
+
+**8. Smaller repairs.** `arm_id` added to `export.RUN_ID_COLS` (it was melting into an
+observation row, so the tidy frame could not be grouped by arm — the one thing it exists
+for); `REPORT_ID_COLS` corrected from the never-emitted `n_seeds` to `n_seeds_requested`;
+`build_table` now emits `n_unique_seeds` because duplicate rows for one seed are weighted in
+every mean; `turing_criterion` recorded on each row so a ledger spanning 2026-08-04 can
+separate the two `recovered_turing` definitions, with `index.py` documenting it; a
+`SIDE_NEUTRAL` firewall class added so `utils.py` — imported by both sides after D-EVID-9
+moved `d_ratio_of` there — is audited rather than being an unaudited hop; and the stale
+`pytest.skip` in `test_gate_contract.py` (whose message "train.fit does not yet thread
+RecoveryInput.L" had been false for some time) replaced by hard assertions, since it was the
+only end-to-end guard that the leak controls populate at all.
+
+**What this round did NOT fix — see the review backlog.** Three reviewers surfaced further
+findings that are real but larger than a correction round, including several where a
+*pre-registered pass condition does not compute what it says*. Two are owner-only under §10:
+`PREREGISTRATION.md` §3.3 still mandates pairing the headline with `trivial_kstar_err`
+(D-EVID-7 established that is the wrong control), and §3.1's `topology_consistency`
+denominator is the surviving-seed count rather than K. Neither may be amended by an agent.
+
+**Where it lives:** `src/rngrn/optim/benchmark.py`, `src/rngrn/cli.py`,
+`src/rngrn/eval/analysis.py`, `src/rngrn/config.py`, `src/rngrn/export.py`,
+`src/rngrn/index.py`, `src/rngrn/validate.py`, `src/rngrn/optim/target_report.py`,
+`docs/BIO_VIABILITY.md`, `tests/test_firewall.py`, `tests/test_benchmark_grouping.py`,
+`tests/test_gate_contract.py`, `tests/test_target_report.py`.
 
 ---
 

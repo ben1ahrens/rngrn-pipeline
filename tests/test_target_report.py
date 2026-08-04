@@ -14,9 +14,11 @@ from __future__ import annotations
 import json
 import math
 
+import numpy as np
 import pytest
 
 from rngrn.optim.target_report import aggregate_target_report
+from rngrn.scoring.reproducibility import DEFAULT_SIGN_ZERO_RTOL as REPRO_DEFAULT_RTOL
 import rngrn.cli as cli
 
 
@@ -38,6 +40,9 @@ def _metric(*, sign=_SIGN_A, kstar=1.0, dratio=10.0, turing=True,
            tv=0.9) -> dict:
     m = {
         "repro_sign_vector": _sign_vector(sign), "repro_N": 3,
+        # per_run_fields emits this on EVERY run; the fixture omitted it, which made these
+        # synthetic rows less faithful than the real ones (D-EVID-12).
+        "repro_sign_zero_rtol": REPRO_DEFAULT_RTOL,
         "repro_kstar": kstar, "repro_D_ratio": dratio,
         "recovered_turing": turing,
         "turing_volume_1pct": tv, "turing_volume_4p8pct": tv,
@@ -56,6 +61,106 @@ def _metric(*, sign=_SIGN_A, kstar=1.0, dratio=10.0, turing=True,
 def _result(seed, run_id="r0", metric=None, error=None):
     return {"seed": seed, "run_id": run_id if error is None else None,
             "metric": metric, "error": error}
+
+
+# --------------------------------------------------------------------------------------
+# THE PRE-REGISTERED rtol SWEEP MUST ACTUALLY SWEEP (D-EVID-12)
+#
+# PREREGISTRATION §3.1: "Results will be reported at 0.02 / 0.05 / 0.10 so the
+# conclusion's sensitivity to that choice is visible rather than hidden." The report used
+# to re-threshold an ALREADY-COLLAPSED sign vector, which is a no-op for any rtol < 1 —
+# so it returned three identical numbers under three different labels.
+# --------------------------------------------------------------------------------------
+_J_WITH_WEAK_EDGE = [[1.0, -1.0, 0.07], [0.5, -1.0, 0.0], [0.0, 0.5, -1.0]]
+_J_NO_EDGE = [[1.0, -1.0, 0.00], [0.5, -1.0, 0.0], [0.0, 0.5, -1.0]]
+
+
+def _metric_with_raw_J(J, **kw):
+    """A metric carrying the RAW Jacobian, as validate.score_recovery now emits."""
+    m = _metric(**kw)
+    m["repro_J_vector"] = json.dumps([float(v) for row in J for v in row])
+    m["repro_sign_zero_rtol"] = 0.05                       # what score time used
+    return m
+
+
+def test_rtol_sweep_produces_different_numbers_through_the_report():
+    """End-to-end: the three pre-registered cells must not collapse to one number."""
+    results = [_result(0, "r0", _metric_with_raw_J(_J_WITH_WEAK_EDGE)),
+               _result(1, "r1", _metric_with_raw_J(_J_NO_EDGE))]
+    got = {}
+    for rtol in (0.02, 0.05, 0.10):
+        rep = aggregate_target_report(results, dataset_id="ds", sample_key="s0",
+                                      form="nc1", seeds=[0, 1], sign_zero_rtol=rtol)
+        assert rep["reproducibility_status"] == "ok", rep.get("reproducibility_error")
+        # the label must match what was actually computed
+        assert rep["reproducibility_sign_zero_rtol"] == pytest.approx(rtol)
+        got[rtol] = rep["topology_consistency"]
+
+    assert got[0.02] == pytest.approx(0.5)
+    assert got[0.05] == pytest.approx(0.5)
+    assert got[0.10] == pytest.approx(1.0), "the 0.10 cell must differ"
+    assert len(set(got.values())) > 1, "the sweep measured nothing"
+
+
+def test_report_emits_the_three_preregistered_sensitivity_cells():
+    """PREREGISTRATION §3.1 commits to reporting at 0.02 / 0.05 / 0.10. Emitting all
+    three from ONE report is what makes that possible without re-training three times —
+    the threshold is purely post-hoc, so re-running recovery to change it would be waste.
+    """
+    results = [_result(0, "r0", _metric_with_raw_J(_J_WITH_WEAK_EDGE)),
+               _result(1, "r1", _metric_with_raw_J(_J_NO_EDGE))]
+    rep = aggregate_target_report(results, dataset_id="ds", sample_key="s0", form="nc1",
+                                  seeds=[0, 1])
+
+    assert rep["topology_consistency_rtol_0p02"] == pytest.approx(0.5)
+    assert rep["topology_consistency_rtol_0p05"] == pytest.approx(0.5)
+    assert rep["topology_consistency_rtol_0p10"] == pytest.approx(1.0)
+    # the headline stays the default-rtol number, unchanged
+    assert rep["topology_consistency"] == pytest.approx(
+        rep["topology_consistency_rtol_0p05"])
+    # every cell is a flat scalar (run-index rows are flat scalars)
+    for k in ("topology_consistency_rtol_0p02", "topology_consistency_rtol_0p05",
+              "topology_consistency_rtol_0p10"):
+        assert isinstance(rep[k], float)
+
+
+def test_sensitivity_cells_are_nan_when_the_raw_J_is_unavailable():
+    """A legacy row cannot support the sweep. NaN says so; a repeated number would lie."""
+    results = [_result(0, "r0", _metric()), _result(1, "r1", _metric(sign=_SIGN_B))]
+    rep = aggregate_target_report(results, dataset_id="ds", sample_key="s0", form="nc1",
+                                  seeds=[0, 1])
+    assert rep["reproducibility_status"] == "ok"          # the headline still works
+    assert math.isnan(rep["topology_consistency_rtol_0p02"])
+    assert math.isnan(rep["topology_consistency_rtol_0p10"])
+    # the cell that MATCHES the recorded rtol is computable, so it is not NaN
+    assert rep["topology_consistency_rtol_0p05"] == pytest.approx(
+        rep["topology_consistency"])
+
+
+def test_legacy_row_without_raw_J_is_accepted_at_its_own_recorded_rtol():
+    """Rows recorded before repro_J_vector existed stay usable — at their own rtol."""
+    results = [_result(0, "r0", _metric()), _result(1, "r1", _metric(sign=_SIGN_B))]
+    rep = aggregate_target_report(results, dataset_id="ds", sample_key="s0", form="nc1",
+                                  seeds=[0, 1],
+                                  sign_zero_rtol=REPRO_DEFAULT_RTOL)
+    assert rep["reproducibility_status"] == "ok", rep.get("reproducibility_error")
+    assert rep["reproducibility_sign_zero_rtol"] == pytest.approx(REPRO_DEFAULT_RTOL)
+
+
+def test_legacy_row_REFUSES_a_different_rtol_rather_than_mislabelling_it():
+    """THE DEFECT, made impossible.
+
+    A row that only carries the collapsed sign vector cannot honour a different rtol. It
+    must say so, not compute at the recorded threshold and label the answer with the
+    requested one.
+    """
+    results = [_result(0, "r0", _metric()), _result(1, "r1", _metric(sign=_SIGN_B))]
+    rep = aggregate_target_report(results, dataset_id="ds", sample_key="s0", form="nc1",
+                                  seeds=[0, 1], sign_zero_rtol=0.02)
+    assert rep["reproducibility_status"] == "error"
+    err = rep["reproducibility_error"]
+    assert "repro_J_vector" in err and "0.02" in err, err
+    assert np.isnan(rep["topology_consistency"])
 
 
 # --------------------------------------------------------------------------------------

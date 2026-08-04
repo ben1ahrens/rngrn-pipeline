@@ -117,6 +117,20 @@ defined as the modal fraction rather than mean pairwise agreement. Both were fla
 UNCALIBRATED by unit 3. Results will be reported at 0.02 / 0.05 / 0.10 so the conclusion's
 sensitivity to that choice is visible rather than hidden.
 
+> **Implementation note added 2026-08-04 — the pass condition above is UNCHANGED. Only the
+> machinery that was supposed to report it was broken.** The sweep was a no-op: J was
+> collapsed to signs at score time, and the three cells re-thresholded that
+> *already-collapsed* vector, which cannot change anything. All three returned the 0.05
+> answer, and the 0.02 / 0.10 labels were wrong. See `docs/DECISIONS.md` D-EVID-12.
+>
+> **Fixed:** the raw Jacobian is now recorded per run (`repro_J_vector`) and every report
+> emits `topology_consistency_rtol_0p02` / `_0p05` / `_0p10` from a single run.
+>
+> **Consequence for this pre-registration:** nothing is retracted — no number reported so
+> far was computed at 0.02 or 0.10 (all 13 tracked rows carry rtol 0.05, D-EVID-10). But
+> runs recorded *before* this change carry no raw Jacobian and **cannot be swept
+> retroactively**, so the §3.1 sweep must be reported on targets re-run after 2026-08-04.
+
 ### 3.2 Robustness
 
 > Median `turing_volume_10pct` over Turing-reaching seeds ≥ **0.90**, and median

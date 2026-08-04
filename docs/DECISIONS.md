@@ -371,6 +371,82 @@ unit B4 removed from `recover._kgrid_for`, currently wide enough for the registe
 `src/rngrn/validate.py` (`recovered_turing`, `recovered_turing_loose`, `recovered_sig0`);
 `tests/test_science.py`.
 
+### D-EVID-12 — the pre-registered sign-threshold sweep was a no-op, and reported the wrong threshold's answer under the requested threshold's label
+
+**Date found / fixed:** 2026-08-04 (multi-agent branch review, M3). **Status:** SUPERSEDED
+(defect; now fixed). **Decided by:** the implementing agent under delegated authority (§10).
+
+**The defect, in one line:** the threshold was applied once at score time and the
+information needed to apply a different one was thrown away at that moment, so every later
+"re-threshold" silently returned the score-time answer.
+
+`validate.score_recovery` calls `REPRO.per_run_fields(...)` without a `sign_zero_rtol`, so J
+is collapsed to {-1, 0, +1} at `DEFAULT_SIGN_ZERO_RTOL = 0.05` and only the collapsed
+`repro_sign_vector` was stored. Every downstream consumer re-applied `sign_structure` to
+that already-collapsed vector — and `sign_structure` is a **no-op** on such a matrix for any
+`rtol < 1`, because the entries are 0 or ±1 and the scale is 1, so `|arr| > rtol * scale`
+never changes an outcome. The module docstring even relied on this idempotence as a feature.
+
+So `aggregate_target_report(..., sign_zero_rtol=0.02)` computed at **0.05** and wrote
+`reproducibility_sign_zero_rtol: 0.02`.
+
+**Why it matters.** `docs/PREREGISTRATION.md` §3.1 commits, in writing, to reporting
+`topology_consistency` at **0.02 / 0.05 / 0.10** "so the conclusion's sensitivity to that
+choice is visible rather than hidden". The shipped path returned **three identical numbers
+under three different labels** — the sensitivity was not merely hidden, it was affirmatively
+misreported. Both `DEFAULT_SIGN_ZERO_RTOL = 0.05` and the modal-fraction definition were
+flagged UNCALIBRATED by unit 3, which is precisely why the sweep was promised.
+
+**Reproduced.** Two seeds differing only in one edge at 7 % of max|J|:
+
+| sign_zero_rtol | from the raw Jacobians | through the shipped path |
+|---|---|---|
+| 0.02 | 0.500 | 0.500 |
+| 0.05 | 0.500 | 0.500 |
+| 0.10 | **1.000** | 0.500 ← labelled 0.10 |
+
+**Fix, three parts:**
+1. `per_run_fields` now also stores **`repro_J_vector`** — the RAW Jacobian, row-major JSON,
+   N*N floats (9 at N=3), a flat scalar for run-index purposes. This is the actual repair:
+   the collapse is no longer lossy.
+2. `_sign_matrix_from_metric(metric, sign_zero_rtol)` applies the **requested** threshold to
+   that raw J. When a row carries no `repro_J_vector` (recorded before this change) it may
+   still be used at **exactly** its recorded rtol, and otherwise **raises** with a message
+   naming both thresholds. Answering the wrong question quietly is now impossible.
+3. The report emits the three pre-registered cells from **one** run —
+   `topology_consistency_rtol_0p02` / `_0p05` / `_0p10` — because the threshold is applied
+   post hoc, so re-running `target-report` per threshold would burn K trainings to recompute
+   a number that only needs the stored Jacobians. A cell that the rows cannot answer is
+   **NaN**, never a repeated number. Defaults are seeded into the block's `base` dict so
+   every early return (`insufficient_seeds`, `error`) emits the same schema.
+
+**Consequence for earlier results:** none — no sweep was ever run. `docs/DECISIONS.md`
+D-EVID-10 measured that all 13 tracked run rows carry `repro_sign_zero_rtol = 0.05`, i.e.
+nothing was ever computed at 0.02 or 0.10, so no published number is wrong. What was missing
+is a pre-registered deliverable, not a correction. **Rows recorded before this change cannot
+be swept retroactively** — they carry no raw J — so the §3.1 sweep requires re-running the
+targets it will be reported on.
+
+**What was rejected and why:** (a) the interim guard alone (raise when
+`sign_zero_rtol != metric["repro_sign_zero_rtol"]`) — it makes the lie impossible but leaves
+the pre-registered sweep impossible too, and §3.1 is binding; (b) re-deriving J from the
+tracked checkpoints at aggregation time — the checkpoint holds parameters, not the Jacobian
+at the recovered steady state, so it would mean re-solving Newton per seed inside a
+reporting function; (c) storing the raw J only in `arrays/*.npz` — the aggregation reads the
+run index, and reaching into per-run array files from the reporting path couples them
+needlessly.
+
+**Still open, and NOT decided here:** `optim/benchmark.py::_row_to_sign_matrix` has the same
+lossy shape. It feeds `reproducibility_table`, which the same review confirmed has **zero
+callers repo-wide and no CLI flag**. Whether that table is wired up or deleted is
+housekeeping for the owner; fixing dead code was not worth the churn, but it must not be
+wired up as-is.
+
+**Where it lives:** `src/rngrn/scoring/reproducibility.py::per_run_fields`;
+`src/rngrn/optim/target_report.py` (`_sign_matrix_from_metric`, `_sensitivity_cells`,
+`PREREGISTERED_SIGN_ZERO_RTOLS`); `tests/test_reproducibility_scoring.py`;
+`tests/test_target_report.py`.
+
 ---
 
 ## Part 2 — Decisions

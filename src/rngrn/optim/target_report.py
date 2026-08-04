@@ -128,14 +128,38 @@ def _mean_median(vals) -> tuple:
     return float(np.mean(fv)), float(np.median(fv))
 
 
-def _sign_matrix_from_metric(m: dict) -> np.ndarray:
-    """Re-hydrate one run's `repro_sign_vector` (written by
-    scoring.reproducibility.per_run_fields, see validate.score_recovery) back into an
-    (N, N) array. Mirrors optim.benchmark._row_to_sign_matrix; duplicated rather than
-    imported because that helper is private to benchmark.py's own aggregation."""
+def _sign_matrix_from_metric(m: dict, sign_zero_rtol: float) -> np.ndarray:
+    """Re-hydrate one run's Jacobian for the reproducibility aggregation, at the REQUESTED
+    threshold.
+
+    Prefers `repro_J_vector` — the RAW Jacobian — so `sign_zero_rtol` can genuinely be
+    applied here. Falls back to the collapsed `repro_sign_vector` ONLY when the caller
+    asks for exactly the threshold that was used at score time.
+
+    WHY THE FALLBACK IS GUARDED (D-EVID-12). `sign_structure` is idempotent on an
+    already-collapsed matrix for any rtol < 1, so re-thresholding a sign vector silently
+    returns the score-time answer. This function used to do exactly that unconditionally,
+    which made `aggregate_target_report(..., sign_zero_rtol=0.02)` compute at 0.05 and
+    label the result 0.02 — and turned PREREGISTRATION §3.1's committed 0.02/0.05/0.10
+    sensitivity sweep into three identical numbers. A row that cannot honour the requested
+    threshold now says so instead of answering the wrong question quietly.
+    """
     n = int(m["repro_N"])
-    flat = json.loads(m["repro_sign_vector"])
-    return np.array(flat, dtype=float).reshape(n, n)
+    raw = m.get("repro_J_vector")
+    if raw is not None:
+        J = np.array(json.loads(raw), dtype=float).reshape(n, n)
+        return REPRO.sign_structure(J, sign_zero_rtol)
+
+    recorded = m.get("repro_sign_zero_rtol")
+    if recorded is None or not np.isclose(float(recorded), float(sign_zero_rtol)):
+        raise ValueError(
+            f"this run carries no `repro_J_vector` (the raw Jacobian), so it cannot be "
+            f"re-scored at sign_zero_rtol={sign_zero_rtol}; it was collapsed at score "
+            f"time using rtol={recorded}. Re-thresholding the stored sign vector is a "
+            f"no-op and would report the rtol={recorded} answer under the "
+            f"rtol={sign_zero_rtol} label (docs/DECISIONS.md D-EVID-12). Either request "
+            f"rtol={recorded}, or re-run the target so the raw Jacobian is recorded.")
+    return np.array(json.loads(m["repro_sign_vector"]), dtype=float).reshape(n, n)
 
 
 def aggregate_target_report(results, *, dataset_id, sample_key, form, seeds,
@@ -243,6 +267,8 @@ def _reproducibility_block(succeeded, sign_zero_rtol) -> dict:
         "modal_structure": None,
         "kstar_spread": float("nan"),
         "Dratio_spread": float("nan"),
+        # §3.1 sensitivity cells, defaulted so every early return emits the same schema
+        **{_rtol_key(r): float("nan") for r in PREREGISTERED_SIGN_ZERO_RTOLS},
     }
     if len(succeeded) < 2:
         base["reproducibility_status"] = "insufficient_seeds"
@@ -252,10 +278,11 @@ def _reproducibility_block(succeeded, sign_zero_rtol) -> dict:
             f"scoring.reproducibility.reproducibility_report)")
         return base
 
-    J_list = [_sign_matrix_from_metric(r["metric"]) for r in succeeded]
     kstar_list = [float(r["metric"]["repro_kstar"]) for r in succeeded]
     dratio_list = [float(r["metric"]["repro_D_ratio"]) for r in succeeded]
     try:
+        # applies sign_zero_rtol to the RAW Jacobian, or raises rather than mislabelling
+        J_list = [_sign_matrix_from_metric(r["metric"], sign_zero_rtol) for r in succeeded]
         rep = REPRO.reproducibility_report(J_list, kstar_list, dratio_list, sign_zero_rtol)
     except Exception as exc:                           # fail loud IN THE RECORD
         base["reproducibility_status"] = "error"
@@ -274,7 +301,48 @@ def _reproducibility_block(succeeded, sign_zero_rtol) -> dict:
         "kstar_spread": rep["kstar_spread"],
         "Dratio_spread": rep["Dratio_spread"],
     })
+    base.update(_sensitivity_cells(succeeded, kstar_list, dratio_list))
     return base
+
+
+# The thresholds PREREGISTRATION.md §3.1 commits to reporting at, so "the conclusion's
+# sensitivity to that choice is visible rather than hidden". Emitted from ONE report
+# because the threshold is applied POST HOC — re-running recovery per threshold would burn
+# K trainings to recompute a number that only needs the stored Jacobians.
+PREREGISTERED_SIGN_ZERO_RTOLS = (0.02, 0.05, 0.10)
+
+
+def _rtol_key(rtol: float) -> str:
+    """0.02 -> 'topology_consistency_rtol_0p02'. Matches the turing_volume_4p8pct style.
+
+    Fixed 2 decimals, deliberately: '%g' renders 0.10 as '0.1', which would name the cell
+    `..._0p1` and break the visual pairing with `..._0p02` / `..._0p05` in a report meant
+    to be read as a three-cell sweep. All three pre-registered thresholds are exact at 2dp.
+    """
+    return f"topology_consistency_rtol_{rtol:.2f}".replace(".", "p")
+
+
+def _sensitivity_cells(succeeded, kstar_list, dratio_list) -> dict:
+    """The §3.1 sensitivity sweep, as flat scalar columns.
+
+    A cell is NaN when the rows cannot honour that threshold — i.e. they predate
+    `repro_J_vector` and were collapsed at a different rtol. NaN is the honest answer
+    there; repeating the score-time number under a different label is the defect
+    D-EVID-12 records. Cells are computed independently of the headline, so one
+    unavailable cell never blanks the report.
+    """
+    out = {}
+    for rtol in PREREGISTERED_SIGN_ZERO_RTOLS:
+        try:
+            J_list = [_sign_matrix_from_metric(r["metric"], rtol) for r in succeeded]
+            rep = REPRO.reproducibility_report(J_list, kstar_list, dratio_list, rtol)
+            out[_rtol_key(rtol)] = float(rep["topology_consistency"])
+        except Exception:
+            # not swallowed: the reason is already explicit on `reproducibility_error`
+            # for the headline threshold, and NaN here means "this threshold is not
+            # answerable from these rows", which is exactly what a reader needs.
+            out[_rtol_key(rtol)] = float("nan")
+    return out
 
 
 def _robustness_block(turing_rows) -> dict:

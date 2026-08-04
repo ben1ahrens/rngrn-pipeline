@@ -340,11 +340,26 @@ def per_run_fields(J_rec, D_rec, kstar_model: float,
     ``sign_structure`` is idempotent on it (see that function's docstring), so it can
     be fed straight back into ``reproducibility_report`` as a "Jacobian".
 
+    **AND THAT IDEMPOTENCE IS EXACTLY WHY THE RAW J IS ALSO STORED (D-EVID-12).**
+    ``sign_structure`` is a no-op on an already-collapsed matrix for ANY
+    ``sign_zero_rtol < 1``: the entries are 0 or ±1 and the scale is 1, so the comparison
+    ``|arr| > rtol * scale`` never changes an outcome. Re-thresholding
+    ``repro_sign_vector`` downstream therefore CANNOT change anything — which silently
+    turned ``docs/PREREGISTRATION.md`` §3.1's committed 0.02 / 0.05 / 0.10 sensitivity
+    sweep into three identical numbers under three different labels. The threshold is
+    applied ONCE, here, and the information needed to apply a different one was being
+    discarded at that moment. ``repro_J_vector`` preserves it: the raw Jacobian,
+    uncollapsed, so any consumer can re-threshold honestly. It costs N*N floats (9 at
+    N=3) as a JSON string, i.e. a flat scalar for run-index purposes.
+
     Returns
     -------
     dict with keys
+        repro_J_vector : str           JSON list of floats, length N*N, row-major — the
+                                        RAW Jacobian, so sign_zero_rtol can be re-applied
+                                        downstream (D-EVID-12)
         repro_sign_vector : str        JSON list of ints, length N*N, row-major
-        repro_N : int                  N, needed to reshape repro_sign_vector back
+        repro_N : int                  N, needed to reshape either vector back
         repro_kstar : float            == kstar_model, echoed under this module's
                                         naming for the benchmark aggregation to key on
         repro_D_ratio : float
@@ -359,7 +374,11 @@ def per_run_fields(J_rec, D_rec, kstar_model: float,
 
     sign = sign_structure(J_rec, sign_zero_rtol)
     n = sign.shape[0]
+    J_raw = np.asarray(J_rec, dtype=float)
     return {
+        # the RAW Jacobian, so a DIFFERENT sign_zero_rtol can be applied later.
+        # Re-thresholding repro_sign_vector cannot do this — see the docstring.
+        "repro_J_vector": json.dumps([float(v) for v in J_raw.flatten()]),
         "repro_sign_vector": json.dumps([int(v) for v in sign.flatten()]),
         "repro_N": int(n),
         "repro_kstar": float(kstar_model),

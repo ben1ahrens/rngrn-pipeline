@@ -9,7 +9,7 @@ a **3×3 GRN**. They look similar and test opposite things.
 |  | Experiment A | Experiment B |
 |---|---|---|
 | config | `expA_hidden_channel.yaml` | `expB_overparam.yaml` |
-| data | 3-gene (`three_gene_val`) | 2-gene (`two_gene_val`) |
+| data | 3-gene (`three_gene_val`) | 2-gene (`two_gene_classical_val`) |
 | truth | a real 3rd gene exists, unobserved | **no 3rd gene exists** |
 | model | N=3, m=2 | N=3, m=2 |
 | true J | 3×3 | 2×2 |
@@ -96,11 +96,33 @@ Report either outcome as measured. Do not tune until the result flips.
 # one-time: drop the datasets in (docs/LOCAL_DATA_SETUP.md), then
 rngrn scan-datasets
 
-for c in expA_control_full expA_hidden_channel expB_control_matched expB_overparam; do
-  rngrn --runs-root experiments train --config configs/$c.yaml
+# The two CONTROL arms run as-is. Launch trainers through the memory guard (CLAUDE.md §7a).
+for c in expA_control_full expB_control_matched; do
+  bash scripts/guarded_run.sh rngrn --runs-root experiments train --config configs/$c.yaml
 done
 rngrn --runs-root experiments benchmark --degradation
 ```
+
+> **Corrected 2026-08-04 — the two hidden-channel arms do NOT run as written.**
+> `expA_hidden_channel` and `expB_overparam` are both `N=3, m=2`. `recover.py:376` refuses
+> `m < N` when the stationarity residual has weight 0, and `resid: 0.0` is the default
+> (`configs/base.yaml:33`, `strategy: fixed`). Both arms therefore raise `ValueError` before
+> a single Adam step. The old four-arm loop above silently produced a `--degradation` table
+> containing only the controls, which reads as "the experiments found nothing" rather than
+> "the experiments did not run".
+>
+> To run them you must give the residual a non-zero weight — the only term the latent fields
+> enter:
+>
+> ```bash
+> bash scripts/guarded_run.sh rngrn --runs-root experiments train \
+>   --config configs/expA_hidden_channel.yaml -o loss.weights.resid=<nonzero>
+> ```
+>
+> There is **no known-good value** for it: `TUNING.md:102` records that hidden-channel
+> (m &lt; N) recovery has no objective at `resid = 0` and that the alternative is unproven.
+> Treat choosing one as a science decision under CLAUDE.md §10 —
+> calibrate it against the matched control and record it in `docs/DECISIONS.md`.
 
 Sweep across arms — `model.observed_idx` (rotate which channel is hidden) and
 `data.sample_key` (more samples) are legal **experiment-arm axes** in `optim/sweep.py`;

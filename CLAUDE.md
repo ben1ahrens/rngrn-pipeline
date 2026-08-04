@@ -86,7 +86,9 @@ and `docs/` for per-branch handoffs.
   deleted. The account's Actions billing has lapsed, so runs are *skipped* and reported as
   failures that have nothing to do with the code. Do not diagnose those as code failures.
   Restoring CI = uncommenting the two triggers.
-- Current suite: **77 tests**, all CPU, seconds to run. Keep them green.
+- Current suite: **420 passed, 1 skipped**, all CPU, ~3 minutes to run (measured 2026-08-04 on
+  `feature/turing-training`). Keep them green. The count in this line has been stale before —
+  re-measure it rather than trusting it, and update it when it moves.
 
 ## 4. House style
 
@@ -116,9 +118,28 @@ not appear in its imports.
   firewall boundary where `(RecoveryInput, AnswerKey)` are separated. Neither is
   recovery-side.
 
-**Known gap:** `rngrn.scoring` is *not* in the enforced `FORBIDDEN` list, though the
-design intends it to be scoring-side only. No recovery-side module imports it today, so
-the codebase is clean — but the rule is unguarded. Add it to `FORBIDDEN` when convenient.
+**Known gap — restated 2026-08-04. The previous version of this paragraph was wrong in both
+directions.** It said `rngrn.scoring` was unguarded and that no recovery-side module imports
+it. Neither holds.
+
+- *It is guarded, three times over.* `tests/test_permutation_scoring.py::test_no_recovery_side_module_imports_scoring`,
+  `tests/test_morphology_scoring.py::test_no_recovery_side_module_imports_the_morphology_scorer`,
+  and the equivalent in `tests/test_overparam_scoring.py` each assert `"scoring" not in
+  imports` across the recovery-side list. It is absent from `test_firewall.py`'s `FORBIDDEN`
+  only.
+- *And the codebase is not clean.* `history.py:45` does `from .scoring.plausibility import
+  d_ratio_of`, and `TrainingHistory` is called from inside the Adam loop (`recover.py:245`,
+  `:492`). This is **not** a truth leak — `d_ratio_of` is a pure function of the model's own
+  `D` — but it does contradict the stated design intent, and no audit covers it.
+
+**The real gap is that the audit is a name allowlist copied by hand into four files.**
+`RECOVERY_SIDE` is re-typed verbatim in `tests/test_firewall.py:19`,
+`tests/test_plot_arrays.py:319`, `tests/test_permutation_scoring.py` and
+`tests/test_morphology_scoring.py` — the same eleven names in all four. `history.py` is in
+none of them; neither is `eval/lgen_eval.py`. **So any new module is unaudited by default and
+the suite stays green.** The fix is not to add one name: define `RECOVERY_SIDE` once, and add
+a test asserting that every module under `losses/` and `eval/`, plus `history.py`, is on
+either that list or an explicit `SCORING_SIDE` list — membership of neither being a failure.
 
 ## 6. Datasets
 
@@ -376,3 +397,26 @@ Spawning subagents inside a dynamic workflow is **allowed and encouraged**. Use 
   green test that hides it — say which, explicitly.
 - **A wave can die wholesale to an upstream outage.** Six phase-B units returned API 500s
   simultaneously. Check whether failures are server-side before diagnosing them as code.
+
+## 12. `.claude/` — the executable form of this file
+
+This file is the contract. `.claude/` holds the parts that work better as a tool than as a
+paragraph. It is **tracked**; only `.claude/settings.local.json` is machine-local. See
+`.claude/README.md` for the full map. Nothing there restates this file — where they could
+drift, **this file wins and the other gets fixed**.
+
+- **Agents** (`.claude/agents/`) — four read-only reviewers for invariants the suite cannot
+  check: `firewall-auditor` (§5), `evidence-auditor` (§8, §10), `numerics-reviewer` (§7, §7c),
+  `merge-damage-hunter` (§11).
+- **Skills** (`.claude/skills/`) — `run-training` (§7a, §7b), `new-worktree` (§2, §11),
+  `record-decision` (§10), `harvest-dataset` (§6, §6a).
+- **Rules** (`.claude/rules/`) — `pre-merge-checklist.md` and `reporting-numbers.md`, the
+  checklist forms of §3/§5/§8/§11 and §8 respectively.
+- **Hook** (`.claude/hooks/guard_trainer.py`) — refuses any Bash command that launches
+  `rngrn train`/`sweep`/`target-report` or a `scripts/exp*.py` experiment outside
+  `scripts/guarded_run.sh`. §7a is the one rule worth enforcing mechanically, because the
+  agent that forgets the guard is the one that has not read §7a. `RNGRN_GUARD_OFF=1` still
+  bypasses it deliberately.
+
+@.claude/rules/pre-merge-checklist.md
+@.claude/rules/reporting-numbers.md

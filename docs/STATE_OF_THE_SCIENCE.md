@@ -81,7 +81,10 @@ same scalar receives opposing gradients. The only escape, an interior peak, is p
 on approach. Fix: give the two conditions disjoint support —
 `L_uniform` from k=0, `L_unstable` from `max` over `k ≥ k_min` with
 `i_min = max(1, int(0.1·len(kgrid)))`. Validated as `turing_hinges_split` in
-`scripts/exp02_objective_fix.py`; **not yet promoted into `losses/terms.py`**.
+`scripts/exp02_objective_fix.py`; **promoted into `losses/terms.py` by unit 1** — it is
+`terms.turing_hinges_split` (`terms.py:186`) and is the library default
+(`config.py:105`, `split_hinges=True`). *(Corrected 2026-08-04; this line previously said
+"not yet promoted".)*
 
 ### 2.3 Why the frame-scale anchor is needed
 
@@ -145,17 +148,27 @@ budget. **The Newton death is a symptom, not the cause.**
   resolution*. The exact 6.00-bin identity holds for the `three_gene` family only; the
   classical sets break it where the `clip(18, 220)` bound fired.
 
-### 2.6 Library path vs experiment path — they are not the same objective
+### 2.6 Library path vs experiment path — same objective now, still different code
 
 `recover.recover` (library) and `scripts/exp0*.py::fit` (what actually produced every
-result above) are different code with different objectives. Library defaults:
-`n_restarts=4, adam_steps=1500, adam_lr=0.05, lbfgs_steps=50, tau=0.12, jac_floor=1.0,
-grad_clip=10.0, form='competitive'`, weights
-`{kstar:1.0, turing:1.0, resid:0.3, anticollapse:0.5, morphology:0.0}` — i.e. the
-library still uses the **original** (self-defeating) hinges, has `resid` **on** at 0.3,
-`anticollapse` **on** at 0.5, and no frame-scale anchor. None of those defaults reflect
-what was learned. Nothing is persisted mid-run, so an interrupted restart loses the
-whole 4×1550-step budget.
+result above) are different **code**, and were once different **objectives**.
+
+> **As of `d8070ca` — SUPERSEDED, retained because it dates the numbers above.** Library
+> weights were `{kstar:1.0, turing:1.0, resid:0.3, anticollapse:0.5, morphology:0.0}`, with
+> the original self-defeating hinges, `resid` on at 0.3, and no frame-scale anchor. Results
+> measured under those defaults are **not comparable** to results measured after.
+
+**Corrected 2026-08-04.** Unit 1 promoted the learned objective into the library. Defaults
+are now `{kstar:1.0, turing:1.0, resid:0.0, anticollapse:0.5, anchor:2.0, morphology:0.1,
+param_prior:0.0}` with `split_hinges=True` and data-first staging (`config.py:99-105`) —
+split hinges, the frame-scale anchor, staging, and the residual **off** (settled by exp06,
+not merely untuned). Other defaults unchanged: `n_restarts=4, adam_steps=1500, adam_lr=0.05,
+lbfgs_steps=50, jac_floor=1.0, grad_clip=10.0, form='competitive'`. Note `tau=0.12` is
+**inert** — it reaches `kstar_anchor` and is never read (`TUNING.md:37`).
+
+What is still true: the scripts assemble their loss **inline**, so the two paths agree today
+only because someone checked, and nothing enforces it. Nothing is persisted mid-run, so an
+interrupted restart loses the whole 4×1550-step budget.
 
 ---
 
@@ -352,7 +365,7 @@ motivation for a 200k-iteration budget.
 | `losses/terms.py`, `eval/*`, `validate.py`, `data/*` | repackaged from scaffold; wiring correct, **recovery science unproven** |
 | `eval/analysis.turing_ok`, `robustness_cloud` | repackaged, **never validated**; `robustness_cloud` never run on a recovery |
 | `eval/numerics.integrate_bdf1_newton_krylov` | **stub** — delegates to ETDRK4 |
-| `losses/weighting.{GradNorm,NTK}Weighting.combine` | **stubs** — run with fixed weights |
+| `losses/weighting.{GradNorm,NTK}Weighting` | **Corrected 2026-08-04:** both `raise NotImplementedError` in `__init__` (`weighting.py:69`, `:87`), naming the missing estimator — they do **not** fall back to fixed weights, and neither defines a `combine`. `RatioWeighting` (`:94`) is implemented |
 | `losses/terms.morphology_consistency` | non-differentiable numpy diagnostic, **not in `compute_terms`**; the `morphology` weight is inert |
 
 ### 4.1 The exact cubic dispersion (the GPU unlock)
@@ -688,10 +701,19 @@ easier regime than N=2.
 
 ---
 
-## 11. The D-ratio prior — designed, unwired, and with an unresolved tension
+## 11. The D-ratio prior — implemented, opt-in, with an unresolved tension
 
 The failing exp09 runs collapse the D-ratio toward ~8 while the generators sit at
-108–140. That motivated a soft prior. It is **not implemented**.
+108–140. That motivated a soft prior.
+
+**Corrected 2026-08-04: it is implemented.** `terms.py::param_prior` (`terms.py:415`), bounds
+in `configs/bio_box.yaml`, switched on by `loss.weights.param_prior` (default **0.0** —
+opt-in, wired at `recover.py:390-400`). The scoring-side counterpart is
+`scoring/plausibility.py`. This section previously said "not implemented"; that was true at
+`d8070ca` and stopped being true with unit 5.
+
+The tension below is **not** resolved by implementing it, and is the reason the prior is
+opt-in rather than on by default.
 
 **Literature values, and the tension they create.** Absolute morphogen diffusion shows a
 local-to-global slowdown of nearly two orders of magnitude, from ~60 µm²/s (FCS, local)
@@ -706,9 +728,12 @@ biology gets away with less via richer topology. **This is exactly Tica's stated
 for node C** — see `GOAL_tica_equivalent.md` §4.4 for what our own data says when a node
 is made non-diffusible.
 
-**Open design choice:** centre the prior on ~7.5 (biologically measured, far from the
-data-generating regime) or ~100 (matches the generator but is grounded in the user's own
-simulation choices); a wide spread spanning both keeps the prior informative but honest.
+**Design choice — SETTLED 2026-07-29 at ~7.5** (`DECISIONS.md` D1; `config.py::dratio_centre`,
+with `dratio_spread=1.0` in natural-log units). The alternatives and the reasoning are kept
+below because the choice is contestable and the ~15× gap is real, not because it is still open:
+centre on ~7.5 (biologically measured, far from the data-generating regime) or ~100 (matches
+the generator but is grounded in the user's own simulation choices); a wide spread spanning
+both keeps the prior informative but honest.
 
 **Notation:** do **not** use `mu` for the prior's centre. In this codebase `mu` already
 means (a) the QSS lift's fast-variable timescale in `eval/dynamical.py` and (b) the

@@ -119,10 +119,11 @@ called from `total.total_loss` (`total.py:44-56`), which `recover.py:86,111,121`
 | `anticollapse` | `terms.anticollapse` (`terms.py:189-201`), called `total.py:38` | `J` **[MODEL-SIDE]**; `jac_floor` **[CONFIG]**. `softplus(floor − ‖J‖_F)` |
 
 Weighting: `strategy.combine` (`total.py:53`). `FixedWeighting` (`weighting.py:35-40`),
-`ScheduledWeighting` (`weighting.py:43-53`). **`gradnorm` and `ntk` are stubs that silently
-return base weights** (`weighting.py:56-71`, `weighting.py:74-90`) — their docstrings say so
-(`weighting.py:60`, `:80`) but `build_strategy` (`weighting.py:93-95`) will happily hand you
-one from a config.
+`ScheduledWeighting` (`weighting.py:43-53`), `RatioWeighting` (`weighting.py:94`, implemented).
+**Corrected 2026-08-04: `gradnorm` and `ntk` no longer return base weights silently** — both
+`raise NotImplementedError` in `__init__` (`weighting.py:69`, `:87`), naming the missing
+estimator, so `build_strategy` cannot hand you a silent no-op from a config. (Item 5 of this
+file's own "code wins" table already recorded this; the two passages contradicted each other.)
 
 ### 2.3 Dead / inert knobs on the library path
 
@@ -437,10 +438,11 @@ dimensionless and not determined by `L`.
 | 2 | Firewall forbids `rngrn.scoring` per `test_firewall.py` | `FORBIDDEN` has no `"scoring"`; that check lives in `test_morphology_scoring.py` | `docs/HANDOFF_identifiability.md:131-133` vs `test_firewall.py:27` |
 | 3 | `train`, `optim` are recovery-side modules | Neither is in `RECOVERY_SIDE`; `train.py` imports `rd_models` and `cache` | `gate.py:15-17` vs `test_firewall.py:19-24`, `train.py:16,18` |
 | 4 | `loss.tau` is the "k\* tolerance band" | `tau` is accepted and never used in `kstar_anchor`'s body | `config.py:75`, `terms.py:120` vs `terms.py:121-138` |
-| 5 | `gradnorm` / `ntk` weighting strategies | Stubs returning base weights; selectable from config with no warning | `config.py:74` vs `weighting.py:56-71,74-90` |
+| 5 | `gradnorm` / `ntk` weighting strategies | **Corrected 2026-08-04:** they no longer return base weights silently — both `raise NotImplementedError` naming the missing estimator | `weighting.py:71`, `weighting.py:89` |
 | 6 | Design doc §5.6 morphology weight 0.1 | Not in the differentiable sum; the weight multiplies nothing | `config.py:73` vs `total.py:39` |
 | 7 | `recover.py` docstring describes the objective | The scripts use a **different** objective (split hinge at `exp05:43-48` vs `terms.py:91-105`; frame-scale anchor `exp05:86` absent from the library; no `anticollapse`) | `recover.py:1-11` vs `exp05:70-100` |
-| 8 | README "24 tests" | The suite is far larger now (140 per the branch history) | `README.md:65` |
+| 8 | README "24 tests" | **Fixed 2026-08-04.** Measured 420 passed + 1 skipped; README, `CODE_REALITY.md:171` and `HANDOFF_identifiability.md:12` all updated. Re-measure rather than trusting any written count | `README.md:65` |
+| 9 | `CLAUDE.md` is not on this branch (`README.md`, `CODE_REALITY.md` §12) | **Fixed 2026-08-04.** It is tracked at the repo root here, brought over in `c53ebf6` | `README.md:100`, `CODE_REALITY.md:216` |
 
 ---
 

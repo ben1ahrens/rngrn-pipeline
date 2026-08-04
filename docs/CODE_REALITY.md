@@ -1,8 +1,13 @@
 # Code reality map — what is wired, what is a stub, what the docs get wrong
 
 **Status: information, not instruction.** A map of the codebase as it actually is on
-`feature/turing-training` @ `d8070ca`, written for someone who has not read it. Where a
+`feature/turing-training` @ `b4376a1`, written for someone who has not read it. Where a
 docstring or a doc disagrees with the source, **the source is recorded here**.
+
+> **This file is a SNAPSHOT and it has drifted before.** It was pinned to `d8070ca` while
+> the branch moved on ~40 commits, and §1 ended up contradicting §11 of this same file.
+> Re-pinned and corrected 2026-08-04. If you are reading it against a later HEAD, verify
+> before believing it — `CLAUDE.md` and `docs/DECISIONS.md` are the maintained sources.
 
 ---
 
@@ -10,22 +15,27 @@ docstring or a doc disagrees with the source, **the source is recorded here**.
 
 **The library objective and the experiment objective are different code.**
 
+**Corrected 2026-08-04.** The previous version of this section said the library "still
+encodes the configuration that produced 0 % Turing" and that "nothing learned in exp02–exp10
+has been promoted". **Unit 1 promoted it, and §11 item 6 of this same file already said so
+250 lines below.** The source wins; both are now reconciled here.
+
 - `src/rngrn/recover.py::recover` + `src/rngrn/losses/total.py` — the *library* path.
-  Wired, tested, dry-runs. Uses the **original** (self-defeating) `turing_hinges`, has
-  `resid` on at weight 0.3, `anticollapse` on at 0.5, and **no frame-scale anchor**.
-- `scripts/exp0[4-9]*.py::fit` — assembles its loss **inline**, and is what produced
-  every result in `STATE_OF_THE_SCIENCE.md`. Uses `split_hinges` (defined locally in
-  each script), the frame-scale anchor, data-first staging, and no residual.
+  Wired, tested, and now carrying the promoted objective: `turing_hinges_split`
+  (`terms.py:186`, default `split_hinges=True`), the frame-scale anchor
+  (`terms.py:237`, default weight 2.0), data-first staging (`staging_keys=["turing"]`),
+  and the residual **off** (`resid=0.0`, settled by exp06, not merely untuned). Defaults
+  live at `config.py:99-105`.
+- `scripts/exp0[4-9]*.py::fit` — assembles its loss **inline**, and is what produced every
+  result in `STATE_OF_THE_SCIENCE.md`.
 
-Consequences worth internalising:
+What remains true, and is the actual reason this section exists:
 
-1. **Nothing learned in exp02–exp10 has been promoted into the library.** The library
-   defaults still encode the configuration that produced 0 % Turing.
-2. A change to `losses/total.py` alone **changes no measured number**, because the
-   scripts do not call it.
-3. `split_hinges` is duplicated across several scripts rather than living in
-   `losses/terms.py`. Promoting it is a science decision (it changes the objective), not
-   a mechanical refactor — hence its still being in the scripts.
+1. **The scripts still assemble their loss inline.** A change to `losses/total.py` alone
+   changes no number *in the scripts*, because they do not call it. The two paths agree on
+   the objective today, but nothing enforces that they stay in agreement.
+2. Consequently, a script result and a library result are comparable only if someone has
+   checked the two assemblies still match. That check is manual.
 
 ---
 
@@ -33,14 +43,15 @@ Consequences worth internalising:
 
 | thing | file | reality |
 |---|---|---|
-| `GradNormWeighting.combine` | `losses/weighting.py` | **stub** — silently runs with fixed weights |
-| `NTKWeighting.combine` | `losses/weighting.py` | **stub** — same |
+| `GradNormWeighting` | `losses/weighting.py:69` | **Corrected 2026-08-04:** raises `NotImplementedError` in `__init__`, naming the missing per-term gradient-norm estimator. It does *not* silently fall back, and it defines no `combine` method |
+| `NTKWeighting` | `losses/weighting.py:87` | same — raises in `__init__`, names the missing NTK/convergence-rate estimator |
+| `RatioWeighting` | `losses/weighting.py:94` | **implemented** (`strategy: ratio`), and mentioned by no other doc |
 | `integrate_bdf1_newton_krylov` | `eval/numerics.py` | **stub** — delegates to ETDRK4, so the "independent stiff cross-check" does not exist |
 | `morphology_consistency` | `losses/terms.py` | non-differentiable numpy diagnostic, **not in `compute_terms`** — the `loss.weights.morphology` knob is inert |
 | `robustness_cloud` | `eval/analysis.py` | runs, but never validated, never run on a recovery, output never reaches the run index (see `ROBUSTNESS_MEASUREMENT.md` §3 for four measured defects) |
 | in-pipeline 3-node reference systems | `data/rd_models.py` | absent — N=3 enters only via registry/HDF5, so new N=3 systems cannot be generated from this repo |
-| a biological-plausibility score | nowhere | absent — no check that recovered parameters lie in a plausible box, and no such column in the run index. One of the three goal components (`GOAL_tica_equivalent.md` §2.2) is therefore uninstrumented |
-| Experiment B (N=2 truth → N=3 model) | `configs/expB_*.yaml`, `scoring/overparam.py` | harness runs, **never executed** on the current objective; threshold uncalibrated; both configs pin `sample_key: sample_0000` |
+| a biological-plausibility score | `scoring/plausibility.py` | **Corrected 2026-08-04: implemented.** Box in `configs/bio_box.yaml`; run-index columns `plausibility_score` + `plausibility_*_in_box` (`validate.py:329`); aggregated as VIABILITY (`target_report.py:328-333`); matching training-time prior `terms.py::param_prior` (opt-in, `loss.weights.param_prior=0.0`). **Remaining caveat:** the box is centred on literature values, not the generators' — see `DECISIONS.md` D3 |
+| Experiment B (N=2 truth → N=3 model) | `configs/expB_*.yaml`, `scoring/overparam.py` | **Corrected 2026-08-04:** the B arm (`N=3, m=2`) now *cannot* run under the default `resid: 0.0` — `recover.py:376` raises `ValueError`. It needs `-o loss.weights.resid=<nonzero>`, for which there is no known-good value (`TUNING.md:102`). Threshold uncalibrated; both configs pin `sample_key: sample_0000` |
 | `integrate_etdrk4` fully-coupled variant | `eval/numerics.py` | diagonal linear operator only (`−D_i k²`), correct for diagonal diffusion; the `(J − k²D)` matrix-exponential form is not implemented |
 
 ---
@@ -168,7 +179,7 @@ when the hardcoded `L=100.0` bug was fixed).
 | `robustness_cloud` draw | ~**59 ms**, serial |
 | `eval.rollout.simulate` at 96×96 | ~4.2 ms/step × ~128k steps = ~**9 minutes** per field (14 min at the 200k clip) |
 | exp11 robustness baseline, 127 samples × 4 σ × 400 draws | ~60 s (vectorised numpy) |
-| test suite | 140 tests, ~8 s via the pre-push hook |
+| test suite | 420 passed + 1 skipped, ~3 min via the pre-push hook (measured 2026-08-04) |
 
 The rollout figure is the one that bites: an earlier brief assumed ~1.9 s, off by three
 orders of magnitude. Never roll out inside a per-run scoring path.
@@ -207,16 +218,18 @@ orders of magnitude. Never roll out inside a per-run scoring path.
 | branch | worktree | contents |
 |---|---|---|
 | `main` @ `4509632` | `rngrn-pipeline` | template + dataset manifests + local pre-push hook |
-| `feature/turing-training` @ `d8070ca` | `worktrees/turing-training` | **the science branch** — exp01–exp11, cubic dispersion, CUDA portability, `DATA_INTO_MODEL.md`; contains everything below it |
+| `feature/turing-training` @ `b4376a1` | `worktrees/turing-training` | **the science branch** — exp01–exp11, cubic dispersion, CUDA portability, `DATA_INTO_MODEL.md`, the phase-A/B unit waves, Stage-0 bio-viability, the OOM guard; contains everything below it |
 | `feature/spatial-mode-recovery` @ `d76378a` | `worktrees/spatial-mode` | morphology scoring, real k\*, the gate `L` fix |
 | `feature/identifiability-experiments` @ `cae5cf2` | `worktrees/identifiability-experiments` | permutation + overparam scoring, the 4 experiment configs |
-| `docs/agent-conventions` @ `ed8dd28` | `worktrees/agent-conventions` | **`CLAUDE.md`** — the shared working contract |
+| `docs/agent-conventions` @ `ed8dd28` | `worktrees/agent-conventions` | where **`CLAUDE.md`** originated; it now lives at the repo root on this branch (see below) |
 | `docs/hooks-config` @ `273a646` | `worktrees/hooks-config-docs` | hooksPath guidance fix |
 
-`CLAUDE.md` lives on `docs/agent-conventions`, **not on `main` and not on this branch** —
-so a reader who only checks out `feature/turing-training` will not see it. It is the
-authoritative source for conventions: environment, git, testing, house style, firewall,
-datasets, compute reality, evidence discipline, run locations, and the autonomy rule.
+**Corrected 2026-08-04.** `CLAUDE.md` originated on `docs/agent-conventions` but is now
+tracked at the repo root **on this branch** (brought over in `c53ebf6`, then extended). A
+reader who checks out `feature/turing-training` *will* see it, and it — not the
+`docs/agent-conventions` copy — is the authoritative source for conventions: environment,
+git, testing, house style, firewall, datasets, compute reality, evidence discipline, run
+locations, the autonomy rule, and the subagent/workflow rules.
 
 ---
 
@@ -227,16 +240,19 @@ datasets, compute reality, evidence discipline, run locations, and the autonomy 
 `experiments/` tree is gitignored. Name the subdirectory for its purpose so a plumbing
 check is never later mistaken for a result.
 
-**The autonomy rule.** Run freely on mechanical work — refactors, tests, plumbing, docs,
-packaging, diagnosis. **Stop and ask** whenever a science decision appears: defining or
-changing a metric, choosing a threshold or pass condition, choosing an estimator when
-alternatives disagree materially, deciding what counts as a control or reference arm, or
-anything that would make a later number non-comparable to an earlier one. Bring measured
-evidence to the question rather than a bare choice.
+**The autonomy rule — SUPERSEDED 2026-07-29. See `CLAUDE.md` §10, which is authoritative.**
+This section used to say "stop and ask whenever a science decision appears". The owner
+withdrew that: science decisions are now **decided by the agent and recorded**, with evidence,
+in `docs/DECISIONS.md`. Only two things still escalate — weakening a pre-registered pass
+condition in `docs/PREREGISTRATION.md`, and anything outside the repo's technical scope.
 
-This is why several validated improvements sit unadopted (`split_hinges` in scripts, the
-low-basal init, the D-ratio prior): each changes what the optimiser finds, so each is a
-science decision.
+The policy is deliberately **not** restated here. Duplicating it is exactly what let this copy
+diverge from `CLAUDE.md` for a month.
+
+Because the rule changed, the improvements this section used to list as blocked are no longer
+blocked, and most have landed: `split_hinges` is promoted (`terms.py:186`, default on) and the
+D-ratio prior is implemented (`terms.py:415`, opt-in). Only the **low-basal init** remains an
+open decision — see `DECISIONS.md` D9 and item 5 below.
 
 ---
 

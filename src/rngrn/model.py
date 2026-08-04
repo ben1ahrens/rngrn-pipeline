@@ -154,8 +154,13 @@ class RNGRN(nn.Module):
         if init == "low_basal":
             # FIREWALL-SAFE low-basal prior (docs/STATE_OF_THE_SCIENCE.md section 10):
             # measured 0/200 default-init Jacobian diagonals are positive vs 88/88 true
-            # systems' diagonals, the root cause of 0/300 Turing-unstable inits. This
-            # prior measured 82% Turing-unstable at init. Fixed numeric ranges only, not
+            # systems' diagonals, the root cause of 0/300 Turing-unstable inits.
+            # CORRECTED 2026-08-04 (docs/DECISIONS.md D-EVID-11): this prior was recorded
+            # as "82% Turing-unstable at init". It is not. Under the strict criterion it is
+            # 0/398 (0.0%); the 82% came from turing_ok's old tr(J) < 0 test, which counts
+            # a uniformly UNSTABLE system as Turing. What this prior actually buys is the
+            # POSITIVE JACOBIAN DIAGONAL that Turing requires -- 114/398 (28.6%) vs 0/400
+            # for the default init. Necessary, not sufficient. Fixed numeric ranges only, not
             # derived from any target system. DEFAULT STAYS "default" (see config.py) --
             # adopting this changes which solutions recovery finds, so it must stay a
             # measured choice, not a silent bias.

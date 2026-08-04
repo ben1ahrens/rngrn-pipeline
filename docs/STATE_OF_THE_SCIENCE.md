@@ -328,7 +328,9 @@ pulls toward a wrong model. Pixel minibatching genuinely *improved* the residual
 wrong constraint here.
 
 **"Turing-first" homotopy — rejected.** Start from the low-basal prior that reaches the
-Turing manifold 82 % of the time, then anneal from "stay Turing" toward "match k\*".
+Turing manifold 82 % of the time (**that premise is withdrawn — see §10; the strict figure
+is 0 %**, so this homotopy had no Turing manifold to start from in the first place), then
+anneal from "stay Turing" toward "match k\*".
 Convergence collapses to 1/16 versus 10/16 for the plain baseline, k\* rel err 99.8 %.
 Reaching the Turing manifold and being able to *move along* it are different
 properties: β ~ 1e-4 with steep Hill responses is a numerically stiff corner where the
@@ -687,6 +689,33 @@ A firewall-safe init sampling low basal production (β ~ 1e-4 to 1e-2 vs the old
 gate ~ N(0, 2.5), D spread 10^0.9–10^2.4 takes Turing-unstable inits from **0 % to 82 %**.
 Ladder by β upper bound (400 seeds each): 0.5 → 69.7 %; 0.05 → 80.3 %; 0.01 → 81.4 %;
 0.001 → 82.0 %.
+
+> **⚠ WITHDRAWN 2026-08-04 — the whole ladder above is an artefact.** See
+> `docs/DECISIONS.md` D-EVID-11. Those percentages came from `eval/analysis.turing_ok`
+> testing `tr(J) < 0`, which a uniformly **unstable** system satisfies whenever one
+> positive eigenvalue is outweighed by the others. Every qualifying draw was uniformly
+> unstable with k\* pinned to the scan floor (1e-3), so the "Turing-unstable" reading was
+> the uniform instability being counted as a structured one.
+>
+> **Re-measured under the strict criterion (max Re eig(J) < 0, unstable at some k > 0),
+> N=3, 400 seeds:**
+>
+> | init | converged | any positive J diagonal | STRICT Turing | loose (superseded) |
+> |---|---|---|---|---|
+> | `default` | 400 | 0/400 = 0.000 | **0/400 = 0.000** | 0/400 |
+> | `low_basal` | 398 | 114/398 = **0.286** | **0/398 = 0.000** | 206/398 = 0.518 |
+>
+> Note the loose figure is 51.8 %, not 82 %, even before the criterion change: unit B3's
+> steady-state multistart raised converged inits from 255 to 398 while the loose-Turing
+> count stayed at exactly 206.
+>
+> **What is still true:** low_basal produces the **positive Jacobian diagonal** that Turing
+> instability requires and the default init never produces (0/400). That is necessary, not
+> sufficient, and it is the only claim this init supports.
+
+**The honest statement:** the low-basal init changes the *sign structure* of the Jacobian
+diagonal, which is a Turing prerequisite. It does **not** place inits on the Turing
+manifold.
 
 **Deliberately not adopted.** The init distribution biases which solutions are found,
 and near-zero basal expression is a modelling assumption rather than a neutral prior.

@@ -344,8 +344,18 @@ def score_recovery(result, answer_key, observed_idx=None, target_frame=None,
     D_rec = (result.model.D.detach().cpu().numpy() if D_rec is None
              else np.asarray(D_rec, dtype=float))
     ok, info = turing_ok(J_rec, D_rec)
+    # `recovered_turing` is the STRICT verdict as of 2026-08-04 (D-EVID-11): uniformly
+    # stable by max Re eig(J) < 0, structurally unstable at some k > 0. It previously used
+    # tr(J) < 0, which a uniformly UNSTABLE system can satisfy. `recovered_turing_loose`
+    # carries the superseded verdict so rows recorded either side of the change stay
+    # readable against each other; per docs/DECISIONS.md D-BIO-3 the loose verdict is
+    # reported, never led with. MEASURED: the two agree on all 12 tracked run rows that
+    # store a Jacobian, so no recorded number moved — the correction bites at init
+    # (low_basal: 51.8% loose vs 0.0% strict), not on recoveries.
     out["recovered_turing"] = bool(ok)
+    out["recovered_turing_loose"] = bool(info["turing_loose"])
     out["recovered_sig_max"] = float(info["sig_max"])
+    out["recovered_sig0"] = float(info["sig0"])          # max Re eig(J): the uniform mode
     out["recovered_tr0"] = float(info["tr0"])
 
     # 4. robustness — local Turing-volume fraction of the RECOVERED (J, D) under a

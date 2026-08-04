@@ -302,6 +302,75 @@ larger of the two because it would move `recovered_turing` itself.
 
 **Where it lives:** `experiments/*/runs.jsonl` (tracked).
 
+### D-EVID-11 — `turing_ok` tested `tr(J) < 0`, so uniformly UNSTABLE systems were scored Turing-unstable
+
+**Date found / fixed:** 2026-08-04 (multi-agent branch review, M2). **Status:** SUPERSEDED
+(defect; now fixed). **Decided by:** the implementing agent under delegated authority (§10).
+
+**The defect.** `eval/analysis.turing_ok` evaluated uniform stability as `tr(J) < 0`. The
+trace is the **sum** of the eigenvalues, so it can be negative while one eigenvalue is
+positive — i.e. while the homogeneous state is unstable. Compounding it, the default scan
+grid began at `k = 1e-3`, where `sigma(k)` is still essentially `sigma(0)`, so the *same*
+uniform instability also satisfied the "structurally unstable" half. Both conditions could
+therefore be met by a system that merely blows up uniformly, with `kstar` reported as the
+grid floor.
+
+**Reproduced exactly:** `J = diag(0.5, -1, -1)`, `D = (1, 10, 20)`. `tr(J) = -1.5 < 0`;
+`max Re eig(J) = +0.5 > 0`. Old `turing_ok` → `ok=True`, `kstar=0.001`, `sig_max=0.5`.
+
+**The correct criterion already existed in the same file.** `_perturb_cloud` has always
+used `np.linalg.eigvals(Jp).real.max() < 0` and taken the structured max over `sig[:, 1:]`,
+excluding `k=0`. So `recovered_turing` and the `turing_volume_*` columns — both on every run
+row — were answering different questions. `scripts/exp11_robustness_baseline.py:23` recorded
+the discrepancy in prose and it was never fixed in the library.
+
+**Fix:** `turing_ok` now computes `sigma(0) = max Re eig(J)` exactly (independent of the
+caller's grid), requires `sigma(0) < 0`, and takes the structured max over `k > 0` only. It
+raises if the supplied grid has no `k > 0`. The superseded verdict is returned alongside as
+`turing_loose` / `stable_uniform_loose`, and surfaced on the run row as
+`recovered_turing_loose`, so rows recorded either side of the change stay readable against
+each other — the convention `_perturb_cloud` already used with `frac_loose`. A new
+`recovered_sig0` column exposes the uniform mode directly.
+
+**Consequence for earlier results — MEASURED, and smaller than feared.** All 12 tracked run
+records that store a Jacobian were re-scored under both criteria: **0 of 12 change verdict.**
+No published recovery number moves. The correction bites at **initialisation**, not on
+recoveries, because a trained model that reaches Turing does so genuinely.
+
+**Consequence for the low-basal init — this is the real casualty.** Re-measured at N=3 over
+400 seeds:
+
+| init | converged | any positive J diagonal | STRICT Turing | loose (superseded) |
+|---|---|---|---|---|
+| `default` | 400 | 0/400 = 0.000 | **0/400 = 0.000** | 0/400 |
+| `low_basal` | 398 | 114/398 = **0.286** | **0/398 = 0.000** | 206/398 = 0.518 |
+
+The recorded "0 % → 82 % Turing-unstable at init" (D9, `STATE_OF_THE_SCIENCE.md` §10,
+`model.py`, `exp03_turing_first.py`) is **withdrawn**. Note the loose figure is 51.8 %, not
+82 %, even before the criterion change: D9's 80.8 % was `206/255 converged`, and unit B3's
+steady-state multistart since raised convergence to 398/400 while the loose-Turing numerator
+stayed at **exactly 206**. So the number moved twice, for two independent reasons.
+
+**What survives:** low_basal produces the positive Jacobian diagonal Turing requires
+(28.6 % vs 0 %). Necessary, not sufficient. `tests/test_science.py::
+test_low_basal_init_gains_the_positive_diagonal_but_NOT_turing_reachability` pins both the
+effect and the absence of the claimed one, and fails loudly if the loose criterion returns.
+
+**What was rejected and why:** (a) renaming `recovered_turing` to `recovered_turing_loose`
+and introducing a new strict column — rejected because the plain name should carry the
+correct verdict, and because the ledger sweep showed no recorded row changes, so there is
+nothing to protect by renaming; (b) leaving `turing_ok` loose and adding a separate strict
+column — rejected because two live definitions of "Turing" in one library is what caused
+this; (c) changing the default k-grid — deliberately **not** done, so `kstar` values stay
+comparable. That grid (`linspace(1e-3, 50, 4000)`) is an absolute band in rad/length and is
+now marked `[UNCALIBRATED]` at `analysis.py::_TURING_KGRID`: it is the same class of defect
+unit B4 removed from `recover._kgrid_for`, currently wide enough for the registered L range
+(18..220 → k\* 0.17..2.09) but not scale-free and untested at its boundary.
+
+**Where it lives:** `src/rngrn/eval/analysis.py::turing_ok`, `::_TURING_KGRID`;
+`src/rngrn/validate.py` (`recovered_turing`, `recovered_turing_loose`, `recovered_sig0`);
+`tests/test_science.py`.
+
 ---
 
 ## Part 2 — Decisions
@@ -640,6 +709,31 @@ setting (Newton steady state + Jacobian-sign check only, no fit) —
 **0/400 (0%)** Turing-unstable-at-init for `default` vs **206/255 converged (80.8%)**
 for `low_basal`, consistent with the ~82% figure already documented in
 `docs/STATE_OF_THE_SCIENCE.md` §10 for this same beta upper bound.
+
+> ### ⚠ THE EVIDENCE ABOVE IS WITHDRAWN — re-measured 2026-08-04, see D-EVID-11
+>
+> That 80.8% was produced by `turing_ok`'s **loose** `tr(J) < 0` criterion, which a
+> uniformly UNSTABLE system can satisfy. Under the corrected strict criterion the
+> low-basal init is **0/398 (0.0%)** Turing-unstable at init.
+>
+> The number moved for **two independent reasons**, and both matter:
+> 1. **The denominator changed.** 255 of 400 inits converged then; **398 of 400** converge
+>    now (unit B3's steady-state multistart). The numerator is **206 in both
+>    measurements** — the extra 143 converged inits contributed no loose-Turing draws. So
+>    the same data now reads 206/398 = **51.8%**, not 80.8%, before any criterion change.
+> 2. **The criterion changed.** All 206 were uniformly unstable with k\* pinned exactly to
+>    the grid floor. Strict fraction: **0.000**.
+>
+> **What survives:** low_basal buys the *positive Jacobian diagonal* that Turing requires —
+> 114/398 (28.6%) vs 0/400 for `default`. That separation is real, is the honest motivation
+> for the init, and is what `tests/test_science.py::
+> test_low_basal_init_gains_the_positive_diagonal_but_NOT_turing_reachability` now pins.
+> A positive diagonal is necessary for Turing instability; it is not sufficient.
+>
+> **Effect on this decision:** D9 stays **OPEN**, but the case for adopting low_basal is
+> materially weaker than recorded — it was never "0% → 82% Turing-reachable". Combined with
+> the 40/40 training failure below, there is now no measured benefit to set against a
+> measured cost.
 
 **Evidence — but it fails under actual training, which is why the default stays off:**
 direct `recover(ri, init="low_basal", adam_steps=200, lbfgs_steps=0)` on

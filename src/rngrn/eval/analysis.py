@@ -14,20 +14,72 @@ import numpy as np
 import torch
 
 
-def turing_ok(J, D, kgrid=None):
-    """Evaluate the Turing conditions on numpy J, D. Returns (ok: bool, info dict)."""
+# [UNCALIBRATED] the default scan band. `linspace(1e-3, 50, ...)` is an ABSOLUTE band in
+# rad/length, inherited from the scaffold and never calibrated — the same class of defect
+# unit B4 removed from recover._kgrid_for, where an absolute 2.0 floor silently dominated
+# whenever kstar_obs < 0.25. It is currently wide enough for the registered L range
+# (18..220 -> k* 0.17..2.09) and is left as-is so k* values stay comparable, but it is not
+# scale-free and nothing tests its boundary. Pass an explicit kgrid for any L outside that
+# range. See docs/DECISIONS.md D-EVID-11.
+_TURING_KGRID = np.linspace(1e-3, 50, 4000)
+
+
+def turing_ok(J, D, kgrid=None, tol=1e-9):
+    """Evaluate the Turing conditions on numpy J, D. Returns (ok: bool, info dict).
+
+    THE TWO CONDITIONS, both evaluated strictly (corrected 2026-08-04, D-EVID-11):
+
+      1. UNIFORMLY STABLE:  max Re eig(J) < 0      -- i.e. sigma(k=0) < 0
+      2. STRUCTURALLY UNSTABLE:  max over k > 0 of sigma(k) > tol
+
+    Condition 1 used to be `tr(J) < 0`. **A negative trace does not imply stability**: the
+    trace is the SUM of the eigenvalues, so one eigenvalue can be positive while the sum is
+    negative. Worse, the default grid starts at k = 1e-3, where sigma(k) is still
+    essentially sigma(0) -- so a system that was merely uniformly unstable satisfied
+    condition 2 as well, with its own uniform instability, and `turing_ok` returned True
+    with `kstar` pinned to the grid floor.
+
+    MEASURED, 2026-08-04: of 398 converged `model.init='low_basal'` draws at N=3, **206
+    (51.8%) passed the loose test and 0 (0.0%) pass this one** -- and all 206 had k* exactly
+    at the grid floor. The low-basal init makes inits uniformly UNSTABLE; it does not make
+    them Turing-reachable. See docs/DECISIONS.md D-EVID-11.
+
+    This now matches the criterion `_perturb_cloud` has always used (strict eigenvalue test
+    at line ~86, structured max over k>0 at line ~92), so `recovered_turing` and the
+    `turing_volume_*` columns finally answer the same question.
+    `scripts/exp11_robustness_baseline.py:23` recorded the discrepancy without fixing it.
+
+    The loose verdict is returned alongside as `turing_loose` / `stable_uniform_loose`
+    rather than discarded, so a row recorded under the old criterion stays interpretable --
+    the same convention `_perturb_cloud` uses with `frac_loose` / `frac_loose_only`.
+    """
     J = np.asarray(J); D = np.asarray(D)
     if kgrid is None:
-        kgrid = np.linspace(1e-3, 50, 4000)
-    tr0 = np.trace(J)
-    sig = np.array([np.max(np.real(np.linalg.eigvals(J - k**2 * np.diag(D)))) for k in kgrid])
-    stable_uniform = tr0 < 0
-    unstable_struct = sig.max() > 1e-9
+        kgrid = _TURING_KGRID
+    kgrid = np.asarray(kgrid, float)
+
+    # sigma(0) exactly, independent of whether the caller's grid contains 0.
+    eig0 = np.real(np.linalg.eigvals(J))
+    sig0 = float(eig0.max())
+
+    kpos = kgrid[kgrid > 0.0]
+    if kpos.size == 0:
+        raise ValueError("turing_ok needs at least one k > 0 in kgrid; the k=0 mode is the "
+                         "uniform mode and can never be the structured instability.")
+    sig = np.array([np.max(np.real(np.linalg.eigvals(J - k**2 * np.diag(D)))) for k in kpos])
+
+    tr0 = float(np.trace(J))
+    stable_uniform = sig0 < 0.0                    # STRICT
+    unstable_struct = bool(sig.max() > tol)
     ok = bool(stable_uniform and unstable_struct)
-    return ok, dict(tr0=float(tr0), sig_max=float(sig.max()),
-                    kstar=float(kgrid[np.argmax(sig)]),
+
+    return ok, dict(tr0=tr0, sig0=sig0, sig_max=float(sig.max()),
+                    kstar=float(kpos[np.argmax(sig)]),
                     stable_uniform=bool(stable_uniform),
-                    unstable_struct=bool(unstable_struct))
+                    unstable_struct=unstable_struct,
+                    # the superseded criterion, kept visible and explicitly labelled
+                    stable_uniform_loose=bool(tr0 < 0.0),
+                    turing_loose=bool(tr0 < 0.0 and unstable_struct))
 
 
 def linear_stability(model, xstar):

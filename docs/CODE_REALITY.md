@@ -281,7 +281,9 @@ what was rejected, is in `docs/DECISIONS.md`** — this section stays a short in
    recorded as a deliberate, unresolved tension, not a contradiction —
    `STATE_OF_THE_SCIENCE.md` §11, `configs/bio_box.yaml`. Full record: `DECISIONS.md`
    D1 and Part 3 item 4.
-5. **Whether to adopt the low-basal init** (0 % → 82 % Turing-reachable at init) given
+5. **Whether to adopt the low-basal init** (~~0 % → 82 % Turing-reachable at init~~ —
+   **withdrawn 2026-08-04, `DECISIONS.md` D-EVID-11: the strict figure is 0 %, and what
+   low_basal actually buys is the positive Jacobian diagonal, 28.6 % vs 0 %**) given
    that it biases which solutions are found. **Still OPEN as a default-flip decision**,
    but now with training-time evidence against it: PR 9 measured 0/40 restarts
    converging under actual training with `low_basal` vs a matched `default` run

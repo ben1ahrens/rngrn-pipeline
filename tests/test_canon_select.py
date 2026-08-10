@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import sys
 
+import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
@@ -137,6 +138,107 @@ def test_probe_period_differs_from_the_samples_own_period():
     assert CS.stability_probe_p({"L": 78.0, "k_star": 0.2416}) != 3
 
 
+def test_probe_period_stays_inside_the_generator_feasibility_window():
+    """A p whose L falls outside [18, 220] makes simulate_and_classify raise -- this bit
+    when the probe first ran (p=13 gave L=300.63 for a long-wavelength system)."""
+    from gen_tg3 import feasible_periods
+    for k in (0.10, 0.2416, 0.75, 1.5):
+        p = CS.stability_probe_p({"L": 6 * 2 * np.pi / k, "k_star": k})
+        assert p in feasible_periods(k)
+
+
 def test_native_periods_recovers_the_generating_p():
     """L = p * 2pi/k*, so p = L*k*/(2pi). qvar/sample_0000 was generated at p=3."""
     assert CS.native_periods({"L": 78.01357861389891, "k_star": 0.24161891117478512}) == 3
+
+
+# --------------------------------------------------------------------------------------
+# which classes we actually ship
+# --------------------------------------------------------------------------------------
+def test_stripes_is_in_the_taxonomy_but_not_shipped():
+    """MEASURED 2026-08-10: every stripes candidate in the re-simulatable corpus flips to
+    labyrinth when only the box size changes, and no sample at p >= 11 is ever labelled
+    stripes. The class is a small-box artefact, so it is not a canonical dataset."""
+    assert "stripes" in CS.TAXONOMY_CLASSES
+    assert "stripes" not in CS.CANONICAL_CLASSES
+    assert CS.CANONICAL_CLASSES == ("spots", "labyrinth")
+
+
+# --------------------------------------------------------------------------------------
+# the selection driver
+# --------------------------------------------------------------------------------------
+def _fake_table():
+    """8 synthetic systems: 4 per canonical class, decreasing margin, all gate-clean.
+
+    Two per class carry system_ids that appear in CS.PREVIOUSLY_RUN (so they are eligible
+    for the tuning slots) and two do not (so they can fill the held-out slots).
+    """
+    out = []
+    # burned ids must exist in PREVIOUSLY_RUN; fresh ids must not.
+    ids = {"spots": [0, 1, 100, 101], "labyrinth": [2, 3, 102, 103]}
+    for cls, phi, an in (("spots", 0.10, 0.05), ("labyrinth", 0.50, 0.20)):
+        for i, sid in enumerate(ids[cls]):
+            r = row(morph=cls, phi=phi + (0.02 * i if cls == "spots" else 0.0),
+                    aniso=an + (0.0 if cls == "spots" else 0.05 * i))
+            r.update(source_dataset="three_gene_qvar", source_key=f"sample_{sid:04d}",
+                     system_id=sid, k_star=0.3, L=125.0)
+            r["margin"] = CS.class_margin(cls, r["area_frac"], r["anisotropy"])
+            r["uid"] = CS.row_uid(r)
+            out.append(r)
+    return out
+
+
+def test_the_fixture_matches_the_real_previously_run_set():
+    """Guards the fixture itself: if PREVIOUSLY_RUN changes, these tests must be updated
+    rather than silently testing a different split."""
+    t = _fake_table()
+    burned = [r for r in t if r["uid"] in CS.PREVIOUSLY_RUN]
+    assert len(burned) == 4, "fixture needs exactly 2 burned systems per class"
+
+
+def _all_stable(table):
+    return {r["uid"]: True for r in table}
+
+
+def test_selection_returns_the_requested_count_per_class():
+    t = _fake_table()
+    sel = CS.select(t, _all_stable(t), per_class=4, n_tuning=2)
+    for cls in CS.CANONICAL_CLASSES:
+        assert len(sel["datasets"][f"turing_{cls}"]["samples"]) == 4
+
+
+def test_unstable_systems_are_excluded_even_at_high_margin():
+    t = _fake_table()
+    stab = _all_stable(t)
+    best = max((r for r in t if r["morphology"] == "spots"), key=lambda r: r["margin"])
+    stab[best["uid"]] = False
+    sel = CS.select(t, stab, per_class=3, n_tuning=1)
+    assert best["uid"] not in {s["uid"] for s in sel["datasets"]["turing_spots"]["samples"]}
+
+
+def test_each_dataset_gets_distinct_periods():
+    t = _fake_table()
+    sel = CS.select(t, _all_stable(t), per_class=4, n_tuning=2)
+    for name, d in sel["datasets"].items():
+        ps = [s["periods_per_box"] for s in d["samples"]]
+        assert len(set(ps)) == len(ps), f"{name} reuses a periods-per-box value"
+
+
+def test_split_roles_are_assigned_and_counted():
+    t = _fake_table()
+    sel = CS.select(t, _all_stable(t), per_class=4, n_tuning=2)
+    roles = [s["role"] for s in sel["datasets"]["turing_spots"]["samples"]]
+    assert roles.count("tuning") == 2
+    assert roles.count("held_out") == 2
+
+
+def test_selection_fails_loud_when_a_class_is_short():
+    thin = [r for r in _fake_table() if r["morphology"] != "labyrinth"]
+    with pytest.raises(ValueError, match="only 0 admissible"):
+        CS.select(thin, _all_stable(thin), per_class=4, n_tuning=2)
+
+
+def test_selection_is_deterministic():
+    t = _fake_table()
+    s = _all_stable(t)
+    assert CS.select(t, s, 4, 2) == CS.select(t, s, 4, 2)

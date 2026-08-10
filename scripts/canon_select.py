@@ -61,7 +61,31 @@ CV_MIN = 0.30
 # the k* half-bin precision 1/(2p) lands in 1.6%..3.1% (vs 8.3% on the legacy data).
 P_CHOICES = tuple(range(16, 33))
 
-CLASSES = ("spots", "stripes", "labyrinth")
+# Everything the generator's classifier can emit. `holes` is omitted deliberately: it is
+# structurally unreachable, because species 0 is the self-activator in all six topologies
+# and its field is bounded in [b/mu, (b+V)/mu] with the basal floor 1-3 decades below
+# saturation, so the activator channel is positively skewed by construction while
+# `holes` (phi > 0.66) needs strong negative skew. Measured class-mean skews: spots +1.235,
+# labyrinth -0.145, stripes -0.058. The corpus contains zero `holes` samples in 413.
+TAXONOMY_CLASSES = ("spots", "stripes", "labyrinth")
+
+# What we actually ship as canonical datasets.
+#
+# `stripes` is EXCLUDED, on measurement rather than convenience (2026-08-10):
+#   * 9/23 multiL systems change morphology label when only the box size changes, and every
+#     single flip is labyrinth <-> stripes -- the uncalibrated `A > 0.55` boundary.
+#   * All 5 gated qvar stripes candidates flip to labyrinth under the stability probe.
+#     Zero stripes survive gates + stability anywhere in the re-simulatable corpus.
+#   * corr(periods_per_box, anisotropy) = -0.312, and the stripes fraction falls
+#     monotonically 26% -> 20% -> 16% -> 8% -> 0% across p bins. NO sample at p >= 11 is
+#     ever labelled stripes; stripes sit at median p = 4.5 against 9.5 for everything else.
+#
+# The mechanism: a small box admits few orientations, forcing the pattern onto a single
+# axis and raising anisotropy. Give it room and it relaxes into labyrinth. So `stripes`
+# here is largely a small-box artefact rather than a distinct pattern type, and the
+# canonical range p = 16..32 lies entirely above the regime where it has ever occurred.
+# Shipping a "stripes" set would ship the artefact. See docs/DECISIONS.md D-CANON-2.
+CANONICAL_CLASSES = ("spots", "labyrinth")
 
 
 def class_margin(morphology, phi, anisotropy):
@@ -169,18 +193,24 @@ def native_periods(row):
 
 
 def stability_probe_p(row):
-    """A second periods-per-box at which to re-simulate, well separated from the native one.
+    """A second periods-per-box at which to re-simulate, as far from the native one as the
+    system allows.
 
     Probing at the sample's own p would re-run an identical simulation and prove nothing.
-    Stays inside the original generator's {3..14} window so the probe is a box size the
-    screening actually certified as feasible for this system.
+    The candidate set is ``gen_tg3.feasible_periods(k*)`` — the periods for which
+    ``L = p*(2pi/k*)`` lands inside the generator's [18, 220] acceptance window — because a
+    p outside it makes ``simulate_and_classify`` raise. Picking the FURTHEST feasible p
+    makes the probe the strongest available test of whether the label is a property of the
+    system or of its box.
     """
+    from gen_tg3 import feasible_periods
+
     native = native_periods(row)
-    candidates = [p for p in (native + 5, native - 5, native + 3, native - 3)
-                  if 3 <= p <= 14 and p != native]
-    if not candidates:
-        raise ValueError(f"no valid stability probe for native p={native}")
-    return candidates[0]
+    feas = [p for p in feasible_periods(float(row["k_star"])) if p != native]
+    if not feas:
+        raise ValueError(f"no feasible stability probe for native p={native} "
+                         f"(k*={row['k_star']:.4f}); this system admits only one box size")
+    return max(feas, key=lambda p: (abs(p - native), p))
 
 
 def label_is_stable(row, probe_labels):
@@ -199,3 +229,128 @@ def multiL_labels(system_id, datasets_root=None):
     import td_figures as TD
     return [str(s["morphology"]) for s in TD.load_samples("three_gene_multiL", datasets_root)
             if int(s["attrs"]["system_id"]) == int(system_id)]
+
+
+# ======================================================================================
+# selection
+# ======================================================================================
+# Systems that recovery experiments have already been run against (counted over every
+# experiments/**/runs.jsonl). They are burned for tuning, so they may seed the TUNING half
+# of a class but must never land in the held-out half.
+PREVIOUSLY_RUN = {"three_gene_qvar:0", "three_gene_qvar:1", "three_gene_qvar:2",
+                  "three_gene_qvar:3", "three_gene_qvar:4", "three_gene_multiL:13"}
+
+
+def select(table, stability, per_class=5, n_tuning=2, seed=2026):
+    """Choose ``per_class`` systems for each canonical class and assign split roles.
+
+    Ranking is by margin, descending, after gates and stability. Previously-run systems are
+    preferred for the TUNING slots — they are already burned, so spending them costs
+    nothing — and forbidden from the held-out slots, where they would not be held out in
+    any meaningful sense.
+    """
+    out = {"seed": seed, "per_class": per_class, "n_tuning": n_tuning, "datasets": {}}
+    for cls in CANONICAL_CLASSES:
+        pool = [r for r in table
+                if r["morphology"] == cls and passes_gates(r) and stability.get(r["uid"], False)]
+        if len(pool) < per_class:
+            raise ValueError(
+                f"class {cls!r}: only {len(pool)} admissible systems, need {per_class}. "
+                f"Screen fresh candidates with scripts/gen_tg3.py rather than lowering a gate.")
+        burned = sorted([r for r in pool if r["uid"] in PREVIOUSLY_RUN],
+                        key=lambda r: (-r["margin"], r["uid"]))
+        fresh = sorted([r for r in pool if r["uid"] not in PREVIOUSLY_RUN],
+                       key=lambda r: (-r["margin"], r["uid"]))
+        tuning = (burned + fresh)[:n_tuning]
+        taken = {r["uid"] for r in tuning}
+        held = [r for r in fresh if r["uid"] not in taken][:per_class - n_tuning]
+        if len(held) < per_class - n_tuning:
+            raise ValueError(f"class {cls!r}: not enough never-run systems for the held-out "
+                             f"half ({len(held)} of {per_class - n_tuning})")
+        chosen = tuning + held
+        ds_id = f"turing_{cls}"
+        periods = draw_periods(ds_id, per_class, seed)
+        samples = []
+        for r, p, role in zip(chosen, periods,
+                              ["tuning"] * n_tuning + ["held_out"] * (per_class - n_tuning)):
+            samples.append({**{k: r[k] for k in CANDIDATE_FIELDS},
+                            "periods_per_box": int(p), "role": role})
+        out["datasets"][ds_id] = {"morphology": cls, "samples": samples}
+    return out
+
+
+def compute_stability(table, datasets_root=None, cache_path=None, verbose=True):
+    """Stability verdict per system.
+
+    multiL systems are free — they were already simulated at p in {4,7,10,13}, so the probe
+    is a lookup. qvar systems need ONE extra 96x96 simulation each (~20-40 s). Results are
+    cached so the (slow) sweep is restartable.
+    """
+    import td_figures as TD
+
+    cache = {}
+    if cache_path and os.path.exists(cache_path):
+        cache = json.load(open(cache_path))
+
+    qvar = {s["key"]: s for s in TD.load_samples("three_gene_qvar", datasets_root)}
+    stability = {}
+    for r in table:
+        if r["uid"] in cache:
+            stability[r["uid"]] = bool(cache[r["uid"]])
+            continue
+        if not passes_gates(r) or r["morphology"] not in CANONICAL_CLASSES:
+            stability[r["uid"]] = False          # never probed; cannot be selected anyway
+            continue
+        if r["source_dataset"] == "three_gene_multiL":
+            labels = multiL_labels(r["system_id"], datasets_root)
+        else:
+            import canon_generate as CG
+            labels = [CG.probe_label(qvar[r["source_key"]], stability_probe_p(r))]
+        ok = label_is_stable(r, labels)
+        stability[r["uid"]] = ok
+        cache[r["uid"]] = ok
+        if verbose:
+            print(f"  probe {r['uid']:24s} {r['morphology']:10s} -> "
+                  f"{'STABLE' if ok else 'FLIPPED'}")
+        if cache_path:
+            with open(cache_path, "w") as f:
+                json.dump(cache, f, indent=2, sort_keys=True)
+    return stability
+
+
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description="Freeze the canonical dataset selection.")
+    ap.add_argument("--out", default=os.path.join(HERE, "..", "data", "canonical_selection.json"))
+    ap.add_argument("--cache", default=os.path.join(HERE, "..", "data",
+                                                    "canonical_stability_cache.json"))
+    ap.add_argument("--per-class", type=int, default=5)
+    ap.add_argument("--n-tuning", type=int, default=2)
+    ap.add_argument("--seed", type=int, default=2026)
+    ap.add_argument("--datasets-root", default=None)
+    a = ap.parse_args(argv)
+
+    table = candidate_table(a.datasets_root)
+    print(f"{len(table)} distinct systems in the eligible pool")
+    stability = compute_stability(table, a.datasets_root, a.cache)
+    sel = select(table, stability, a.per_class, a.n_tuning, a.seed)
+    sel["excluded_classes"] = {
+        "stripes": "every candidate flips to labyrinth when only the box size changes; "
+                   "no sample at p >= 11 is ever labelled stripes (see DECISIONS D-CANON-2)",
+        "holes": "structurally unreachable: species 0 is the self-activator in all six "
+                 "topologies, so the observed channel is positively skewed by construction",
+    }
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    with open(a.out, "w") as f:
+        json.dump(sel, f, indent=2, sort_keys=True)
+    print(f"\nwrote {a.out}")
+    for name, d in sel["datasets"].items():
+        print(f"\n{name}:")
+        for s in d["samples"]:
+            print(f"   {s['uid']:24s} {s['source_key']:13s} p={s['periods_per_box']:3d} "
+                  f"px/wl={512/s['periods_per_box']:5.1f} margin={s['margin']:.3f} {s['role']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

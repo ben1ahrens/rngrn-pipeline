@@ -88,3 +88,80 @@ def test_params_from_sample_rebuilds_the_generator_input():
     assert out["periods_per_box"] == 20
     assert out["sim_seed"] == 99
     assert np.allclose(out["_M"], p["_M"])
+
+
+# --------------------------------------------------------------------------------------
+# the canonical payload contract
+# --------------------------------------------------------------------------------------
+def _record(grid=32):
+    rng = np.random.default_rng(0)
+    return {"final": rng.random((3, grid, grid)).astype(np.float32),
+            "L": 120.0, "dx": 120.0 / grid, "dt_sim": 0.01, "grid": grid,
+            "cv0": 0.7, "morphology": "spots", "wavelength": 20.0, "k_star_fft": 0.31,
+            "area_frac": 0.2, "n_components": 40, "anisotropy": 0.05,
+            "cv_trace": np.linspace(0, 0.7, 20), "cv_times": np.linspace(0, 260, 20),
+            "params": {"b": [1., 1., 1.], "V": [1., 1., 1.], "mu": [1., 1., 1.],
+                       "K": [1., 1., 1.], "n": 2.0, "D": [1., 30., 40.],
+                       "topology": "double_inhibitor", "reaction": "multiplicative",
+                       "interaction_matrix": [[1, -1, -1], [1, 0, 0], [1, 0, 0]],
+                       "k_star": 0.30, "sim_seed": 7, "periods_per_box": 20,
+                       "x_star": [1., 1., 1.], "_M": [[1, -1, -1], [1, 0, 0], [1, 0, 0]]},
+            "source_dataset": "three_gene_qvar", "source_key": "sample_0002",
+            "system_id": 2, "role": "tuning"}
+
+
+def test_payload_carries_the_attributes_the_gate_requires(tmp_path):
+    """gate.from_registry RAISES if a sample lacks L or k_star -- it refuses to default
+    them. Everything else in the payload is optional to the loader."""
+    import h5py
+    out = CG.write_canonical_payload([_record()], str(tmp_path / "payload.h5"))
+    with h5py.File(out, "r") as f:
+        g = f["sample_0000"]
+        assert "L" in g.attrs and "k_star" in g.attrs
+        assert g["final_frame"].shape == (3, 32, 32)
+        assert "params_json" in g.attrs and "sim_seed" in g.attrs
+
+
+def test_payload_stores_no_trajectory(tmp_path):
+    """src/rngrn/ never reads `trajectory`; at 512 it would be 6x the storage for nothing."""
+    import h5py
+    out = CG.write_canonical_payload([_record()], str(tmp_path / "payload.h5"))
+    with h5py.File(out, "r") as f:
+        assert "trajectory" not in f["sample_0000"]
+        assert "cv_trace" in f["sample_0000"]
+
+
+def test_payload_records_its_provenance(tmp_path):
+    """Which corpus sample this was promoted from, and which side of the split it is on."""
+    import h5py
+    out = CG.write_canonical_payload([_record()], str(tmp_path / "payload.h5"))
+    with h5py.File(out, "r") as f:
+        g = f["sample_0000"]
+        assert g.attrs["source_dataset"] == "three_gene_qvar"
+        assert g.attrs["source_key"] == "sample_0002"
+        assert g.attrs["role"] == "tuning"
+
+
+def test_all_three_channels_are_stored(tmp_path):
+    """Real images give one observable, but storing all three keeps m=1 vs m=3 a
+    controlled comparison rather than a different dataset."""
+    import h5py
+    out = CG.write_canonical_payload([_record()], str(tmp_path / "payload.h5"))
+    with h5py.File(out, "r") as f:
+        assert f["sample_0000"]["final_frame"].shape[0] == 3
+
+
+def test_payload_round_trips_through_the_firewall_gate(tmp_path):
+    """The real contract: gate.from_registry must be able to load what we wrote."""
+    import json
+    from rngrn.data import registry as reg
+    from rngrn.data import gate
+
+    root = tmp_path / "datasets"
+    (root / "turing_spots").mkdir(parents=True)
+    CG.write_canonical_payload([_record()], str(root / "turing_spots" / "payload.h5"))
+    reg.scan(str(root))
+    ri, ak = gate.from_registry(str(root), "turing_spots", "sample_0000",
+                                N=3, observed_idx=(0, 1, 2))
+    assert ri.frame.shape == (3, 32, 32)
+    assert ri.L == pytest.approx(120.0)

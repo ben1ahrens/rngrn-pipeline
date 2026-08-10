@@ -85,3 +85,53 @@ def probe_label(sample, periods, grid=96):
     if out is None:
         return "collapsed"
     return str(out["morphology"])
+
+
+# ======================================================================================
+# the canonical payload
+# ======================================================================================
+def write_canonical_payload(records, out_path):
+    """Write the canonical registry payload: final frame, cv trace, full provenance.
+
+    Deliberately OMITS ``trajectory``. Nothing under ``src/rngrn/`` reads it — the loader
+    records only ``frame_shape`` from ``observable_key`` — so at 512x512 it would cost 6x
+    the storage for data no consumer touches.
+
+    Deliberately KEEPS all three channels even though a real photograph gives one. That
+    makes m=1 vs m=3 a controlled comparison on identical data rather than two datasets.
+
+    ``L`` and ``k_star`` are mandatory: ``gate.from_registry`` raises rather than defaulting
+    them, on purpose.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    with h5py.File(out_path, "w") as f:
+        for idx, r in enumerate(records):
+            p = r["params"]
+            g = f.create_group(f"sample_{idx:04d}")
+            g.create_dataset("final_frame", data=r["final"], compression="gzip")
+            g.create_dataset("x_star", data=np.asarray(p["x_star"]))
+            g.create_dataset("D", data=np.asarray(p["D"]))
+            g.create_dataset("interaction_matrix", data=np.asarray(p["_M"]))
+            g.create_dataset("jacobian", data=G.jac_fd(
+                G.make_reaction(p["_M"], np.asarray(p["b"]), np.asarray(p["V"]),
+                                np.asarray(p["mu"]), np.asarray(p["K"]), p["n"],
+                                p["reaction"]), np.asarray(p["x_star"])))
+            g.create_dataset("cv_trace", data=np.asarray(r["cv_trace"]))
+            g.create_dataset("cv_times", data=np.asarray(r["cv_times"]))
+            for k in ("L", "dx", "dt_sim", "grid", "cv0", "morphology", "wavelength",
+                      "k_star_fft", "area_frac", "n_components", "anisotropy"):
+                g.attrs[k] = r[k]
+            g.attrs["k_star"] = float(p["k_star"])       # REQUIRED by gate.from_registry
+            g.attrs["topology"] = p["topology"]
+            g.attrs["reaction"] = p["reaction"]
+            g.attrs["n"] = p["n"]
+            g.attrs["sim_seed"] = int(p["sim_seed"])
+            g.attrs["periods_per_box"] = int(p["periods_per_box"])
+            g.attrs["system_id"] = int(r["system_id"])
+            g.attrs["source_dataset"] = r["source_dataset"]
+            g.attrs["source_key"] = r["source_key"]
+            g.attrs["role"] = r["role"]
+            g.attrs["params_json"] = json.dumps(
+                {**{k: p[k] for k in G.PARAM_KEYS}, "topology": p["topology"],
+                 "reaction": p["reaction"], "interaction_matrix": p["_M"]})
+    return out_path

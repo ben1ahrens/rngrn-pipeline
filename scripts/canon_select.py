@@ -102,3 +102,59 @@ def draw_periods(dataset_id, n, seed):
     """
     rng = np.random.default_rng(stable_seed(f"{seed}:{dataset_id}"))
     return sorted(int(x) for x in rng.choice(P_CHOICES, size=n, replace=False))
+
+
+# ======================================================================================
+# the candidate table
+# ======================================================================================
+# Only these two datasets carry params_json AND sim_seed, which is what re-simulation at a
+# new resolution requires. The 127 legacy three_gene_{train,val,test} samples carry
+# neither — their generator lived in a gitignored tree and their kinetics are gone — and
+# the *_classical_* families carry kinetics but no seed and are not 3-gene GRNs.
+ELIGIBLE_DATASETS = ("three_gene_qvar", "three_gene_multiL")
+
+CANDIDATE_FIELDS = ("source_dataset", "source_key", "system_id", "morphology", "area_frac",
+                    "anisotropy", "cv", "peak_bin", "margin", "k_star", "L", "uid")
+
+
+def row_uid(row):
+    """Stable identity for a SYSTEM (kinetics), independent of which replicate we read."""
+    return f"{row['source_dataset']}:{int(row['system_id'])}"
+
+
+def candidate_table(datasets_root=None):
+    """One row per distinct system across the eligible datasets.
+
+    ``three_gene_multiL`` holds 23 systems x 4 domain sizes; we keep the first replicate as
+    the representative and use the other three for the free label-stability check.
+    """
+    import td_figures as TD
+
+    rows = []
+    for ds in ELIGIBLE_DATASETS:
+        seen = set()
+        for s in TD.load_samples(ds, datasets_root):
+            if not TD.is_resimulatable(s):
+                raise ValueError(f"{ds}/{s['key']} is not re-simulatable but {ds} is listed "
+                                 f"as eligible — the eligibility list is wrong")
+            sid = int(s["attrs"]["system_id"])
+            if sid in seen:
+                continue
+            seen.add(sid)
+            v = TD.patterning_verdict(s["final_frame"][0], s["L"])
+            r = {
+                "source_dataset": ds,
+                "source_key": s["key"],
+                "system_id": sid,
+                "morphology": str(s["morphology"]),
+                "area_frac": float(s["attrs"]["area_frac"]),
+                "anisotropy": float(s["attrs"]["anisotropy"]),
+                "cv": float(v["cv"]),
+                "peak_bin": int(v["peak_bin"]),
+                "k_star": float(s["k_star"]),
+                "L": float(s["L"]),
+            }
+            r["margin"] = class_margin(r["morphology"], r["area_frac"], r["anisotropy"])
+            r["uid"] = row_uid(r)
+            rows.append(r)
+    return rows

@@ -92,3 +92,23 @@ def test_period_range_keeps_every_sample_well_resolved_at_512():
     6 px/wavelength floor (docs/DECISIONS.md D15)."""
     for p in CS.P_CHOICES:
         assert 16 <= 512 / p <= 32
+
+
+# --------------------------------------------------------------------------------------
+# the candidate table
+# --------------------------------------------------------------------------------------
+def test_candidate_row_uid_is_stable_and_unique_per_system():
+    r = {"source_dataset": "three_gene_qvar", "system_id": 7}
+    assert CS.row_uid(r) == "three_gene_qvar:7"
+
+
+def test_only_resimulatable_datasets_are_eligible():
+    """The 127 legacy three_gene samples store no params_json and no sim_seed, so their
+    kinetics are unrecoverable and they can never be re-simulated at a new resolution."""
+    assert CS.ELIGIBLE_DATASETS == ("three_gene_qvar", "three_gene_multiL")
+
+
+def test_table_rows_carry_every_field_the_selector_needs():
+    required = {"source_dataset", "source_key", "system_id", "morphology", "area_frac",
+                "anisotropy", "cv", "peak_bin", "margin", "k_star", "L", "uid"}
+    assert required <= set(CS.CANDIDATE_FIELDS)

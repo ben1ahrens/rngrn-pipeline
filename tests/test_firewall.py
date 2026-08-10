@@ -45,8 +45,15 @@ SIDE_NEUTRAL = ["utils.py"]
 # truth in two lines while passing every previous version of this audit. NOTE these names
 # must stay DOTTED — a bare "registry" would false-positive on `rngrn/registry.py`, the
 # component registry, which model.py and losses/weighting.py legitimately import.
+# `td_figures` and `gen_tg3` added 2026-08-10 (unit training-data-plots). Both live in
+# `scripts/`, so the completeness test below — which globs `src/rngrn` — is structurally
+# blind to them, and both are importable by BARE TOP-LEVEL NAME because the inspection
+# notebook and tests/test_td_figures.py put `scripts/` on sys.path for the whole pytest
+# session. `td_figures.load_samples` reaches params_json, x_star, D and the generator's
+# k_star in two lines. Nothing imports them from the recovery side today; these entries
+# make sure that stays true instead of relying on it.
 FORBIDDEN = ["rd_models", "data.solver", "data.cache", "data.gate", "data.registry",
-             "AnswerKey", "answer_key"]
+             "AnswerKey", "answer_key", "td_figures", "gen_tg3"]
 
 
 def _imports(path):

@@ -2012,3 +2012,106 @@ The axis is not in C1's original eight and had never been tried by this unit. C2
 the serial and the batched path before any cell using it is believed, per the standing rule
 that five silent no-ops have already been found in this codebase. Reordering a queue changes
 no threshold and drops no cell.
+
+### D-TDPLOT-1 — "patterned" and "periodic" are scored as two separate verdicts, and the periodicity threshold is calibrated on the corpus
+*2026-08-10. Unit: training-data visual inspection (`feature/training-data-plots`).*
+*Evidence: `notebooks/training_data_simulations.ipynb` §2/§2b, run over all 413 registered*
+*samples; code in `scripts/td_figures.py::patterning_verdict`; tests in*
+*`tests/test_td_figures.py`.*
+
+**The decision.** The inspection notebook reports two independent booleans per sample rather
+than one:
+
+- `has_contrast` — `cv >= 0.05`, the spatial coefficient of variation of species 0. This is
+  **not** a new threshold: it is the generator's own accept/reject rule
+  (`scripts/gen_tg3.py:240-241` discards a simulation with `cv0 < 0.05` as "collapsed to
+  homogeneous"). Reusing the identical number means the verdict carries the meaning it had
+  at generation time.
+- `periodic` — the RAPS peak sits at bin index `>= PEAK_BIN_MIN = 3`.
+
+**`has_contrast` is NEARLY A TAUTOLOGY on this corpus and is recorded as such.** Every
+generator here applies the same `cv < 0.05` reject rule, so "413/413 clear `cv >= 0.05`,
+corpus minimum 0.0633" is what the filter does, not evidence about the data. An earlier
+draft of this branch reported it under "Established"; that was wrong and is corrected. What
+the check *does* establish is payload integrity — the recomputed cv matches the stored
+`cv0` attribute to <= 2.2e-07 across all 413 samples. The informative screen is `periodic`.
+
+**Naming collision, avoided deliberately.** The key is `has_contrast`, **not** `patterned`,
+because `src/rngrn/eval/rollout.py:272` already owns `patterned` for a different quantity —
+rollout amplitude against `max(1e-3, 0.02*|x*_0|)` — and *that* one is pre-registered
+(`docs/PREREGISTRATION.md` §3.5a). The two are never comparable, and no number from this
+notebook may be read against a rollout `patterned` rate.
+`tests/test_td_figures.py::test_the_contrast_key_does_not_collide_with_the_prereg_patterned_name`
+holds the separation.
+
+**Why two and not one.** `cv` asks "is there spatial contrast?" and never "is the contrast
+**periodic**?" A field made of a handful of isolated blobs clears `cv` comfortably while its
+power spectrum decays monotonically from the lowest resolvable bin — there is no interior
+peak, hence no characteristic wavelength, hence no Turing pattern. Merging the two into one
+boolean would have hidden exactly the case the corpus turned out to contain.
+
+**How the threshold was set.** The RAPS peak-bin distribution over all 413 registered
+samples, measured 2026-08-10 — the FULL distribution, summing to 413:
+
+```
+bin:    1   2    3    4    5    6    7    8    9   10   11   12   13   14
+count:  1   0   14   44   78  155   49   12   15   14    8    9   11    3
+                                                  min=1  1st pct=3  median=6  max=14
+```
+
+> **Correction, same day.** The first version of this entry printed the table capped at
+> bin 9 with the residue mislabelled `9+`. That silently dropped the 45 samples at bins
+> 10–14 and summed to 368, not 413. The cap came from the notebook's own generating
+> expression (`range(pb.min(), min(pb.max(), 9) + 1)`), now removed and replaced by an
+> assertion that the histogram accounts for every sample. The gap-at-bin-2 conclusion is
+> unaffected — everything omitted lay further *above* the threshold — but a table in this
+> register that drops 11 % of the corpus is a defect regardless.
+
+Exactly one sample sits at bin 1; **bin 2 is empty**; every other sample is at bin 3 or
+above. `PEAK_BIN_MIN = 3` therefore falls inside a genuine gap in the data rather than
+cutting through a populated region. Had the distribution been continuous across bins 1–3 the
+screen would have been reported as unusable instead of adopted.
+
+**"Calibrated" would be too strong a word, so the limits are recorded here rather than left
+implicit** (CLAUDE.md §8):
+
+- The threshold is set **descriptively**, from the corpus distribution. On real data its
+  decision boundary has been exercised **n = 1** times: one sample is separated, 412 sit on
+  the other side. That makes it a corpus-specific outlier detector, not a transferable
+  periodicity criterion.
+- **`PEAK_BIN_MIN = 2` gives an identical partition** on this corpus, and `4` would flag 15
+  samples. The threshold is insensitive downward and brittle upward.
+- `peak_bin >= 1` is **structural, not a property of the data**: `observables.raps` forces
+  `power[0] = 0`, so bin 0 can never win. "min = 1" is a floor of the estimator.
+- **The known-answer controls are synthetic and live in the tests, not in the corpus.**
+  `tests/test_td_figures.py` passes a synthetic periodic field (must clear the screen) and a
+  synthetic isolated-blob field (must fail it) through this exact code path. No *real*
+  sample of independently-known periodicity was available to read it against.
+
+**What it found.** `three_gene_qvar/sample_0032` in a domain of L = 177.8 — ~95 % of pixels
+within 1 % of the field's *dynamic range* above its minimum (90.4 % within 1 % of the
+minimum *value*; the earlier wording of this sentence conflated the two), species 1 and 2
+flat to `cv = 0.002`, and a
+monotonically decaying spectrum. The generator labelled it `morphology = 'spots'` because
+`gen_tg3.classify` assigns `spots` on `area_fraction < 0.34` alone, with **no lower bound on
+area fraction or component count** — a condition an almost-empty field satisfies trivially.
+It is 1/413 (0.24 %) of the corpus and 1/34 (2.9 %) of `three_gene_qvar`.
+
+**What was rejected.** (a) A "fraction of pixels pinned at the minimum > 0.6" screen: it
+flags 8 samples, of which only one is the real defect. Six are legitimate dense spot
+patterns — e.g. `three_gene_qvar/sample_0023`, 83 connected components with a clean spectral
+peak at bin 9. The seventh is `three_gene_classical_val/sample_0007`, the marginal 4-spot
+case discussed in `docs/HANDOFF_training_data_plots.md` §5: it clears the periodicity screen
+at bin 4 but is *sparse*, not dense, so it is neither a defect nor a dense-spot exemplar.
+The eighth is `sample_0032` itself. So the screen over-flags 7:1 and was rejected.
+(b) Folding periodicity into the cv verdict — that would silently redefine a
+number the generator already owns. (c) Tightening `gen_tg3.classify`'s `spots` rule: that
+would change what every existing dataset's stored `morphology` attribute means, and is a
+generator change, not an inspection change.
+
+**Explicitly NOT decided here.** Whether `sample_0032` should be excluded from training. It
+is reported, not acted on — dropping a sample changes what every `three_gene_qvar` number
+means and is the owner's call, not this unit's.
+
+**Scope.** This decision governs an inspection/reporting notebook only. It introduces no
+recovery criterion and touches nothing on the recovery side of the firewall.

@@ -1,10 +1,16 @@
-# Milestone 3 (registry) — N=3 recovery from the registered three_gene_val dataset.
-# Fully observed (m=3). This is the first REAL-data recovery config, as opposed to
-# milestone3_3gene.yaml which points at a loose unpacked HDF5 path.
+# Milestone 3 (registry) — N=3 recovery from a registered dataset, fully observed (m=3).
+#
+# The default dataset_id was `three_gene_val` until 2026-08-10. That is a LEGACY set: its
+# domain size encodes k* exactly (L = 6*2pi/k*), so an image-blind predictor beats recovery
+# on kstar_rel_err and PREREGISTRATION §1 bars it from supporting any k* claim. It now points
+# at the canonical training source instead (D-CANON-4).
+#
+# Callers that want a different set pass --dataset-id; scripts/tune_comp_cell.sh and
+# scripts/c2_cell.sh both do, so this default is a starting point, not a constraint.
 _base_: [base.yaml]
 data:
   source: registry
-  dataset_id: three_gene_val
+  dataset_id: turing_spots
   sample_key: sample_0000
   # no L here: the sample's own L attr is authoritative (this dataset spans many
   # domain sizes). Set data.L_override only to cross-check one specific sample.

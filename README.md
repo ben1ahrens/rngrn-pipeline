@@ -115,7 +115,7 @@ no longer the copy to read.
 |---|---|---|
 | M1 | `milestone1_{gm,schnak}.yaml` | N=m=2 fully observed — tune the objective here |
 | M2 | `milestone2_gm_partial.yaml` | N=2, m=1 — latent v field, identifiability degradation |
-| M3 | `milestone3_3gene.yaml` | N=3 from the 3-gene HDF5 dataset |
+| M3 | `m3_registry.yaml` | N=3 from a registered dataset — defaults to the canonical `turing_spots` |
 
 ## Where datasets come from — four sources, one firewall
 
@@ -145,7 +145,7 @@ cp /path/to/val.h5 data/datasets/three_gene_v1/payload.h5
 rngrn scan-datasets
 
 rngrn list-datasets
-rngrn train --config configs/registry_example.yaml    # source: registry, dataset_id: three_gene_v1
+rngrn train --config configs/m3_registry.yaml         # source: registry, dataset_id: turing_spots
 ```
 
 **One-time per machine:** see [docs/LOCAL_DATA_SETUP.md](docs/LOCAL_DATA_SETUP.md)

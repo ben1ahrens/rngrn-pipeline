@@ -111,10 +111,13 @@ and `docs/` for per-branch handoffs.
   deleted. The account's Actions billing has lapsed, so runs are *skipped* and reported as
   failures that have nothing to do with the code. Do not diagnose those as code failures.
   Restoring CI = uncommenting the two triggers.
-- Current suite: **462 passed, 1 skipped**, all CPU, ~3 minutes to run (measured 2026-08-04 on
-  `feature/turing-training` after the branch consolidation). Keep them green. The count in
+- Current suite: **551 passed, 1 skipped**, all CPU, ~3 min 40 s to run (measured 2026-08-10 on
+  `feature/canonical-datasets` after the canonical-dataset work). Keep them green. The count in
   this line has been stale before — re-measure it rather than trusting it, and update it when
   it moves.
+- **Run the suite with the sandbox DISABLED.** `payload.h5` is on the sandbox read-deny list,
+  so a sandboxed run reports ~15 `PermissionError` failures and errors that look exactly like
+  code faults and are not. Diagnosing those as code bugs wastes a session.
 
 ## 4. House style
 
@@ -158,14 +161,24 @@ it. Neither holds.
   `:492`). This is **not** a truth leak — `d_ratio_of` is a pure function of the model's own
   `D` — but it does contradict the stated design intent, and no audit covers it.
 
-**The real gap is that the audit is a name allowlist copied by hand into four files.**
-`RECOVERY_SIDE` is re-typed verbatim in `tests/test_firewall.py:19`,
-`tests/test_plot_arrays.py:319`, `tests/test_permutation_scoring.py` and
-`tests/test_morphology_scoring.py` — the same eleven names in all four. `history.py` is in
-none of them; neither is `eval/lgen_eval.py`. **So any new module is unaudited by default and
-the suite stays green.** The fix is not to add one name: define `RECOVERY_SIDE` once, and add
-a test asserting that every module under `losses/` and `eval/`, plus `history.py`, is on
-either that list or an explicit `SCORING_SIDE` list — membership of neither being a failure.
+**The allowlist gap inside `src/` is CLOSED.** This paragraph used to describe the fix as a
+to-do; it has been implemented and the description was stale. `tests/test_firewall.py` now
+declares `RECOVERY_SIDE` (with `history.py` on it), `SCORING_SIDE` (with `eval/lgen_eval.py`)
+and `SIDE_NEUTRAL` (`utils.py`), and
+`test_every_loss_and_eval_module_is_classified` asserts that every module under `losses/` and
+`eval/`, plus `history.py`, is on one of those lists — membership of none being a failure. A
+new module under `src/rngrn/` is therefore no longer unaudited by default.
+
+**The gap that remains is `scripts/`, and it bit on 2026-08-10.** The completeness test globs
+`src/rngrn/{losses,eval}`, so it cannot see anything in `scripts/` — yet several scripts read
+`payload.h5` (generating kinetics, `x_star`, the generator's `k_star`) *and* are importable by
+bare top-level name, because the suite and the notebooks put `scripts/` on `sys.path`. Those
+are covered only by the hand-maintained `FORBIDDEN` list: `td_figures`, `gen_tg3`,
+`canon_select`, `canon_generate`, `canon_annotate`. Adding a sixth such script and forgetting
+to list it leaves the suite green — which is exactly what happened when the canonical-dataset
+scripts were written. **If you add a script that opens `payload.h5`, add its module name to
+`FORBIDDEN`.** The durable fix would be a completeness test over `scripts/` that classifies
+each module as payload-reading or not.
 
 ## 6. Datasets
 

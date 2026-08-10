@@ -75,6 +75,42 @@ the §3 thresholds are untouched.*
 
 ---
 
+### 1b. The canonical `turing_*` split — declared 2026-08-10, before the data existed
+
+`turing_spots` and `turing_labyrinth` (5 systems each, 512×512) were generated for reuse
+across all future simulated-data experiments. Their split is fixed **here, before the
+generation run produced a single frame**, and is recorded in the frozen selection record
+`data/canonical_selection.json` alongside the systems themselves.
+
+| role | n per dataset | rule |
+|---|---|---|
+| **TUNING (burned)** | 2 | seeded from systems recovery experiments have already run against, so no fresh system is spent on tuning |
+| **HELD OUT** | 3 | restricted to systems never used in any run |
+
+Concretely — the `role` attribute is written into every sample's payload, so a run cannot
+mistake one for the other:
+
+| dataset | tuning | held out |
+|---|---|---|
+| `turing_spots` | `three_gene_qvar:2`, `three_gene_qvar:3` | `three_gene_multiL:0`, `three_gene_qvar:30`, `three_gene_multiL:20` |
+| `turing_labyrinth` | `three_gene_qvar:1`, `three_gene_qvar:18` | `three_gene_qvar:9`, `three_gene_multiL:9`, `three_gene_qvar:6` |
+
+A system that appears in `PREVIOUSLY_RUN` may **never** occupy a held-out slot — it is not
+held out in any meaningful sense. `three_gene_qvar:18` occupies a tuning slot despite never
+having been run, because only one previously-run labyrinth system survived the gates; it is
+declared burned here so the held-out three stay clean.
+
+**Why there is no `turing_stripes`.** Every stripes candidate in the re-simulatable corpus
+loses the label when only the box size changes, and no sample at periods-per-box ≥ 11 is
+ever labelled `stripes`. The canonical range is 16–32. See `docs/DECISIONS.md` **D-CANON-2**.
+
+**These datasets carry no leak.** Periods-per-box is drawn distinct per dataset from
+{16..32}, so `L` does not determine `k*`. Unlike the legacy sets, they may support k\* claims.
+
+*This is a split definition and an addition to §1's dataset roles. It weakens no pass
+condition — every threshold in §3 is untouched.*
+
+
 ## 2. Seeds
 
 **K = 8 independent seeds per target**, and *independent* is load-bearing. Before phase-B

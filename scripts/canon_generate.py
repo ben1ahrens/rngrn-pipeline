@@ -38,6 +38,18 @@ import gen_tg3 as G                                                # noqa: E402
 GRID = 512
 CV_EVERY = 200
 
+# px/wavelength band for the canonical sets. This — not an absolute L window — is the real
+# resolution constraint: L enters the physics only as a unit (CLAUDE.md section 7c). The
+# floor of 16 sits far above the 6.0 px/wavelength breakdown measured in D15; the ceiling
+# of 32 keeps periods-per-box high enough that the k* half-bin precision stays at 1.6-3.1%.
+PPW_MIN, PPW_MAX = 16.0, 32.0
+
+# Domain-size window passed through to the generator. The default (18, 220) is tied to the
+# 96x96 grid and every canonical sample exceeds it (measured L range 245.8 .. 794.0), which
+# is correct rather than alarming: at 512 those give 17-30 px/wavelength. PPW_MIN/PPW_MAX
+# above is what actually guards resolution here.
+L_BOUNDS = (18.0, 2000.0)
+
 # Saturation tolerance: the pattern must have stopped changing by the end of the run.
 # UNCALIBRATED in the strict sense — it is a convergence tolerance, not a threshold
 # separating two populations, and no control was run against it. It is enforced as a
@@ -135,3 +147,104 @@ def write_canonical_payload(records, out_path):
                 {**{k: p[k] for k in G.PARAM_KEYS}, "topology": p["topology"],
                  "reaction": p["reaction"], "interaction_matrix": p["_M"]})
     return out_path
+
+
+# ======================================================================================
+# the driver
+# ======================================================================================
+def _simulate_one(job):
+    """Pool worker: re-simulate one selected system at the canonical resolution.
+
+    Module-level and picklable. Returns the result dict plus the provenance fields the
+    payload writer needs, or raises with the sample named.
+    """
+    import time
+    s, src, grid = job
+    p = params_from_sample(src, s["periods_per_box"])
+    t0 = time.time()
+    out = G.simulate_and_classify(p, grid=grid, n_traj=2, seed=p["sim_seed"],
+                                  cv_every=CV_EVERY, l_bounds=L_BOUNDS)
+    elapsed = time.time() - t0
+    if out is None:
+        raise RuntimeError(
+            f"{s['uid']} diverged or collapsed at grid={grid}; it did not at 96 — "
+            f"investigate before excluding it")
+    if not is_saturated(out["cv_trace"]):
+        raise RuntimeError(
+            f"{s['uid']} had not saturated by Tmax at grid={grid} (cv still moving > "
+            f"{SATURATION_TOL:.0%} over the last 20% of the run). Re-run with a longer "
+            f"Tmax; do not ship a transient frame.")
+    return {**out, "params": p, "source_dataset": s["source_dataset"],
+            "source_key": s["source_key"], "system_id": s["system_id"],
+            "role": s["role"], "_elapsed": elapsed, "_uid": s["uid"],
+            "_label_before": s["morphology"]}
+
+
+def build_dataset(ds_id, spec, source_root=None, out_root=None, grid=GRID, verbose=True,
+                  procs=1, limit=None):
+    """Re-simulate every system in one dataset spec at `grid` and write its payload.
+
+    ``source_root`` is where the CORPUS is read from; ``out_root`` is where the new payload
+    is written. They are separate so a smoke run can write to a scratch directory while
+    still reading the real corpus.
+    """
+    from multiprocessing import Pool
+    import td_figures as TD
+
+    root = out_root or source_root or os.path.join(HERE, "..", "data", "datasets")
+    samples = spec["samples"][:limit] if limit else spec["samples"]
+
+    jobs = []
+    for s in samples:
+        ppw = grid / s["periods_per_box"]
+        if not (PPW_MIN <= ppw <= PPW_MAX):
+            raise ValueError(f"{ds_id}/{s['uid']}: {ppw:.1f} px/wavelength outside "
+                             f"[{PPW_MIN}, {PPW_MAX}] — check the periods draw, not this gate")
+        src = [x for x in TD.load_samples(s["source_dataset"], source_root)
+               if x["key"] == s["source_key"]][0]
+        jobs.append((s, src, grid))
+
+    if procs > 1:
+        with Pool(procs) as pool:
+            results = pool.map(_simulate_one, jobs)
+    else:
+        results = [_simulate_one(j) for j in jobs]
+
+    for r in results:
+        if verbose:
+            print(f"   {r['_uid']:24s} p={r['params']['periods_per_box']:3d} "
+                  f"px/wl={grid / r['params']['periods_per_box']:5.1f} "
+                  f"morph {r['_label_before']} -> {r['morphology']:10s} "
+                  f"cv={r['cv0']:.2f} ({r['_elapsed']:.0f} s)")
+    return write_canonical_payload(results, os.path.join(root, ds_id, "payload.h5"))
+
+
+def main(argv=None):
+    import argparse
+    import time
+    ap = argparse.ArgumentParser(description="Generate the canonical Turing datasets.")
+    ap.add_argument("--selection", default=os.path.join(HERE, "..", "data",
+                                                        "canonical_selection.json"))
+    ap.add_argument("--source-root", default=None, help="where the CORPUS is read from")
+    ap.add_argument("--out-root", default=None, help="where the new payloads are written")
+    ap.add_argument("--grid", type=int, default=GRID)
+    ap.add_argument("--only", default=None, help="one dataset id, for restartability")
+    ap.add_argument("--procs", type=int, default=1)
+    ap.add_argument("--limit", type=int, default=None, help="first N samples only (debug)")
+    a = ap.parse_args(argv)
+
+    sel = json.load(open(a.selection))
+    for ds_id, spec in sorted(sel["datasets"].items()):
+        if a.only and ds_id != a.only:
+            continue
+        print(f"\n{ds_id} ({len(spec['samples'])} systems at {a.grid}x{a.grid}):", flush=True)
+        t0 = time.time()
+        path = build_dataset(ds_id, spec, a.source_root, a.out_root, a.grid,
+                             procs=a.procs, limit=a.limit)
+        print(f"  wrote {path} ({os.path.getsize(path)/1e6:.1f} MB) "
+              f"in {(time.time()-t0)/60:.1f} min")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

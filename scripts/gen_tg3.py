@@ -179,7 +179,8 @@ def screen_model(topo, form, n_samples, seed, want, periods_choices=PERIODS_CHOI
 
 
 # ---------------- simulation (spectral IMEX) + classification ----------------
-def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1, cv_every=None):
+def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1, cv_every=None,
+                          l_bounds=None):
     """Nonlinear spectral IMEX simulation + morphology classification.
 
     Verbatim from the staging generator except that the domain size comes from
@@ -194,7 +195,17 @@ def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1, cv_every=Non
     matters more at large grids: ``Tmax = 260`` was chosen for 96x96 boxes, and a bigger
     box holds more pattern to organise, while recovery solves ``f(x*) = 0`` and never
     integrates time — so a transient frame is silently outside the model's assumptions.
+
+    ``l_bounds`` (added 2026-08-10): the acceptance window for the domain size, defaulting
+    to the module-level ``(L_MIN, L_MAX) = (18, 220)``. Those numbers are tied to the 96x96
+    grid: they exist so a pattern is neither under- nor over-resolved, and at 96 pixels an
+    L of 800 would leave ~3 px per wavelength. At 512 the same L gives ~18 px/wavelength,
+    which is fine — ``L`` enters the physics only as a UNIT (CLAUDE.md section 7c), so the
+    real constraint is pixels-per-wavelength, not L itself. A caller generating at another
+    resolution therefore passes its own bounds AND enforces its own px/wavelength gate;
+    ``scripts/canon_generate.py`` does exactly that. Existing callers are unaffected.
     """
+    L_lo, L_hi = l_bounds if l_bounds is not None else (L_MIN, L_MAX)
     M = np.array(p["_M"], float)
     b = np.array(p["b"]); V = np.array(p["V"]); mu = np.array(p["mu"])
     K = np.array(p["K"]); n = p["n"]; D = np.array(p["D"])
@@ -203,8 +214,8 @@ def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1, cv_every=Non
     ppb = int(p["periods_per_box"])
     lam = 2 * np.pi / p["k_star"]
     L = float(ppb * lam)
-    if not (L_MIN <= L <= L_MAX):
-        raise ValueError(f"periods_per_box={ppb} gives L={L:.2f} outside [{L_MIN}, {L_MAX}]; "
+    if not (L_lo <= L <= L_hi):
+        raise ValueError(f"periods_per_box={ppb} gives L={L:.2f} outside [{L_lo}, {L_hi}]; "
                          "screen_model should have rejected this candidate")
     dx = L / grid
     dt = 0.02 / max(mu.max(), 1.0)

@@ -56,8 +56,46 @@ ANISO_STRIPES_MIN = 0.55
 # far above that, chosen so a canonical exemplar is unambiguous rather than merely legal.
 CV_MIN = 0.30
 
-# Periods-per-box for the 512 grid. Three properties pull against each other here, and the
-# range is the compromise between them:
+# ======================================================================================
+# THE DOMAIN SIZE IS FIXED, AND CHOSEN WITHOUT REFERENCE TO k*
+# ======================================================================================
+# This is the central design decision of the canonical sets, and it reverses how every
+# earlier dataset in this project was built.
+#
+# Every previous generator set `L = p * (2*pi/k*)` — the domain size computed FROM the
+# answer. The legacy sets used p = 6 always, which made `k* = 6*2*pi/L` exact and let an
+# image-blind predictor read k* off L perfectly. `gen_tg3` improved this by drawing p from
+# {3..14}, and an earlier version of THIS module drew p geometrically from {8..40}. Both are
+# treatments of a symptom: however p is chosen, L is still a function of k* and an integer
+# we picked, so the number of periods in the image is IMPOSED by us rather than produced by
+# the physics.
+#
+# Here L is a CONSTANT, identical for every sample in every canonical dataset, selected
+# without looking at any system's k*. Two consequences:
+#
+#   * A constant carries no information. There is no predictor of k* from L, not merely a
+#     weak one — the leak is not reduced, it is structurally absent.
+#   * The periods per box, `p = L*k*/(2*pi)`, become EMERGENT and generally non-integer,
+#     determined entirely by the reaction and diffusion parameters of the system. That is
+#     the property a real image has: a field of view is what the microscope gives you, and
+#     the wavelength is whatever the biology does.
+#
+# L = 300 chosen by measuring the gated, stable candidate pool (37 systems, wavelengths
+# 9.8-32.8): it puts every one of them at 9.1-30.7 emergent periods and 16.7-56.0
+# px/wavelength — at or above the legacy corpus median of 16.0, far above the 6.0 floor
+# measured in D15, and at a k* half-bin precision of 1.6-5.5% against the legacy 8.3%.
+# See docs/DECISIONS.md D-CANON-3.
+DOMAIN_L = 300.0
+
+# Resolution band the fixed domain must deliver. Checked per sample AFTER the fact — these
+# are not knobs used to shape the data, they are assertions that the fixed L did not leave a
+# system unresolved or with too few periods to measure.
+PPW_MIN, PPW_MAX = 12.0, 64.0
+PERIODS_MIN = 4.0
+
+# ---------------------------------------------------------------------------------------
+# HISTORICAL. Retained only so the older imposed-period route stays reproducible; the
+# canonical datasets do not use it. Three properties pull against each other here:
 #
 #   * k* PRECISION wants HIGH p. The RAPS bin width is 2*pi/L, so the relative half-bin
 #     precision is 1/(2p).
@@ -332,12 +370,24 @@ def select(table, stability, per_class=5, n_tuning=2, seed=2026):
                              f"half ({len(held)} of {per_class - n_tuning})")
         chosen = tuning + held
         ds_id = f"turing_{cls}"
-        periods = draw_periods(ds_id, per_class, seed)
         samples = []
-        for r, p, role in zip(chosen, periods,
-                              ["tuning"] * n_tuning + ["held_out"] * (per_class - n_tuning)):
+        roles = ["tuning"] * n_tuning + ["held_out"] * (per_class - n_tuning)
+        for r, role in zip(chosen, roles):
+            # The domain is the SAME constant for every sample. The periods it contains are
+            # then read off the physics, not chosen — hence `periods_emergent`, a float.
+            periods = DOMAIN_L * r["k_star"] / (2 * np.pi)
+            ppw = 512.0 / periods
+            if periods < PERIODS_MIN or not (PPW_MIN <= ppw <= PPW_MAX):
+                raise ValueError(
+                    f"{ds_id}/{r['uid']}: at the fixed L={DOMAIN_L:.0f} this system gives "
+                    f"{periods:.1f} periods and {ppw:.1f} px/wavelength, outside the usable "
+                    f"band. Choose a different DOMAIN_L for the whole corpus — do NOT set a "
+                    f"per-sample L, which would make L a function of k* again.")
             samples.append({**{k: r[k] for k in CANDIDATE_FIELDS},
-                            "periods_per_box": int(p), "role": role})
+                            "domain_L": float(DOMAIN_L),
+                            "periods_emergent": float(periods),
+                            "px_per_wavelength": float(ppw),
+                            "role": role})
         out["datasets"][ds_id] = {"morphology": cls, "samples": samples}
     return out
 
@@ -413,8 +463,10 @@ def main(argv=None):
     for name, d in sel["datasets"].items():
         print(f"\n{name}:")
         for s in d["samples"]:
-            print(f"   {s['uid']:24s} {s['source_key']:13s} p={s['periods_per_box']:3d} "
-                  f"px/wl={512/s['periods_per_box']:5.1f} margin={s['margin']:.3f} {s['role']}")
+            print(f"   {s['uid']:24s} {s['source_key']:13s} k*={s['k_star']:.3f} "
+                  f"L={s['domain_L']:6.1f} periods={s['periods_emergent']:5.1f} "
+                  f"px/wl={s['px_per_wavelength']:5.1f} margin={s['margin']:.3f} "
+                  f"{s['role']}")
     return 0
 
 

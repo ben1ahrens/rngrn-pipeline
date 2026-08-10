@@ -78,16 +78,37 @@ def test_saturation_needs_enough_samples_to_judge():
 # --------------------------------------------------------------------------------------
 # rebuilding generator input from a stored sample
 # --------------------------------------------------------------------------------------
-def test_params_from_sample_rebuilds_the_generator_input():
+def test_params_from_sample_passes_the_domain_through_untouched():
+    """L is given, not derived. Nothing here may compute L from k*."""
     p = tiny_system()
     fake = {"params": {k: p[k] for k in ("b", "V", "mu", "K", "n", "D")},
             "x_star": np.asarray(p["x_star"]),
             "attrs": {"k_star": p["k_star"], "sim_seed": 99, "grid": 96}}
     fake["params"]["interaction_matrix"] = p["_M"]
-    out = CG.params_from_sample(fake, periods=20)
-    assert out["periods_per_box"] == 20
+    out = CG.params_from_sample(fake, domain_L=300.0)
+    assert out["domain_L"] == 300.0
+    assert out["periods_per_box"] is None
     assert out["sim_seed"] == 99
     assert np.allclose(out["_M"], p["_M"])
+
+
+def test_a_fixed_domain_gives_periods_set_by_kstar_alone():
+    """Two systems on the SAME box must differ in periodicity only through their own k*."""
+    p = tiny_system()
+    slow = dict(p); slow["domain_L"] = 300.0; slow["k_star"] = 0.20
+    fast = dict(p); fast["domain_L"] = 300.0; fast["k_star"] = 0.60
+    a = G.simulate_and_classify(slow, grid=48, Tmax=20.0, seed=3, l_bounds=CG.L_BOUNDS)
+    b = G.simulate_and_classify(fast, grid=48, Tmax=20.0, seed=3, l_bounds=CG.L_BOUNDS)
+    assert a["L"] == b["L"] == 300.0
+    assert (300.0 * 0.60 / (2 * np.pi)) > (300.0 * 0.20 / (2 * np.pi))
+
+
+def test_the_historical_imposed_period_route_still_works():
+    """Every existing dataset was built that way and must stay reproducible."""
+    p = tiny_system()
+    out = G.simulate_and_classify(p, grid=48, Tmax=20.0, seed=3)
+    expected = p["periods_per_box"] * 2 * np.pi / p["k_star"]
+    assert out["L"] == pytest.approx(expected)
 
 
 # --------------------------------------------------------------------------------------
@@ -104,7 +125,8 @@ def _record(grid=32):
                        "K": [1., 1., 1.], "n": 2.0, "D": [1., 30., 40.],
                        "topology": "double_inhibitor", "reaction": "multiplicative",
                        "interaction_matrix": [[1, -1, -1], [1, 0, 0], [1, 0, 0]],
-                       "k_star": 0.30, "sim_seed": 7, "periods_per_box": 20,
+                       "k_star": 0.30, "sim_seed": 7, "domain_L": 120.0,
+                       "periods_per_box": None,
                        "x_star": [1., 1., 1.], "_M": [[1, -1, -1], [1, 0, 0], [1, 0, 0]]},
             "source_dataset": "three_gene_qvar", "source_key": "sample_0002",
             "system_id": 2, "role": "tuning"}

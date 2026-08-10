@@ -52,12 +52,14 @@ PPW_MIN, PPW_MAX = 12.0, 64.0
 # above is what actually guards resolution here.
 L_BOUNDS = (18.0, 2000.0)
 
-# Integration horizon. TMAX_BASE is the generator's own default, kept so a sample that was
-# already converged at 96 costs exactly what it used to. TMAX_MAX caps the escalation at 8x
-# — a system that cannot reach a steady state in 2080 time units is telling us something
-# about the system, and the answer is to look at it, not to keep integrating.
-TMAX_BASE = 260.0
-TMAX_MAX = 2080.0
+# Integration horizon, in non-dimensional time units. 500 is the owner's stated figure
+# (400-600 is sufficient to form stable patterns) and replaces the generator's 260, which
+# was chosen for 96x96 boxes and proved short at 512 — three_gene_qvar:18 was still evolving
+# at the end of a 260-unit run. The escalation below is retained as a safety net, not as the
+# expected path; TMAX_MAX caps it at 4x, because a system that cannot settle in 2000 units
+# is telling us something about the system and the answer is to look at it.
+TMAX_BASE = 500.0
+TMAX_MAX = 2000.0
 
 # Saturation tolerance: the pattern must have stopped changing by the end of the run.
 # UNCALIBRATED in the strict sense — it is a convergence tolerance, not a threshold
@@ -81,15 +83,20 @@ def is_saturated(cv_trace, tol=SATURATION_TOL):
     return bool(abs(final - float(tail[0])) / max(abs(final), 1e-12) < tol)
 
 
-def params_from_sample(sample, periods):
-    """Rebuild the generator's parameter dict from a stored sample, at a new box size."""
+def params_from_sample(sample, domain_L):
+    """Rebuild the generator's parameter dict from a stored sample, on a FIXED domain.
+
+    ``domain_L`` is passed straight through, so the number of periods the box contains is
+    whatever the system's own k* produces. Nothing here chooses the periodicity.
+    """
     a = sample["attrs"]
     p = dict(sample["params"])
     p["_M"] = p["interaction_matrix"]
     p["x_star"] = np.asarray(sample["x_star"])
     p["k_star"] = float(a["k_star"])
     p["sim_seed"] = int(a["sim_seed"])
-    p["periods_per_box"] = int(periods)
+    p["domain_L"] = float(domain_L)
+    p["periods_per_box"] = None          # unused on this path; L is given directly
     return p
 
 
@@ -147,7 +154,10 @@ def write_canonical_payload(records, out_path):
             g.attrs["reaction"] = p["reaction"]
             g.attrs["n"] = p["n"]
             g.attrs["sim_seed"] = int(p["sim_seed"])
-            g.attrs["periods_per_box"] = int(p["periods_per_box"])
+            # Emergent, not imposed: read off L and the system's own k*, generally
+            # non-integer. Recorded as a float so nobody mistakes it for a chosen setting.
+            g.attrs["periods_emergent"] = float(r["L"] * p["k_star"] / (2 * np.pi))
+            g.attrs["domain_L_fixed"] = float(r["L"])
             g.attrs["system_id"] = int(r["system_id"])
             g.attrs["source_dataset"] = r["source_dataset"]
             g.attrs["source_key"] = r["source_key"]
@@ -184,7 +194,7 @@ def _simulate_one(job):
     """
     import time
     s, src, grid = job
-    p = params_from_sample(src, s["periods_per_box"])
+    p = params_from_sample(src, s["domain_L"])
     t0 = time.time()
     tmax = TMAX_BASE
     while True:
@@ -224,10 +234,13 @@ def build_dataset(ds_id, spec, source_root=None, out_root=None, grid=GRID, verbo
 
     jobs = []
     for s in samples:
-        ppw = grid / s["periods_per_box"]
+        # Resolution is now a CONSEQUENCE of the fixed domain and the system's own k*, not
+        # something we set. This is an assertion that the fixed L left the sample usable.
+        ppw = grid * 2 * np.pi / (s["domain_L"] * s["k_star"])
         if not (PPW_MIN <= ppw <= PPW_MAX):
             raise ValueError(f"{ds_id}/{s['uid']}: {ppw:.1f} px/wavelength outside "
-                             f"[{PPW_MIN}, {PPW_MAX}] — check the periods draw, not this gate")
+                             f"[{PPW_MIN}, {PPW_MAX}] at the fixed L={s['domain_L']:.0f}. "
+                             f"Change DOMAIN_L for the whole corpus, never per sample.")
         src = [x for x in TD.load_samples(s["source_dataset"], source_root)
                if x["key"] == s["source_key"]][0]
         jobs.append((s, src, grid))
@@ -240,8 +253,9 @@ def build_dataset(ds_id, spec, source_root=None, out_root=None, grid=GRID, verbo
 
     for r in results:
         if verbose:
-            print(f"   {r['_uid']:24s} p={r['params']['periods_per_box']:3d} "
-                  f"px/wl={grid / r['params']['periods_per_box']:5.1f} "
+            per = r["L"] * r["params"]["k_star"] / (2 * np.pi)
+            print(f"   {r['_uid']:24s} L={r['L']:6.1f} periods={per:5.1f} "
+                  f"px/wl={grid / per:5.1f} "
                   f"morph {r['_label_before']} -> {r['morphology']:10s} "
                   f"cv={r['cv0']:.2f} Tmax={r['_tmax']:.0f} ({r['_elapsed']/60:.1f} min)",
                   flush=True)

@@ -2258,3 +2258,82 @@ assumes a periodic tile with no windowing, so a cropped real image will bias k\*
 The saturation tolerance (1 % over the last 20 % of the run) is a convergence tolerance, not
 a calibrated threshold, and is enforced as a fail-loud gate rather than used to judge
 anything.
+
+### D-CANON-3 — periods-per-box is a geometric ladder over {8..40}, checked against a leak bar
+*2026-08-10. Same unit. Evidence: `scripts/canon_select.py::draw_periods` /*
+*`oracle_leak_error`; tests in `tests/test_canon_select.py`; the measurement below.*
+
+**The decision.** Each canonical dataset's five periods-per-box are laid out as a geometric
+ladder across {8..40} with a seeded sub-rung offset, and the result is **checked** against
+`LEAK_MIN_ORACLE_ERR = 0.25` and rejected if it fails, rather than assumed adequate.
+
+**Why this needed a decision at all.** The obvious reading of "vary p so L does not encode
+k\*" is *draw distinct integers*. That is not sufficient, and the shortfall was measured on
+generated data rather than reasoned about in advance. A first attempt drew five distinct p
+i.i.d. from {16..32} and produced `{17, 22, 23, 24, 28}` for `turing_labyrinth`. An oracle
+blind predictor `k = q·2π/L` — one fixed integer q chosen *after* seeing the answers — fits
+that to **4.5 %** median error. The legacy leak scores 0.0 % and `three_gene_qvar` 45.5 %, so
+4.5 % sits far closer to the defect this project exists to have fixed than to the fix.
+
+The cause: the predictor's relative error is exactly `|q − p| / p`, so protection comes from
+spread in **log** space. Measured over 4000 random 5-sample draws:
+
+| p range | spread | median oracle error | draws below 15 % | px/wavelength at 512 | k\* floor |
+|---|---|---|---|---|---|
+| 16–32 | 2.0× | 9.1 % | **95 %** | 16.0–32.0 | 1.6–3.1 % |
+| 8–40 | 5.0× | 15.0 % | 48 % | 12.8–64.0 | 1.2–6.2 % |
+| 3–14 (legacy qvar) | 4.7× | 20.0 % | 27 % | 36.6–170.7 | 3.6–16.7 % |
+
+{8..40} gives a wider relative spread than the legacy `qvar` range while keeping every sample
+better than the legacy data on **both** resolution and k\* precision. Replacing the i.i.d.
+draw with a geometric ladder then lifts the realised figures well above the random median:
+
+| dataset | periods | spread | oracle error |
+|---|---|---|---|
+| `turing_spots` | 8, 11, 16, 24, 36 | 4.5× | **37.5 %** |
+| `turing_labyrinth` | 8, 10, 15, 23, 35 | 4.4× | **33.3 %** |
+
+**The limit, recorded because it does not go away.** At n=5 no range decouples strongly — an
+oracle single q can always sit near the middle of five values, and even the legacy {3..14}
+range only reaches 20 % at n=5 against 45.5 % at n=34. **Corpus-level `kstar_rel_err`
+medians are therefore not meaningful on a five-sample dataset at any period range.** These
+sets support per-sample k\* claims; they do not support a corpus median.
+
+**What was rejected: fixing L outright.** A constant L, chosen without reference to any
+system's k\*, would make the leak *structurally absent* rather than small, and would make the
+periods emergent from the physics. It was implemented and measured — L = 300 puts all 37
+gated candidates at 9.1–30.7 emergent periods and 16.7–56.0 px/wavelength — and then
+reverted on owner instruction. The reasoning: `λ = 2π/k*` is set by the network's Jacobian
+and diffusivities either way, so the *periodicity of the pattern* is always the physics.
+Choosing `L = p·λ` only sets how much of it is in view — a field-of-view choice of the kind a
+microscope makes. Commit `948281d` and its revert `ac11847` hold the implementation if the
+question is reopened.
+
+---
+
+### D-CANON-4 — the canonical sets become the training data source
+*2026-08-10. Owner instruction. Status: **DECIDED**.*
+
+**The decision.** From 2026-08-10, `turing_spots` and `turing_labyrinth` are the training
+data source for simulated-data work. `docs/PREREGISTRATION.md` §1 is amended to match.
+
+**What this does not do.** `three_gene_qvar` is not deprecated and none of its numbers are
+withdrawn. It is the provenance of every canonical system — each canonical sample is a
+re-simulation of a qvar or multiL system at 512² — and existing results against it stand. It
+stops being where *new* headline claims are drawn from. `three_gene_multiL` keeps its
+cross-L role under §3.5a. The legacy and classical families are unaffected: still barred from
+k\* claims, still dormant respectively.
+
+**Two consequences that must be stated rather than discovered.**
+
+1. **The primary evidence base is now 10 samples, 6 of them held out**, against 26 held-out
+   in the `three_gene_qvar` split. This follows from the owner's requirement of the smallest
+   number of datasets, one per pattern type, and is not a defect. But it means **a per-sample
+   result is the unit of evidence**, and a median over five samples is not a corpus
+   statistic. Combined with D-CANON-3, `kstar_rel_err` medians must not be quoted from these
+   sets at all.
+2. **No config points here yet.** `configs/m3_registry.yaml`, `nc1_m3_registry.yaml`,
+   `expA_control_full.yaml` and `expA_hidden_channel.yaml` still name `three_gene_val`;
+   `expB_*.yaml` still name `two_gene_classical_val`. Repointing them is a separate change,
+   deliberately not made while generating the data, and it will change what those configs
+   measure — so it is announced here rather than done quietly.

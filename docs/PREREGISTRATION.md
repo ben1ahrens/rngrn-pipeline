@@ -35,9 +35,29 @@ biologically plausible." Parameter agreement is not scored anywhere below.
 
 | dataset | n | role |
 |---|---|---|
-| `three_gene_qvar` | 34 systems, periods-per-box ~ U{3..14} | **PRIMARY.** All headline claims. |
+| `turing_spots` | 5 systems, 512², periods 8/11/16/24/36 | **PRIMARY from 2026-08-10.** The training data source. |
+| `turing_labyrinth` | 5 systems, 512², periods 8/10/15/23/35 | **PRIMARY from 2026-08-10.** The training data source. |
+| `three_gene_qvar` | 34 systems, periods-per-box ~ U{3..14} | Superseded as primary. Provenance of the canonical systems; continuity for runs already made against it. |
 | `three_gene_multiL` | 23 systems × 4 domain sizes | **L-generalisation only.** |
 | `three_gene_val` (legacy) | 19, periods-per-box ≡ 6.000 | **Secondary/continuity only. May not support any k\* claim.** |
+
+**Amended 2026-08-10, on owner instruction, before any run against the new sets.** The
+canonical `turing_*` datasets become the training data source for simulated-data work.
+`three_gene_qvar` is not deprecated and its numbers are not withdrawn — it is where the
+canonical systems came from, and every existing result against it stands. It simply stops
+being where new headline claims are drawn from.
+
+This amendment *adds* dataset roles. It weakens no threshold: every pass condition in §3 is
+untouched, and the new sets are strictly better instrumented than the old ones on both
+resolution and k\* precision (see `docs/CANONICAL_DATASETS.md` §4).
+
+**A limitation this creates, stated here rather than discovered later.** The primary evidence
+base is now **10 samples, 6 of them held out** — against 26 held-out in the `three_gene_qvar`
+split of §1a. That is a deliberate choice (smallest number of datasets, one per pattern type)
+but it has a hard consequence: **a per-sample result is the unit of evidence on these sets,
+and a median over five samples is not a corpus statistic.** In particular
+`kstar_rel_err` medians must not be quoted from them — see `CANONICAL_DATASETS.md` §5 for
+why no periods range fixes this at n=5.
 
 **The legacy exclusion is not optional.** Every legacy generator set
 `L = clip(6·2π/k*, 18, 220)`, so an image-blind predictor using `L` alone scores **0.0 %
@@ -101,11 +121,16 @@ having been run, because only one previously-run labyrinth system survived the g
 declared burned here so the held-out three stay clean.
 
 **Why there is no `turing_stripes`.** Every stripes candidate in the re-simulatable corpus
-loses the label when only the box size changes, and no sample at periods-per-box ≥ 11 is
-ever labelled `stripes`. The canonical range is 16–32. See `docs/DECISIONS.md` **D-CANON-2**.
+loses the label when only the box size changes; and across the corpus the stripes fraction
+falls monotonically with periods-per-box to zero at p ≥ 11, while the canonical draw runs
+8–40. See `docs/DECISIONS.md` **D-CANON-2**.
 
-**These datasets carry no leak.** Periods-per-box is drawn distinct per dataset from
-{16..32}, so `L` does not determine `k*`. Unlike the legacy sets, they may support k\* claims.
+**The leak is measured on these sets, not assumed away.** Periods-per-box is laid out as a
+geometric ladder across {8..40} and checked against a 25 % bar, giving an oracle
+blind-predictor error of 37.5 % (`turing_spots`) and 33.3 % (`turing_labyrinth`) against
+0.0 % for the legacy sets. They may therefore support k\* claims **per sample**. They may
+not support a corpus median: at n=5 no period range decouples strongly, because an oracle
+can always sit near the middle of five values. See `docs/DECISIONS.md` **D-CANON-3**.
 
 *This is a split definition and an addition to §1's dataset roles. It weakens no pass
 condition — every threshold in §3 is untouched.*

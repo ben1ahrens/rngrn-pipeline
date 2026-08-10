@@ -328,8 +328,16 @@ def classify(field, L):
         morph = "holes"
     else:
         morph = "stripes" if A > 0.55 else "labyrinth"
+    # k_star_fft is stored at FULL precision, not rounded to 3 dp as it was until
+    # 2026-08-10. `raps_dominant_k` returns a bin centre, so `k_star_fft * L / 2*pi` lands
+    # exactly on the half-integer grid — a property `tests/test_gate_contract.py` asserts and
+    # `PREREGISTRATION` leans on, because it is why the FFT-vs-linear disagreement is a grid
+    # offset rather than a bias. Rounding to 3 dp perturbs that by ~2*0.0005*L/(2*pi), which
+    # is invisible at the legacy L <= 220 and breaks the property outright at L ~ 990: the
+    # canonical turing_labyrinth set drifted 0.087 bins off the grid and failed the test.
+    # The other fields stay rounded; they are descriptive, not load-bearing.
     return {"morphology": morph, "wavelength": round(float(wav), 2),
-            "k_star_fft": round(k, 3), "area_frac": round(phi, 3),
+            "k_star_fft": float(k), "area_frac": round(phi, 3),
             "n_components": ncomp, "anisotropy": round(A, 3)}
 
 

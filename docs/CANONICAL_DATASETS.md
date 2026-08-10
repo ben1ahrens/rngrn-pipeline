@@ -10,9 +10,21 @@ reused across simulated-data experiments. Written for a reader who has not seen 
 **Owner decision, 2026-08-10: from here on, these two datasets are the training data source
 for simulated-data work.** Everything else in `data/datasets/` becomes historical:
 
+> ### Read this before using `turing_labyrinth`
+>
+> **It is a mixed class: 3 hole patterns + 2 labyrinths.** The generator's `morphology`
+> attribute says `labyrinth` for all five, but measured from the fields themselves three of
+> them are *holes* — a connected bright matrix pierced by round dark voids, which is a
+> distinct morphology. Every sample carries `morphology_measured` alongside the stored label,
+> and the figures print `stored → MEASURED` wherever they disagree. Full measurement and
+> reasoning in `docs/DECISIONS.md` **D-CANON-5**.
+>
+> `turing_spots` is homogeneous: 5 of 5 measured `spots`, agreeing with the stored label.
+
 | dataset | role from 2026-08-10 |
 |---|---|
-| `turing_spots`, `turing_labyrinth` | **PRIMARY. The training data source.** |
+| `turing_spots` | **PRIMARY. The training data source.** Homogeneous: 5/5 spots. |
+| `turing_labyrinth` | **PRIMARY. The training data source.** Mixed: 3 holes + 2 labyrinths. |
 | `three_gene_qvar` | superseded as the primary set; retained as the provenance of the canonical systems and for continuity with runs already made against it |
 | `three_gene_multiL` | cross-L transfer only (`PREREGISTRATION.md` §3.5a) |
 | `three_gene_train/val/test` (legacy) | **may not support any k\* claim** — the domain-size leak; kept as the comparison baseline that shows what the leak looked like |

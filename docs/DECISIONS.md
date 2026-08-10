@@ -2197,9 +2197,17 @@ that real Turing stripes are unreachable**, only that *this* generator's `stripe
 
 **The decision.** Ship `turing_spots` and `turing_labyrinth`, 5 distinct 3-gene systems each,
 at 512×512, generated once and reused for all simulated-data experiments. `stripes` is
-excluded per D-CANON-2; `holes` is structurally unreachable (species 0 is the self-activator
-in all six topologies, so the observed channel is positively skewed by construction while
-`holes` needs strong negative skew — the corpus contains zero `holes` in 413 samples).
+excluded per D-CANON-2; `holes` is not shipped as its own class because only 3 gated, stable
+hole systems exist, below the 5 required.
+
+> **Corrected 2026-08-10 by D-CANON-5.** This paragraph originally said `holes` was
+> "structurally unreachable… the observed channel is positively skewed by construction".
+> That is **wrong**. Hole patterns are common — 7 of 57 systems produce them, several with
+> negative skew, and 3 of the 5 shipped `turing_labyrinth` samples are hole patterns. What is
+> unreachable is the *label*: `classify` needs `phi > 0.66` to say `holes`, which a connected
+> bright matrix cannot reach because much of the matrix falls below the `z > 0.4` line. The
+> corpus containing zero samples *labelled* `holes` is a fact about the classifier, not about
+> the physics, and this entry read it the wrong way round.
 
 **The eligible pool is 57 systems, not 413.** Re-simulating at a new resolution needs the
 generating kinetics *and* the simulation seed. Only `three_gene_qvar` (34 systems) and
@@ -2337,3 +2345,78 @@ k\* claims, still dormant respectively.
    `expB_*.yaml` still name `two_gene_classical_val`. Repointing them is a separate change,
    deliberately not made while generating the data, and it will change what those configs
    measure — so it is announced here rather than done quietly.
+
+### D-CANON-5 — canonical morphology is MEASURED from the field; `turing_labyrinth` is a mixed class
+*2026-08-10. Same unit. Evidence: `scripts/phase_topology.py`, `tests/test_phase_topology.py`,*
+*`scripts/canon_annotate.py`; the cross-tabulation below over all 57 re-simulatable systems.*
+
+**Two decisions, one measurement.**
+
+**(a) The canonical classes are defined by measured phase topology, not by the generator's
+stored label.** `phase_topology.measure` splits the field at its Otsu threshold and asks two
+questions: which phase fragments into domains, and are those domains round or worm-like.
+Round bright islands in a connected dark matrix → `spots`; round dark voids in a connected
+bright matrix → `holes`; neither → `labyrinth`.
+
+**The corpus is NOT relabelled.** All 413 registered samples keep their stored `morphology`
+attribute, so no existing number changes meaning. The measured value is written *alongside*
+it, on the canonical payloads only, as `morphology_measured` plus the statistics behind it.
+
+**Why.** The generator's rule assigns morphology from the area fraction above a fixed
+contrast threshold. Cross-tabulated against measured topology over the 57 distinct
+re-simulatable systems:
+
+| stored label | → spots | → holes | → labyrinth |
+|---|---|---|---|
+| `spots` (29) | **28** | 0 | 1 |
+| `labyrinth` (17) | 3 | **7** | **7** |
+| `stripes` (11) | 2 | 1 | 8 |
+
+The `spots` label is reliable — 28 of 29. `labyrinth` is not: only 41 % of it is a labyrinth,
+and most of the rest is a **hole** pattern, a genuinely distinct morphology.
+
+**A correction to D-CANON-1, which was wrong.** That entry said `holes` is "structurally
+unreachable, because species 0 is the self-activator in all six topologies, so the observed
+channel is positively skewed by construction". **The patterns are not unreachable — 7 of 57
+systems produce them, several with negative skew.** What is unreachable is the *label*:
+detecting holes requires `phi > 0.66`, i.e. two thirds of all pixels more than 0.4 SD above
+the mean, but a connected bright matrix has its own spread and much of it falls below that
+line. The test can essentially never fire regardless of the field. The corpus contains zero
+samples *labelled* `holes` — which is a fact about the classifier, not about the physics, and
+D-CANON-1 read it the wrong way round.
+
+**(b) `turing_labyrinth` ships as generated, and it is a MIXED class.** Measured composition:
+
+| sample | stored | measured | bright domains / circularity | dark domains / circularity |
+|---|---|---|---|---|
+| `sample_0000` | labyrinth | **labyrinth** | 35 / 0.77 | 3 / 0.29 |
+| `sample_0001` | labyrinth | **holes** | 1 / 0.02 | 64 / 1.22 |
+| `sample_0002` | labyrinth | **holes** | 1 / 0.01 | 95 / 0.94 |
+| `sample_0003` | labyrinth | **holes** | 1 / 0.00 | 297 / 1.29 |
+| `sample_0004` | labyrinth | **labyrinth** | 41 / 0.74 | 189 / 0.42 |
+
+So the dataset is **3 hole patterns + 2 labyrinths**, and its name is to that extent
+misleading. Owner's call, taken with the measurement in hand: keep the data as generated and
+document the mix rather than spend another generation run. Every sample carries its measured
+morphology, and the figures print `stored → MEASURED` wherever the two disagree, so the mix
+is visible at the point of use rather than buried here.
+
+`turing_spots` is unaffected: 5 of 5 measured `spots`, in agreement with the stored label.
+
+**What was rejected.** (a) Re-selecting `turing_labyrinth` as 5 true labyrinths — exactly 5
+qualify, so it was feasible but with zero slack, and the owner chose not to spend the run.
+(b) A `turing_holes` third class — only 3 gated, stable hole systems exist, below the 5
+required. (c) Changing `gen_tg3.classify` — that would alter the meaning of the `morphology`
+attribute on all 413 existing samples, which D-TDPLOT-1 already considered and rejected.
+
+**A bug this surfaced, recorded because the class of error recurs.** The first version of the
+speckle floor discarded domains smaller than a fixed fraction of the FRAME. At 512² with 36
+periods a spot is ~7 px across (area ~38 px) while the floor was 52 px, so every domain was
+deleted and a clean spot lattice measured as `labyrinth` with **zero** domains. The floor is
+now a fraction of the pattern's own wavelength squared, read from the field's spectrum.
+`tests/test_phase_topology.py` pins the regression at the exact resolution that failed.
+
+**Not established.** The circularity cut of 0.55 is read off the separation measured on the
+canonical frames (round domains 0.94–1.57, worms 0.29–0.77) and is **not calibrated against a
+control**. It is used for labelling only, never as a pass condition, and no threshold in
+`docs/PREREGISTRATION.md` depends on it.

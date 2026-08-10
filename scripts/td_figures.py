@@ -328,7 +328,16 @@ def _panel_title(s, species):
         flags += "  NO CONTRAST"
     if not v["periodic"]:
         flags += "  NOT PERIODIC"
-    return (f"{s['key']}  [{s['morphology']}]{flags}\n"
+    # Where a sample carries a MEASURED morphology (written by scripts/canon_annotate.py),
+    # show it beside the generator's stored label. They disagree on 3 of 10 canonical
+    # samples, and the disagreement is the point — see docs/DECISIONS.md D-CANON-5.
+    label = str(s["morphology"])
+    measured = s["attrs"].get("morphology_measured")
+    if measured is not None and str(measured) != label:
+        label = f"stored:{label} -> MEASURED:{measured}"
+    elif measured is not None:
+        label = f"{label} (measured agrees)"
+    return (f"{s['key']}  [{label}]{flags}\n"
             f"L={s['L']:.1f}  $k^*$={s['k_star']:.3f}  cv={v['cv']:.2f}")
 
 

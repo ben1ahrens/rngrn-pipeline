@@ -88,11 +88,47 @@ def test_the_periods_draw_is_deterministic_and_dataset_specific():
     assert CS.draw_periods("turing_spots", 5, 2026) != CS.draw_periods("turing_stripes", 5, 2026)
 
 
+def test_the_oracle_leak_error_is_zero_for_a_fixed_period():
+    """The legacy failure mode: every sample at p=6 means k* = 6*2pi/L exactly, so a blind
+    predictor reading only L is perfect. This is what the drawn periods must avoid."""
+    assert CS.oracle_leak_error([6, 6, 6, 6, 6]) == pytest.approx(0.0)
+
+
+def test_the_oracle_leak_error_rewards_relative_spread():
+    """|q - p| / p is relative, so a geometric ladder beats an equally-wide linear one."""
+    geometric = CS.oracle_leak_error([8, 12, 18, 27, 40])
+    clustered = CS.oracle_leak_error([12, 15, 19, 20, 24])
+    assert geometric > clustered
+    assert clustered < 0.15, "this clustered draw is the one that failed the audit"
+
+
+def test_every_drawn_period_set_clears_the_leak_bar():
+    """Not left to luck: draw_periods checks the bar and rejects a ladder that fails it."""
+    for ds in ("turing_spots", "turing_labyrinth"):
+        ps = CS.draw_periods(ds, 5, 2026)
+        assert CS.oracle_leak_error(ps) >= CS.LEAK_MIN_ORACLE_ERR, f"{ds}: {ps}"
+
+
+def test_the_leak_bar_is_well_above_the_first_attempt():
+    """The first bar was 0.15 and an i.i.d. draw from 16-32 met it only 5% of the time."""
+    assert CS.LEAK_MIN_ORACLE_ERR >= 0.25
+
+
 def test_period_range_keeps_every_sample_well_resolved_at_512():
-    """px/wavelength = 512/p must stay in [16, 32] -- comfortably above the measured
-    6 px/wavelength floor (docs/DECISIONS.md D15)."""
+    """px/wavelength = 512/p must stay at least 2x the measured 6.0 floor (D15), and every
+    sample must beat the legacy data's 16.0 px/wavelength on k* precision."""
     for p in CS.P_CHOICES:
-        assert 16 <= 512 / p <= 32
+        ppw = 512 / p
+        assert ppw >= 12.0, f"p={p} gives {ppw:.1f} px/wavelength, under 2x the D15 floor"
+        assert 100 / (2 * p) <= 8.3, f"p={p} k* floor worse than the legacy 8.3%"
+
+
+def test_period_range_is_wide_enough_to_decouple_L_from_kstar():
+    """The decoupling strength scales with the SPREAD of p, not its magnitude. The first
+    choice of 16-32 (2.0x) left an oracle blind predictor inside 15% on 95% of draws."""
+    spread = max(CS.P_CHOICES) / min(CS.P_CHOICES)
+    assert spread >= 4.67, (f"spread {spread:.1f}x is narrower than the legacy qvar range's "
+                            f"4.67x, so L carries MORE information about k* than before")
 
 
 # --------------------------------------------------------------------------------------

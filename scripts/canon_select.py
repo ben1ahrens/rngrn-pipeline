@@ -56,10 +56,37 @@ ANISO_STRIPES_MIN = 0.55
 # far above that, chosen so a canonical exemplar is unambiguous rather than merely legal.
 CV_MIN = 0.30
 
-# Periods-per-box for the 512 grid. px/wavelength = 512/p, so this range gives 16..32
-# px/wavelength — every sample far above the 6 px/wavelength floor measured in D15 — while
-# the k* half-bin precision 1/(2p) lands in 1.6%..3.1% (vs 8.3% on the legacy data).
-P_CHOICES = tuple(range(16, 33))
+# Periods-per-box for the 512 grid. Three properties pull against each other here, and the
+# range is the compromise between them:
+#
+#   * k* PRECISION wants HIGH p. The RAPS bin width is 2*pi/L, so the relative half-bin
+#     precision is 1/(2p).
+#   * RESOLUTION wants LOW p at a fixed grid: px/wavelength = 512/p, against a measured
+#     floor of 6.0 (D15).
+#   * L-DECOUPLING wants a WIDE RELATIVE range. If every sample shares one p then
+#     k* = p*2*pi/L inverts exactly and the domain size is the label again (D6). The
+#     strength of the decoupling scales with the SPREAD of p, not its magnitude.
+#
+# MEASURED 2026-08-10, oracle best-fixed-p blind predictor over 4000 random 5-sample draws
+# (the oracle picks the single p minimising median error AFTER seeing the answers):
+#
+#   p range   spread   median oracle error   % of draws below 15%   px/wl      k* floor
+#    16-32      2.0x           9.1%                   95%          16.0-32.0  1.6-3.1%
+#     8-40      5.0x          15.0%                   48%          12.8-64.0  1.2-6.2%
+#     3-14      4.7x          20.0%                   27%          36.6-170.7 3.6-16.7%
+#
+# 16-32 was the first choice and is the WORST of these: 95% of draws leave the leak
+# predictor inside 15%. 8-40 gives a 5.0x spread — wider than the legacy qvar range's 4.67x
+# — while keeping every sample better than the legacy data on BOTH resolution (12.8 px/wl
+# worst case against 16.0, both far above the 6.0 floor) and k* precision (6.2% worst case
+# against 8.3%). So it dominates the legacy set outright and materially improves the
+# decoupling. See docs/DECISIONS.md D-CANON-3.
+#
+# NOTE the honest limit: with only 5 samples per dataset NO range decouples strongly, because
+# an oracle single p can always sit near the middle of five values. Even the legacy 3-14
+# range only reaches 20% at n=5, against the 45.5% qvar achieves at n=34. Corpus-level
+# `kstar_rel_err` medians are therefore not meaningful on these datasets at any range.
+P_CHOICES = tuple(range(8, 41))
 
 # Everything the generator's classifier can emit. `holes` is omitted deliberately: it is
 # structurally unreachable, because species 0 is the self-activator in all six topologies
@@ -115,17 +142,53 @@ def passes_gates(row):
                 and class_margin(row["morphology"], row["area_frac"], row["anisotropy"]) > 0)
 
 
-def draw_periods(dataset_id, n, seed):
-    """``n`` DISTINCT periods-per-box for one dataset.
+# The leak bar. `oracle_leak_error` below is the median relative error of the best blind
+# predictor `k = q*2pi/L` with q chosen AFTER seeing the answers — a deliberately generous
+# adversary. 0.25 is comfortably above the 0.15 first used and is met by construction; the
+# legacy three_gene sets score 0.000 and three_gene_qvar scores 0.455 at n=34.
+LEAK_MIN_ORACLE_ERR = 0.25
 
-    Distinctness is the point: with a single p, ``k* = p*2pi/L`` inverts exactly and the
-    domain size becomes the label again — the leak that made ``kstar_rel_err`` a gate
-    rather than evidence on the legacy data. Seeded via SHA-256 so the draw is
-    process-independent (Python salts ``hash()`` per process, which is why the legacy seeds
-    do not reproduce their own screens).
+
+def oracle_leak_error(periods):
+    """How badly does the best image-blind predictor of k* do on this set of periods?
+
+    A blind predictor guesses `k = q*2pi/L` for a single fixed integer q. Since the truth is
+    `k = p*2pi/L`, its relative error on a sample is exactly ``|q - p| / p`` — L cancels.
+    Higher is better: it means the domain size does not tell you the wavenumber.
     """
+    ps = np.asarray(periods, float)
+    return float(min(np.median(np.abs(q - ps) / ps) for q in range(1, 80)))
+
+
+def draw_periods(dataset_id, n, seed):
+    """``n`` DISTINCT periods-per-box for one dataset, spread GEOMETRICALLY.
+
+    Distinctness alone is not enough. The leak predictor's error is ``|q - p| / p`` — a
+    RELATIVE quantity — so what protects against it is the spread of p in log space, not in
+    absolute terms. An i.i.d. draw from the allowed range clusters badly at n=5: the first
+    version of this function drew {12,15,19,20,24} for ``turing_spots``, which an oracle
+    fits to 12.5% median error. A geometric ladder across the range maximises the minimum
+    relative gap and reaches ~50% instead.
+
+    The ladder is shifted by a seeded sub-rung offset so the two datasets differ, and the
+    result is CHECKED against ``LEAK_MIN_ORACLE_ERR`` rather than assumed — if a shift fails
+    the bar it is rejected and the next one tried. Seeded via SHA-256 so the choice is
+    process-independent.
+    """
+    lo, hi = float(min(P_CHOICES)), float(max(P_CHOICES))
     rng = np.random.default_rng(stable_seed(f"{seed}:{dataset_id}"))
-    return sorted(int(x) for x in rng.choice(P_CHOICES, size=n, replace=False))
+    rungs = np.linspace(np.log(lo), np.log(hi), n)
+    step = rungs[1] - rungs[0]
+    for _ in range(500):
+        shift = rng.uniform(-0.5, 0.5) * step
+        vals = np.exp(rungs + shift)
+        ps = sorted({int(round(float(np.clip(v, lo, hi)))) for v in vals})
+        if len(ps) == n and oracle_leak_error(ps) >= LEAK_MIN_ORACLE_ERR:
+            return ps
+    raise ValueError(
+        f"no geometric ladder of {n} periods in [{lo:.0f}, {hi:.0f}] clears the leak bar of "
+        f"{LEAK_MIN_ORACLE_ERR:.0%}. Widen P_CHOICES rather than lowering the bar — a narrow "
+        f"range is exactly what makes L informative about k*.")
 
 
 # ======================================================================================

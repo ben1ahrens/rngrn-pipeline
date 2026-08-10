@@ -40,9 +40,11 @@ CV_EVERY = 200
 
 # px/wavelength band for the canonical sets. This — not an absolute L window — is the real
 # resolution constraint: L enters the physics only as a unit (CLAUDE.md section 7c). The
-# floor of 16 sits far above the 6.0 px/wavelength breakdown measured in D15; the ceiling
-# of 32 keeps periods-per-box high enough that the k* half-bin precision stays at 1.6-3.1%.
-PPW_MIN, PPW_MAX = 16.0, 32.0
+# floor of 12 is 2x the 6.0 px/wavelength breakdown measured in D15; the ceiling of 64
+# corresponds to the lowest periods-per-box the range admits. Both ends still beat the
+# legacy data's k* half-bin precision of 8.3%. Must stay consistent with
+# canon_select.P_CHOICES = 8..40.
+PPW_MIN, PPW_MAX = 12.0, 64.0
 
 # Domain-size window passed through to the generator. The default (18, 220) is tied to the
 # 96x96 grid and every canonical sample exceeds it (measured L range 245.8 .. 794.0), which

@@ -179,12 +179,21 @@ def screen_model(topo, form, n_samples, seed, want, periods_choices=PERIODS_CHOI
 
 
 # ---------------- simulation (spectral IMEX) + classification ----------------
-def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1):
+def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1, cv_every=None):
     """Nonlinear spectral IMEX simulation + morphology classification.
 
     Verbatim from the staging generator except that the domain size comes from
     ``p["periods_per_box"]`` instead of the hard-coded 6, and is NOT clipped (the
     caller guarantees feasibility via ``feasible_periods``).
+
+    ``cv_every`` (added 2026-08-10 for the canonical datasets): if set, record the
+    species-0 spatial coefficient of variation every ``cv_every`` steps into
+    ``cv_trace``/``cv_times``. This is a READ-ONLY observation — it never touches ``X`` —
+    so results are bit-identical with and without it. It exists so a saturation gate can
+    ask whether the pattern had actually stopped changing by ``Tmax``. That question
+    matters more at large grids: ``Tmax = 260`` was chosen for 96x96 boxes, and a bigger
+    box holds more pattern to organise, while recovery solves ``f(x*) = 0`` and never
+    integrates time — so a transient frame is silently outside the model's assumptions.
     """
     M = np.array(p["_M"], float)
     b = np.array(p["b"]); V = np.array(p["V"]); mu = np.array(p["mu"])
@@ -226,11 +235,16 @@ def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1):
     save_at = set(np.linspace(int(nsteps * 0.5), nsteps - 1, n_traj).astype(int))
     frames = []
     times = []
+    cv_trace = []
+    cv_times = []
     for s in range(nsteps):
         Xr = X + dt * react(X)
         for i in range(3):
             X[i] = np.real(np.fft.ifft2(np.fft.fft2(Xr[i]) * denom[i]))
         np.clip(X, 0, None, out=X)
+        if cv_every and (s % cv_every == 0 or s == nsteps - 1):
+            cv_trace.append(float(X[0].std() / max(X[0].mean(), 1e-9)))
+            cv_times.append(s * dt)
         if s in save_at:
             frames.append(X.astype(np.float32).copy())
             times.append(s * dt)
@@ -241,8 +255,12 @@ def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1):
     if cv0 < 0.05:
         return None                     # collapsed to homogeneous
     cls = classify(final[0], L)
-    return {"final": final, "traj": np.array(frames), "times": np.array(times),
-            "L": L, "dx": dx, "dt_sim": dt, "grid": grid, "cv0": cv0, **cls, "params": p}
+    out = {"final": final, "traj": np.array(frames), "times": np.array(times),
+           "L": L, "dx": dx, "dt_sim": dt, "grid": grid, "cv0": cv0, **cls, "params": p}
+    if cv_every:
+        out["cv_trace"] = np.array(cv_trace, dtype=np.float64)
+        out["cv_times"] = np.array(cv_times, dtype=np.float64)
+    return out
 
 
 def raps_dominant_k(field, L):

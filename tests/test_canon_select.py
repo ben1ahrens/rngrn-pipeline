@@ -112,3 +112,31 @@ def test_table_rows_carry_every_field_the_selector_needs():
     required = {"source_dataset", "source_key", "system_id", "morphology", "area_frac",
                 "anisotropy", "cv", "peak_bin", "margin", "k_star", "L", "uid"}
     assert required <= set(CS.CANDIDATE_FIELDS)
+
+
+# --------------------------------------------------------------------------------------
+# label stability across domain size
+# --------------------------------------------------------------------------------------
+def test_a_label_that_survives_every_probe_is_stable():
+    assert CS.label_is_stable(row(morph="stripes"), ["stripes", "stripes"]) is True
+
+
+def test_a_label_that_flips_at_another_box_size_is_not_stable():
+    """Measured: ang_conc drifts 0.190 -> 0.074 across an 8x L span, enough to flip a
+    class. A system that does that is not an exemplar of either class."""
+    assert CS.label_is_stable(row(morph="stripes"), ["stripes", "labyrinth"]) is False
+
+
+def test_stability_needs_at_least_one_probe():
+    with pytest.raises(ValueError, match="no probe labels"):
+        CS.label_is_stable(row(), [])
+
+
+def test_probe_period_differs_from_the_samples_own_period():
+    """Probing at the same p re-runs an identical simulation and proves nothing."""
+    assert CS.stability_probe_p({"L": 78.0, "k_star": 0.2416}) != 3
+
+
+def test_native_periods_recovers_the_generating_p():
+    """L = p * 2pi/k*, so p = L*k*/(2pi). qvar/sample_0000 was generated at p=3."""
+    assert CS.native_periods({"L": 78.01357861389891, "k_star": 0.24161891117478512}) == 3

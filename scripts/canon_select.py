@@ -158,3 +158,44 @@ def candidate_table(datasets_root=None):
             r["uid"] = row_uid(r)
             rows.append(r)
     return rows
+
+
+# ======================================================================================
+# label stability across domain size
+# ======================================================================================
+def native_periods(row):
+    """Periods-per-box the sample was generated at: ``p = L*k*/(2*pi)``."""
+    return int(round(float(row["L"]) * float(row["k_star"]) / (2 * np.pi)))
+
+
+def stability_probe_p(row):
+    """A second periods-per-box at which to re-simulate, well separated from the native one.
+
+    Probing at the sample's own p would re-run an identical simulation and prove nothing.
+    Stays inside the original generator's {3..14} window so the probe is a box size the
+    screening actually certified as feasible for this system.
+    """
+    native = native_periods(row)
+    candidates = [p for p in (native + 5, native - 5, native + 3, native - 3)
+                  if 3 <= p <= 14 and p != native]
+    if not candidates:
+        raise ValueError(f"no valid stability probe for native p={native}")
+    return candidates[0]
+
+
+def label_is_stable(row, probe_labels):
+    """Does the stored class survive every probe?"""
+    if not probe_labels:
+        raise ValueError("no probe labels supplied; stability cannot be asserted")
+    return all(str(x) == str(row["morphology"]) for x in probe_labels)
+
+
+def multiL_labels(system_id, datasets_root=None):
+    """Labels of all four replicates of one multiL system.
+
+    Free stability evidence: multiL already simulated each system at p in {4,7,10,13}, so
+    for those 23 systems the probe costs no compute at all.
+    """
+    import td_figures as TD
+    return [str(s["morphology"]) for s in TD.load_samples("three_gene_multiL", datasets_root)
+            if int(s["attrs"]["system_id"]) == int(system_id)]

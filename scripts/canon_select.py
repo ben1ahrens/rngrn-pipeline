@@ -298,9 +298,12 @@ def compute_stability(table, datasets_root=None, cache_path=None, verbose=True):
         if r["uid"] in cache:
             stability[r["uid"]] = bool(cache[r["uid"]])
             continue
-        if not passes_gates(r) or r["morphology"] not in CANONICAL_CLASSES:
+        if not passes_gates(r):
             stability[r["uid"]] = False          # never probed; cannot be selected anyway
             continue
+        # Every gated system is probed, including classes we do not ship. Restricting the
+        # probe to CANONICAL_CLASSES would leave the stripes evidence — the reason stripes
+        # is not shipped — outside the record it is supposed to justify.
         if r["source_dataset"] == "three_gene_multiL":
             labels = multiL_labels(r["system_id"], datasets_root)
         else:

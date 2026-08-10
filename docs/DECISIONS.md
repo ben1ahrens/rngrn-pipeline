@@ -2134,8 +2134,19 @@ probe is free — those systems were already simulated at p ∈ {4,7,10,13}. For
   single flip is `labyrinth ↔ stripes`. No other pair ever flips.
 - **All 5 gated `qvar` stripes candidates flip to `labyrinth`.** Zero stripes survive gates
   plus stability anywhere in the re-simulatable corpus.
-- Over the probed spots/labyrinth pool: 15 stable, 4 flipped, and **all four flips are
-  labyrinth**. `spots` never flips.
+- **Instability is graded by class**, over the full probed pool of 47 gated systems:
+
+  | class | stable | flips | flip rate |
+  |---|---|---|---|
+  | `spots` | 27 | 1 | **3.6 %** |
+  | `labyrinth` | 10 | 4 | **29 %** |
+  | `stripes` | 0 | 5 | **100 %** |
+
+  The single `spots` flip is `three_gene_qvar:24`. (An earlier draft of this entry said
+  "spots never flips" — that was wrong, read off a truncated log, and is corrected here.
+  The graded gradient is the stronger result anyway: it is exactly what a box-size artefact
+  predicts, since `spots` is the class furthest from the anisotropy cut and `stripes` sits
+  on it.)
 
 **The mechanism, and why it is not a bug.** Anisotropy `A` is a nematic order parameter over
 the dominant Fourier ring. A small box admits few orientations, so the pattern is forced onto

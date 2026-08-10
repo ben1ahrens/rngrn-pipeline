@@ -50,6 +50,13 @@ PPW_MIN, PPW_MAX = 16.0, 32.0
 # above is what actually guards resolution here.
 L_BOUNDS = (18.0, 2000.0)
 
+# Integration horizon. TMAX_BASE is the generator's own default, kept so a sample that was
+# already converged at 96 costs exactly what it used to. TMAX_MAX caps the escalation at 8x
+# — a system that cannot reach a steady state in 2080 time units is telling us something
+# about the system, and the answer is to look at it, not to keep integrating.
+TMAX_BASE = 260.0
+TMAX_MAX = 2080.0
+
 # Saturation tolerance: the pattern must have stopped changing by the end of the run.
 # UNCALIBRATED in the strict sense — it is a convergence tolerance, not a threshold
 # separating two populations, and no control was run against it. It is enforced as a
@@ -143,6 +150,9 @@ def write_canonical_payload(records, out_path):
             g.attrs["source_dataset"] = r["source_dataset"]
             g.attrs["source_key"] = r["source_key"]
             g.attrs["role"] = r["role"]
+            # The horizon this sample actually needed. Varies per sample because of the
+            # escalation in _simulate_one, so it must be recorded for reproducibility.
+            g.attrs["tmax"] = float(r.get("_tmax", TMAX_BASE))
             g.attrs["params_json"] = json.dumps(
                 {**{k: p[k] for k in G.PARAM_KEYS}, "topology": p["topology"],
                  "reaction": p["reaction"], "interaction_matrix": p["_M"]})
@@ -155,6 +165,18 @@ def write_canonical_payload(records, out_path):
 def _simulate_one(job):
     """Pool worker: re-simulate one selected system at the canonical resolution.
 
+    HORIZON ESCALATION. ``Tmax = 260`` was chosen for 96x96 boxes and is not always enough
+    at 512: a canonical sample holds 16-32 periods rather than 3-14, so there is far more
+    pattern to organise, and `three_gene_qvar:18` was still moving at the end of a 260-unit
+    run. Rather than raising the horizon for everyone — which would multiply the cost of
+    the samples that were already converged — each sample doubles its own horizon until the
+    saturation gate passes, up to ``TMAX_MAX``.
+
+    Deliberately NOT early-stopping. Stopping the integration as soon as the cv plateaus
+    would make ``is_saturated`` trivially true afterwards — the gate would be testing the
+    rule that produced the frame. Restarting at a longer fixed horizon keeps the gate an
+    independent check on a frame it did not shape.
+
     Module-level and picklable. Returns the result dict plus the provenance fields the
     payload writer needs, or raises with the sample named.
     """
@@ -162,22 +184,26 @@ def _simulate_one(job):
     s, src, grid = job
     p = params_from_sample(src, s["periods_per_box"])
     t0 = time.time()
-    out = G.simulate_and_classify(p, grid=grid, n_traj=2, seed=p["sim_seed"],
-                                  cv_every=CV_EVERY, l_bounds=L_BOUNDS)
-    elapsed = time.time() - t0
-    if out is None:
-        raise RuntimeError(
-            f"{s['uid']} diverged or collapsed at grid={grid}; it did not at 96 — "
-            f"investigate before excluding it")
-    if not is_saturated(out["cv_trace"]):
-        raise RuntimeError(
-            f"{s['uid']} had not saturated by Tmax at grid={grid} (cv still moving > "
-            f"{SATURATION_TOL:.0%} over the last 20% of the run). Re-run with a longer "
-            f"Tmax; do not ship a transient frame.")
+    tmax = TMAX_BASE
+    while True:
+        out = G.simulate_and_classify(p, grid=grid, n_traj=2, seed=p["sim_seed"],
+                                      Tmax=tmax, cv_every=CV_EVERY, l_bounds=L_BOUNDS)
+        if out is None:
+            raise RuntimeError(
+                f"{s['uid']} diverged or collapsed at grid={grid}, Tmax={tmax:.0f}; it did "
+                f"not at 96 — investigate before excluding it")
+        if is_saturated(out["cv_trace"]):
+            break
+        if tmax >= TMAX_MAX:
+            raise RuntimeError(
+                f"{s['uid']} still had not saturated at grid={grid} by Tmax={tmax:.0f} "
+                f"(cv moving > {SATURATION_TOL:.0%} over the last 20%). Do not ship a "
+                f"transient frame; investigate the system instead of raising TMAX_MAX.")
+        tmax *= 2
     return {**out, "params": p, "source_dataset": s["source_dataset"],
             "source_key": s["source_key"], "system_id": s["system_id"],
-            "role": s["role"], "_elapsed": elapsed, "_uid": s["uid"],
-            "_label_before": s["morphology"]}
+            "role": s["role"], "_elapsed": time.time() - t0, "_uid": s["uid"],
+            "_tmax": tmax, "_label_before": s["morphology"]}
 
 
 def build_dataset(ds_id, spec, source_root=None, out_root=None, grid=GRID, verbose=True,
@@ -215,7 +241,8 @@ def build_dataset(ds_id, spec, source_root=None, out_root=None, grid=GRID, verbo
             print(f"   {r['_uid']:24s} p={r['params']['periods_per_box']:3d} "
                   f"px/wl={grid / r['params']['periods_per_box']:5.1f} "
                   f"morph {r['_label_before']} -> {r['morphology']:10s} "
-                  f"cv={r['cv0']:.2f} ({r['_elapsed']:.0f} s)")
+                  f"cv={r['cv0']:.2f} Tmax={r['_tmax']:.0f} ({r['_elapsed']/60:.1f} min)",
+                  flush=True)
     return write_canonical_payload(results, os.path.join(root, ds_id, "payload.h5"))
 
 

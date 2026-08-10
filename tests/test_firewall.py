@@ -52,8 +52,18 @@ SIDE_NEUTRAL = ["utils.py"]
 # session. `td_figures.load_samples` reaches params_json, x_star, D and the generator's
 # k_star in two lines. Nothing imports them from the recovery side today; these entries
 # make sure that stays true instead of relying on it.
+# `canon_select`, `canon_generate` and `canon_annotate` added 2026-08-10 alongside
+# `td_figures`/`gen_tg3`, and for the same reason: all five live in `scripts/`, are therefore
+# invisible to the completeness glob below, are importable by BARE TOP-LEVEL NAME because the
+# test suite puts `scripts/` on sys.path, and all five read `payload.h5` — generating
+# kinetics, `x_star`, and the generator's own `k_star`. A recovery-side import of any of them
+# would reach ground truth in two lines.
+#
+# `phase_topology` is deliberately NOT here: it takes a bare 2-D array and reads no payload,
+# so a recovery-side module could legitimately measure the OBSERVED frame with it.
 FORBIDDEN = ["rd_models", "data.solver", "data.cache", "data.gate", "data.registry",
-             "AnswerKey", "answer_key", "td_figures", "gen_tg3"]
+             "AnswerKey", "answer_key", "td_figures", "gen_tg3",
+             "canon_select", "canon_generate", "canon_annotate"]
 
 
 def _imports(path):

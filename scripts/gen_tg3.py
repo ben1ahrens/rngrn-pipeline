@@ -211,26 +211,11 @@ def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1, cv_every=Non
     K = np.array(p["K"]); n = p["n"]; D = np.array(p["D"])
     xs = np.array(p["x_star"]); form = p["reaction"]
     deg = np.maximum((M != 0).sum(1), 1)
-    # Two ways to set the domain.
-    #
-    #   p["domain_L"]         — L given DIRECTLY, chosen without reference to k*. The number
-    #                           of periods in the box is then emergent: p = L*k*/(2*pi), a
-    #                           real number determined by the reaction-diffusion system, not
-    #                           by us. This is the honest construction and the one the
-    #                           canonical datasets use.
-    #   p["periods_per_box"]  — the historical route, L = ppb * (2*pi/k*). Here L is computed
-    #                           FROM the answer, so the domain size encodes k* by
-    #                           construction. Retained because every existing dataset was
-    #                           made this way and must stay reproducible.
-    if p.get("domain_L") is not None:
-        L = float(p["domain_L"])
-        ppb = L * p["k_star"] / (2 * np.pi)          # emergent, not imposed; may be fractional
-    else:
-        ppb = int(p["periods_per_box"])
-        lam = 2 * np.pi / p["k_star"]
-        L = float(ppb * lam)
+    ppb = int(p["periods_per_box"])
+    lam = 2 * np.pi / p["k_star"]
+    L = float(ppb * lam)
     if not (L_lo <= L <= L_hi):
-        raise ValueError(f"domain L={L:.2f} outside [{L_lo}, {L_hi}]; "
+        raise ValueError(f"periods_per_box={ppb} gives L={L:.2f} outside [{L_lo}, {L_hi}]; "
                          "screen_model should have rejected this candidate")
     dx = L / grid
     dt = 0.02 / max(mu.max(), 1.0)

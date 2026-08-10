@@ -75,62 +75,60 @@ def test_gate_accepts_a_clean_sample():
 # --------------------------------------------------------------------------------------
 # the periods-per-box draw — the anti-leak requirement
 # --------------------------------------------------------------------------------------
-# --------------------------------------------------------------------------------------
-# the domain is FIXED, so periodicity is emergent
-# --------------------------------------------------------------------------------------
-def test_the_domain_is_a_single_constant():
-    """The central property. L is chosen without reference to any system's k*, so it cannot
-    encode k* — the leak is structurally absent rather than merely small."""
-    assert isinstance(CS.DOMAIN_L, float)
-    assert CS.DOMAIN_L > 0
+def test_periods_are_distinct_within_a_dataset():
+    """A constant p makes k* = p*2pi/L exact and recreates the domain-size leak."""
+    p = CS.draw_periods("turing_spots", n=5, seed=2026)
+    assert len(p) == 5
+    assert len(set(p)) == 5
+    assert all(x in CS.P_CHOICES for x in p)
 
 
-def test_the_selector_gives_every_sample_the_same_domain():
-    t = _fake_table()
-    sel = CS.select(t, _all_stable(t), per_class=4, n_tuning=2)
-    Ls = {s["domain_L"] for d in sel["datasets"].values() for s in d["samples"]}
-    assert Ls == {CS.DOMAIN_L}, f"L must be one constant across the corpus, got {Ls}"
+def test_the_periods_draw_is_deterministic_and_dataset_specific():
+    assert CS.draw_periods("turing_spots", 5, 2026) == CS.draw_periods("turing_spots", 5, 2026)
+    assert CS.draw_periods("turing_spots", 5, 2026) != CS.draw_periods("turing_stripes", 5, 2026)
 
 
-def test_periods_are_emergent_and_generally_not_integers():
-    """p = L*k*/(2pi) is read off the physics. If these came out integral it would mean
-    something was still choosing them."""
-    t = _fake_table()
-    sel = CS.select(t, _all_stable(t), per_class=4, n_tuning=2)
-    per = [s["periods_emergent"] for d in sel["datasets"].values() for s in d["samples"]]
-    assert all(isinstance(x, float) for x in per)
-    assert any(abs(x - round(x)) > 1e-6 for x in per), "no sample has a fractional period"
+def test_the_oracle_leak_error_is_zero_for_a_fixed_period():
+    """The legacy failure mode: every sample at p=6 means k* = 6*2pi/L exactly, so a blind
+    predictor reading only L is perfect. This is what the drawn periods must avoid."""
+    assert CS.oracle_leak_error([6, 6, 6, 6, 6]) == pytest.approx(0.0)
 
 
-def test_periods_follow_kstar_exactly():
-    """The defining relation: nothing mediates between the system's wavenumber and the
-    number of periods in the image except the fixed box."""
-    t = _fake_table()
-    sel = CS.select(t, _all_stable(t), per_class=4, n_tuning=2)
-    for d in sel["datasets"].values():
-        for s in d["samples"]:
-            assert s["periods_emergent"] == pytest.approx(
-                CS.DOMAIN_L * s["k_star"] / (2 * np.pi))
+def test_the_oracle_leak_error_rewards_relative_spread():
+    """|q - p| / p is relative, so a geometric ladder beats an equally-wide linear one."""
+    geometric = CS.oracle_leak_error([8, 12, 18, 27, 40])
+    clustered = CS.oracle_leak_error([12, 15, 19, 20, 24])
+    assert geometric > clustered
+    assert clustered < 0.15, "this clustered draw is the one that failed the audit"
 
 
-def test_a_system_left_unresolved_by_the_fixed_domain_is_refused():
-    """The fixed L must not silently produce an unmeasurable sample. The remedy named in
-    the error is to change L for the WHOLE corpus, never per sample."""
-    t = _fake_table()
-    for r in t:
-        r["k_star"] = 8.0          # wavelength 0.79 against L=300 -> ~380 periods
-    with pytest.raises(ValueError, match="px/wavelength"):
-        CS.select(t, _all_stable(t), per_class=4, n_tuning=2)
+def test_every_drawn_period_set_clears_the_leak_bar():
+    """Not left to luck: draw_periods checks the bar and rejects a ladder that fails it."""
+    for ds in ("turing_spots", "turing_labyrinth"):
+        ps = CS.draw_periods(ds, 5, 2026)
+        assert CS.oracle_leak_error(ps) >= CS.LEAK_MIN_ORACLE_ERR, f"{ds}: {ps}"
 
 
-def test_the_fixed_domain_resolves_the_real_candidate_pool():
-    """Guards the choice of DOMAIN_L itself against the measured wavelength range of the
-    corpus (9.8 to 32.8 at the time of selection)."""
-    for lam in (9.8, 32.8):
-        periods = CS.DOMAIN_L / lam
-        ppw = 512.0 / periods
-        assert periods >= CS.PERIODS_MIN
-        assert CS.PPW_MIN <= ppw <= CS.PPW_MAX
+def test_the_leak_bar_is_well_above_the_first_attempt():
+    """The first bar was 0.15 and an i.i.d. draw from 16-32 met it only 5% of the time."""
+    assert CS.LEAK_MIN_ORACLE_ERR >= 0.25
+
+
+def test_period_range_keeps_every_sample_well_resolved_at_512():
+    """px/wavelength = 512/p must stay at least 2x the measured 6.0 floor (D15), and every
+    sample must beat the legacy data's 16.0 px/wavelength on k* precision."""
+    for p in CS.P_CHOICES:
+        ppw = 512 / p
+        assert ppw >= 12.0, f"p={p} gives {ppw:.1f} px/wavelength, under 2x the D15 floor"
+        assert 100 / (2 * p) <= 8.3, f"p={p} k* floor worse than the legacy 8.3%"
+
+
+def test_period_range_is_wide_enough_to_decouple_L_from_kstar():
+    """The decoupling strength scales with the SPREAD of p, not its magnitude. The first
+    choice of 16-32 (2.0x) left an oracle blind predictor inside 15% on 95% of draws."""
+    spread = max(CS.P_CHOICES) / min(CS.P_CHOICES)
+    assert spread >= 4.67, (f"spread {spread:.1f}x is narrower than the legacy qvar range's "
+                            f"4.67x, so L carries MORE information about k* than before")
 
 
 # --------------------------------------------------------------------------------------
@@ -218,10 +216,8 @@ def _fake_table():
         for i, sid in enumerate(ids[cls]):
             r = row(morph=cls, phi=phi + (0.02 * i if cls == "spots" else 0.0),
                     aniso=an + (0.0 if cls == "spots" else 0.05 * i))
-            # distinct k* per system, inside the corpus range 0.191-0.643, so the emergent
-            # periods differ from one another the way real systems do
             r.update(source_dataset="three_gene_qvar", source_key=f"sample_{sid:04d}",
-                     system_id=sid, k_star=0.22 + 0.07 * i, L=125.0)
+                     system_id=sid, k_star=0.3, L=125.0)
             r["margin"] = CS.class_margin(cls, r["area_frac"], r["anisotropy"])
             r["uid"] = CS.row_uid(r)
             out.append(r)
@@ -256,14 +252,12 @@ def test_unstable_systems_are_excluded_even_at_high_margin():
     assert best["uid"] not in {s["uid"] for s in sel["datasets"]["turing_spots"]["samples"]}
 
 
-def test_no_sample_carries_an_imposed_period_count():
-    """Regression guard. Earlier versions wrote an integer `periods_per_box` that WE chose;
-    the whole point of the redesign is that no such field exists on this path."""
+def test_each_dataset_gets_distinct_periods():
     t = _fake_table()
     sel = CS.select(t, _all_stable(t), per_class=4, n_tuning=2)
-    for d in sel["datasets"].values():
-        for s in d["samples"]:
-            assert "periods_per_box" not in s
+    for name, d in sel["datasets"].items():
+        ps = [s["periods_per_box"] for s in d["samples"]]
+        assert len(set(ps)) == len(ps), f"{name} reuses a periods-per-box value"
 
 
 def test_split_roles_are_assigned_and_counted():

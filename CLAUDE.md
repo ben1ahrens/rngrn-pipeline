@@ -464,9 +464,12 @@ paragraph. It is **tracked**; only `.claude/settings.local.json` is machine-loca
 `.claude/README.md` for the full map. Nothing there restates this file — where they could
 drift, **this file wins and the other gets fixed**.
 
-- **Agents** (`.claude/agents/`) — four read-only reviewers for invariants the suite cannot
-  check: `firewall-auditor` (§5), `evidence-auditor` (§8, §10), `numerics-reviewer` (§7, §7c),
-  `merge-damage-hunter` (§11).
+- **Agents** (`.claude/agents/`) — five read-only agents. Four review invariants the suite
+  cannot check: `firewall-auditor` (§5), `evidence-auditor` (§8, §10), `numerics-reviewer`
+  (§7, §7c), `merge-damage-hunter` (§11). The fifth, `repo-mapper`, is not a reviewer — it
+  locates files and traces call paths off the `graphify-out/` graph, verifying every hit
+  against the source, so the reviewers spend their context judging rather than searching. It
+  makes no judgements of its own.
 - **Skills** (`.claude/skills/`) — `run-training` (§7a, §7b), `new-worktree` (§2, §11),
   `record-decision` (§10), `harvest-dataset` (§6, §6a).
 - **Rules** (`.claude/rules/`) — `pre-merge-checklist.md` and `reporting-numbers.md`, the

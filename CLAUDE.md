@@ -138,9 +138,16 @@ Recovery must never see ground truth. `tests/test_firewall.py` is a **static AST
 not a convention — it parses each recovery-side module and asserts the forbidden names do
 not appear in its imports.
 
-- Recovery-side modules: `model.py`, `observables.py`, `recover.py`, `losses/{terms,
-  total,weighting}.py`, `eval/{rollout,numerics,dynamical,analysis,topology}.py`.
-- Forbidden imports: `rd_models`, `data.solver`, `data.cache`, `AnswerKey`, `answer_key`.
+- Recovery-side modules: `model.py`, `observables.py`, `recover.py`, `history.py`,
+  `losses/{terms,total,weighting}.py`,
+  `eval/{rollout,numerics,dynamical,analysis,topology}.py`.
+- Forbidden imports (`tests/test_firewall.py::FORBIDDEN`, 12 names — **re-read the list
+  there rather than trusting this one**): `rd_models`, `data.solver`, `data.cache`,
+  `data.gate`, `data.registry`, `AnswerKey`, `answer_key`, plus the payload-reading
+  scripts `td_figures`, `gen_tg3`, `canon_select`, `canon_generate`, `canon_annotate`.
+  The `data.*` names must stay **dotted**: a bare `registry` would false-positive on
+  `rngrn/registry.py`, the component registry that `model.py` and `losses/weighting.py`
+  legitimately import.
 - The answer key's *contents* are read in **exactly one place**: `validate.score_recovery`.
   `train.fit` holds the key and passes it to the scorer — it touches only
   `n_species_true`, to classify the experiment arm — and `_resolve_recovery_input` is the
@@ -156,10 +163,14 @@ it. Neither holds.
   and the equivalent in `tests/test_overparam_scoring.py` each assert `"scoring" not in
   imports` across the recovery-side list. It is absent from `test_firewall.py`'s `FORBIDDEN`
   only.
-- *And the codebase is not clean.* `history.py:45` does `from .scoring.plausibility import
-  d_ratio_of`, and `TrainingHistory` is called from inside the Adam loop (`recover.py:245`,
-  `:492`). This is **not** a truth leak — `d_ratio_of` is a pure function of the model's own
-  `D` — but it does contradict the stated design intent, and no audit covers it.
+- *And the codebase is now clean — corrected 2026-08-11.* This bullet used to say
+  `history.py:45` does `from .scoring.plausibility import d_ratio_of` and that "no audit
+  covers it". Both halves are false against the source. `d_ratio_of` was moved to the
+  side-neutral `rngrn/utils.py:71`, `history.py:55` now reads `from .utils import
+  d_ratio_of`, and `history.py` is on `RECOVERY_SIDE` with `utils.py` on `SIDE_NEUTRAL`, so
+  the audit *does* cover it — `history.py:41-48` documents the change at the site. No
+  recovery-side module imports the scoring package today. It was never a truth leak either
+  way (`d_ratio_of` is a pure function of the model's own `D`).
 
 **The allowlist gap inside `src/` is CLOSED.** This paragraph used to describe the fix as a
 to-do; it has been implemented and the description was stale. `tests/test_firewall.py` now
@@ -371,10 +382,19 @@ The single most important rule in this file.
 ## 9. Where runs go
 
 `experiments/<purpose>/` inside the repo, passed as `--runs-root` — e.g.
-`experiments/dryrun/`, `experiments/tuning/`, `experiments/identifiability/`. The whole
-`experiments/` tree is gitignored, so runs sit next to the configs that produced them
-without entering version control. Name the subdirectory for the purpose, so a plumbing
-check is never mistaken for a result later.
+`experiments/tuning/`, `experiments/lgen_transfer/`, `experiments/stage0_bioviab/`. Name the
+subdirectory for the purpose, so a plumbing check is never mistaken for a result later.
+
+**Corrected 2026-08-11. This section used to say the whole `experiments/` tree is gitignored
+and that runs never enter version control. That is the opposite of the truth today** — 792
+files under `experiments/` are tracked. The reversal is deliberate and documented at length in
+`.gitignore` (D-PLOT-1): the project is headed for a paper, so the run behind every number is
+versioned alongside the claim. Tracked are the append-only indexes (`runs.jsonl`,
+`target_reports.jsonl`, `lgen_eval.jsonl`), `config/frozen_config.yaml`, `results/*.json`,
+`checkpoints/*.pt` and `arrays/*.npz`. Ignored is only regenerable bulk: `figures/`, `*.h5`,
+bare `*.npy`, `*.png` (except `experiments/figures_report/`), and any `.npz` outside
+`arrays/`. **Read `.gitignore` rather than this paragraph** — it carries the reasoning and the
+measured costs.
 
 ## 10. How far to run before checking in
 

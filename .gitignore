@@ -69,3 +69,13 @@ papers/
 # machine-local Claude Code overrides. The rest of .claude/ is TRACKED and shared: the
 # agents, skills, rules and the trainer guard are project conventions, not personal setup.
 .claude/settings.local.json
+
+# NESTED worktrees. CLAUDE.md §2 puts worktrees in ../worktrees/<slug>, a SIBLING of the
+# checkout, precisely so git never sees them. Some tooling creates them here instead, and a
+# worktree nested inside the parent's working directory is a whole second checkout — src/,
+# .venv/ and all — sitting in `git status` as untracked. Ignoring it keeps `git status`
+# readable and makes it impossible to `git add -A` a worktree into the repository. This is
+# containment, not endorsement: the sibling layout is still the convention, because a
+# nested worktree also means `rm -rf` on the parent silently destroys any uncommitted work
+# inside it. Added 2026-08-11 after one appeared in the main checkout.
+.claude/worktrees/

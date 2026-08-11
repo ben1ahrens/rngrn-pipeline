@@ -38,3 +38,4 @@
 {"dataset_id": "two_gene_classical_test", "n_samples": 13, "frame_shape": "[2, 96, 96]", "splits": "{}", "checksum": "13f29962c8facf34", "source": "manual", "path": "two_gene_classical_test", "_ts": "2026-08-10T19:20:34.971413+00:00"}
 {"dataset_id": "two_gene_classical_train", "n_samples": 52, "frame_shape": "[2, 96, 96]", "splits": "{}", "checksum": "c43913da40d48491", "source": "manual", "path": "two_gene_classical_train", "_ts": "2026-08-10T19:20:34.976328+00:00"}
 {"dataset_id": "two_gene_classical_val", "n_samples": 10, "frame_shape": "[2, 96, 96]", "splits": "{}", "checksum": "5b0520bfe7d763f9", "source": "manual", "path": "two_gene_classical_val", "_ts": "2026-08-10T19:20:34.977941+00:00"}
+{"dataset_id": "three_gene_qvar_smoke", "n_samples": 3, "frame_shape": "[3, 96, 96]", "splits": "{}", "checksum": "b881e667b8b9275b", "source": "manual", "path": "three_gene_qvar_smoke", "_ts": "2026-08-11T13:47:58.276712+00:00"}

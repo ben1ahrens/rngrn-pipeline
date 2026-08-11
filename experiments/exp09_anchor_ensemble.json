@@ -1,0 +1,81 @@
+{
+ "rows": [
+  {
+   "sample": "sample_0000",
+   "L": 91.48997297253318,
+   "kstar_true": 0.4120573065902579,
+   "kstar_obs": 0.4320211109798837,
+   "anchor_rel_err": 0.04844909693465875,
+   "n_turing": 7,
+   "n_seeds": 8,
+   "per_seed_median_err": 0.03407406598256158,
+   "ensemble_err": 0.03407406598256158
+  },
+  {
+   "sample": "sample_0001",
+   "L": 110.27104750646653,
+   "kstar_true": 0.3418767908309456,
+   "kstar_obs": 0.22021755730758913,
+   "anchor_rel_err": 0.35585695427776387,
+   "n_turing": 0,
+   "n_seeds": 8,
+   "per_seed_median_err": null,
+   "ensemble_err": null
+  },
+  {
+   "sample": "sample_0002",
+   "L": 93.77153306797179,
+   "kstar_true": 0.40203151862464187,
+   "kstar_obs": 0.4132289625617203,
+   "anchor_rel_err": 0.02785215441661174,
+   "n_turing": 7,
+   "n_seeds": 8,
+   "per_seed_median_err": 0.028762372014009958,
+   "ensemble_err": 0.028762372014009958
+  },
+  {
+   "sample": "sample_0003",
+   "L": 50.0696036641146,
+   "kstar_true": 0.7529340974212035,
+   "kstar_obs": 0.689971960162011,
+   "anchor_rel_err": 0.08362237475343143,
+   "n_turing": 0,
+   "n_seeds": 8,
+   "per_seed_median_err": null,
+   "ensemble_err": null
+  },
+  {
+   "sample": "sample_0004",
+   "L": 104.16180466962271,
+   "kstar_true": 0.36192836676217766,
+   "kstar_obs": 0.2765610539497053,
+   "anchor_rel_err": 0.23586798010935411,
+   "n_turing": 0,
+   "n_seeds": 8,
+   "per_seed_median_err": null,
+   "ensemble_err": null
+  },
+  {
+   "sample": "sample_0005",
+   "L": 81.56692704558535,
+   "kstar_true": 0.46218624641833816,
+   "kstar_obs": 0.45831736921620875,
+   "anchor_rel_err": 0.008370818543630103,
+   "n_turing": 0,
+   "n_seeds": 8,
+   "per_seed_median_err": null,
+   "ensemble_err": null
+  }
+ ],
+ "summary": {
+  "n_samples": 6,
+  "n_with_turing": 2,
+  "steps": 4000,
+  "seeds": 8,
+  "per_seed_median_pct": 3.141821899828577,
+  "ensemble_median_pct": 3.141821899828577,
+  "anchor_median_pct": 6.60357358440451,
+  "corr_anchor_vs_hitrate": -0.4943690352942738,
+  "wall_s": 40.0
+ }
+}

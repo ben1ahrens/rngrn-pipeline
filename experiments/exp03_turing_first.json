@@ -1,0 +1,23 @@
+{
+ "_meta": {
+  "L": 91.48997297253318,
+  "kstar_true": 0.4120573065902579,
+  "kstar_obs": 0.4320211109798837,
+  "steps": 500,
+  "wall_s": 90.7
+ },
+ "baseline": {
+  "converged": 16,
+  "turing": 10,
+  "seeds": 16,
+  "kstar_rel_err_median": 0.05695362981822442,
+  "kstar_rel_err_min": 0.026611064551295794
+ },
+ "turing_first": {
+  "converged": 1,
+  "turing": 1,
+  "seeds": 16,
+  "kstar_rel_err_median": 0.9975731530930129,
+  "kstar_rel_err_min": 0.9975731530930129
+ }
+}

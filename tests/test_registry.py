@@ -9,8 +9,14 @@ import h5py
 import pytest
 
 
-def _make_payload(path, n=3, N=3, H=16):
-    """A tiny HDF5 payload: per-sample final_frame + quarantined jacobian/x_star."""
+def _make_payload(path, n=3, N=3, H=16, L=100.0):
+    """A tiny HDF5 payload: per-sample final_frame + quarantined jacobian/x_star.
+
+    Mirrors the real dataset layout, which stores the domain size and both wavenumbers as
+    per-sample ATTRIBUTES (`L`, `k_star`, `k_star_fft`). The gate requires `L` and `k_star`
+    and raises without them, so a fixture that omits them is not a valid payload — see
+    tests/test_gate_contract.py, which asserts that failure deliberately.
+    """
     rng = np.random.default_rng(0)
     with h5py.File(path, "w") as f:
         for i in range(n):
@@ -20,6 +26,9 @@ def _make_payload(path, n=3, N=3, H=16):
             g.create_dataset("x_star", data=rng.standard_normal(N))
             g.create_dataset("D", data=np.array([1.0, 40.0, 20.0])[:N])
             g.attrs["split"] = "train" if i < 2 else "val"
+            g.attrs["L"] = float(L)
+            g.attrs["k_star"] = 6.0 * 2.0 * np.pi / float(L)   # 6 FFT bins, as the real sets
+            g.attrs["k_star_fft"] = 1.08 * 6.0 * 2.0 * np.pi / float(L)
 
 
 @pytest.mark.parametrize("backend", ["jsonl", "sqlite"])
@@ -41,7 +50,7 @@ def test_register_list_load(tmp_path, backend):
 
     # load a sample through the FIREWALL gate
     ri, ak = gate.from_registry(droot, "toy_v1", "sample_0000", N=3,
-                                observed_idx=[0, 1, 2], L=100.0, backend=backend)
+                                observed_idx=[0, 1, 2], backend=backend)
     # observable reached recovery...
     assert ri.frame.shape == (3, 16, 16)
     assert ri.N == 3 and ri.observed_idx == (0, 1, 2)
@@ -74,7 +83,7 @@ def test_scan_indexes_manually_placed_dataset(tmp_path, backend):
     assert any(r["dataset_id"] == "dropped_v1"
                for r in reg.list_datasets(str(droot), backend=backend))
     ri, ak = gate.from_registry(str(droot), "dropped_v1", "sample_0000", N=3,
-                                observed_idx=[0, 1, 2], L=100.0, backend=backend)
+                                observed_idx=[0, 1, 2], backend=backend)
     assert ri.frame.shape == (3, 16, 16) and ak.J.shape == (3, 3)
 
     # idempotent: a second scan does not re-index

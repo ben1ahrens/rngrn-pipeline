@@ -35,7 +35,15 @@ class DataConfig:
     dataset_id: Optional[str] = None   # for source='registry': registered dataset name
     hdf5_path: Optional[str] = None    # for source='hdf5_3gene'
     sample_key: Optional[str] = None   # which sample group in the hdf5/registry payload
+    # `L` is a GENERATOR parameter: it sizes the domain for source='reference' (and feeds
+    # the DatasetSpec hash). It is NOT the domain size of a loaded sample — file-backed
+    # sources (registry, cache, hdf5_3gene) read L from the sample itself, because each
+    # sample has its own. Do not add `L:` to a file-backed config expecting it to apply.
     L: float = 100.0
+    # Optional cross-check for file-backed sources: when set, the gate compares it to the
+    # sample's stored L and warns loudly if they disagree — then uses the FILE's value.
+    # Left None, no check is made. It is never an override of measured geometry.
+    L_override: Optional[float] = None
     resolution: int = 128
     T_max: float = 4000.0      # generator horizon (answer-key side; OFF the tuning axis)
     dt: float = 0.1
@@ -49,8 +57,31 @@ class ModelConfig:
     m: int = 2                              # observed species (m<=N)
     form: str = "competitive"               # 'competitive' | 'nc1'
     n_hill: int = 2
-    seed: int = 0
+    # None means DERIVE FROM train.seed. This is an OVERRIDE, not a default.
+    #
+    # It was `0`, and that silently broke seed replication entirely. fit() passes
+    # model_seed=cfg.model.seed into recover(), restart inits come from
+    # _restart_seed(model_seed, r) with per-restart generators, and NOTHING in the recovery
+    # path reads the global RNG that seed_everything(train.seed) touches. So a constant
+    # model.seed=0 pinned every run to the same inits no matter what train.seed said.
+    # MEASURED: three runs at train.seed 0/1/2, identical otherwise, returned
+    # loss=0.234338833269, kstar=0.0058744712, D0=0.1082955398 -- bit-identical to 12
+    # digits. A K-seed target report was therefore running K IDENTICAL recoveries, and
+    # cross-seed topology_consistency -- the project's PRIMARY metric -- would have read 1.0
+    # while measuring nothing at all.
+    #
+    # None restores recover()'s own fallback (`model_seed = seed if model_seed is None`), so
+    # train.seed drives the inits again. Set an int only to hold the model init FIXED while
+    # varying something else, which is a deliberate experiment, not a default.
+    seed: Optional[int] = None
     observed_idx: Optional[list] = None     # which model indices the m rows map to
+    nondim: bool = False                    # recover on the unit box x/L; see recover.py  # unit 12
+
+    dispersion_backend: str = "eig"         # 'eig'|'cubic' ('cubic' exact for N==3 only) # unit 10
+
+    init: str = "default"                   # 'default' | 'low_basal' -- see model.py (unit 2)
+
+    d_init_from_kstar: bool = False         # opt-in D init from k*_obs, L-free  # unit B4
 
 
 @dataclass
@@ -61,11 +92,29 @@ class LossConfig:
     # is currently a non-differentiable post-hoc diagnostic (losses/terms.morphology_
     # consistency) and is NOT yet in the differentiable sum in losses/total.compute_terms,
     # so this weight is inert until Claude Code wires a differentiable morphology term.
+    # `resid` defaults to 0.0 — SETTLED OFF, not merely untuned. exp06 swept pixel batch
+    # {64,128,512} x weight {1,3,10}, 8 seeds per cell: all nine cells collapsed to 1/8
+    # Turing seeds with best median k* error 11.8 %, against 0.4 % with the residual off.
+    # `anchor` (2.0) is the frame-scale anchor promoted from exp05; see TUNING.md [TUNE].
     weights: dict = field(default_factory=lambda: dict(
-        kstar=1.0, turing=1.0, resid=0.3, anticollapse=0.5, morphology=0.1))
-    strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'gradnorm' | 'ntk'
+        kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5, anchor=2.0, morphology=0.1,
+        param_prior=0.0))                   # param_prior default 0.0: opt-in (unit 5)
+    strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'ratio' | 'gradnorm' | 'ntk'
     tau: float = 0.12                        # k* tolerance band
     jac_floor: float = 1.0                   # anti-collapse ||J|| floor
+    split_hinges: bool = True                # disjoint-support Turing hinges  # unit 1
+    hinge_k_min_frac: float = 0.1            # instability hinge starts at this grid fraction  # unit 1
+    staging_keys: list = field(default_factory=lambda: ["turing"])  # data-first staged terms  # unit 1
+    staging_off_frac: float = 0.25           # staged weights held at 0 for this fraction  # unit 1
+    staging_ramp_frac: float = 0.25          # then ramped 0->1 over this fraction  # unit 1
+    detach_xstar: bool = False               # dispersion terms see x* as a constant  # unit 1
+    dratio_centre: float = 7.5              # D-ratio prior centre, biological literature
+                                             # value (Nodal/Lefty), NOT the generator's
+                                             # ~135 median — see configs/bio_box.yaml # unit 5
+    dratio_spread: float = 1.0              # D-ratio prior spread, natural-log units;
+                                             # [TUNE], see configs/bio_box.yaml # unit 5
+    bio_box_path: str = "configs/bio_box.yaml"  # source of every plausibility number # unit 5
+    ratio_update_every: int = 50            # 'ratio' strategy: recompute cadence, in steps  # unit 13
 
 
 @dataclass
@@ -76,6 +125,29 @@ class TrainConfig:
     lbfgs_steps: int = 50
     grad_clip: float = 10.0
     seed: int = 0
+    deterministic: bool = True              # unit 10: torch deterministic-algorithms mode
+
+    # ---- unit b2: GPU-batched recovery -------------------------------------------------
+    # batched=False is the CURRENT serial behaviour and stays the default, so no recorded
+    # number changes method. True optimises all n_restarts restarts as one batched
+    # computation (recover._batched_restarts); it needs lbfgs_steps=0, m==N and resid
+    # weight 0, and it agrees with serial to ~1e-12 per step but is NOT bit-identical over a
+    # full run. device is the torch device recovery runs on; 'cuda' is only worth using
+    # batched, and (measured) only with model.dispersion_backend='cubic' at N=3.
+    batched: bool = False                   # unit b2
+    device: str = "cpu"                     # unit b2
+
+    # ---- unit P1: plottable TRAINING TRAJECTORY ----------------------------------------
+    # Step stride for history.TrainingHistory, which records the per-step loss terms, the
+    # WEIGHTS actually in force, and the CONSTRAINED physical parameters (KA, KR, alpha,
+    # delta, beta, D) of EVERY member. 0 or less records nothing.
+    # 10 is the default because one record per step x 64 members x 36 parameters is ~3.7 MB
+    # per 400-step run at float32 — not affordable across a 96-run wave — while a stride of
+    # 10 is ~370 KB and still resolves the staging ramp, which spans 25-50% of the budget
+    # (25 recorded points across it at adam_steps=1000). Step 0, the last training step and
+    # the final evaluation are recorded UNCONDITIONALLY whatever the stride, so no curve's
+    # endpoints are interpolated. See docs/DECISIONS.md D-PLOT-2.
+    history_every: int = 10                 # unit P1
 
 
 @dataclass
@@ -88,6 +160,34 @@ class SolverConfig:
     noise: float = 1e-2
     robustness_samples: int = 200
     robustness_sigma_log: float = 0.1
+    # ---- morphology rollout: fit() simulates the recovered model so morphology_match is
+    # a real number instead of morphology_scored='target_only'. Measured 0.9-1.7 s per
+    # 96x96/128x128 field; the grid and L come from the TARGET frame, not from n_grid,
+    # because morphology is only comparable on a matching grid.
+    morphology_rollout: bool = True          # unit 7
+    morphology_integrator: str = "etdrk4_rfft"   # unit 7
+    # 15000 is the WORST CASE, not the typical one: at the measured etdrk4_rfft step costs
+    # (0.9 / 1.7 / 2.8 ms per step at 64 / 96 / 128) a fully-bound budget is 13 / 26 / 42 s.
+    # 96x96 — the three_gene grid — therefore stays inside the 30 s target; a 128x128 target
+    # would not, and would need this lowered. Typical runs are far shorter: a saturating
+    # Turing model ends on the horizon at ~600 steps, and a collapsing stable one on the
+    # collapse rule at ~1000 (both measured).
+    morphology_max_steps: int = 15000        # unit 7
+    morphology_early_stop: bool = True       # unit 7 — for the COLLAPSE stop; see rollout.py
+    morphology_check_every: int = 200        # unit 7
+    morphology_saturation_tol: float = 0.01  # unit 7 [TUNE] — uncalibrated stopping rule
+    morphology_saturation_window: int = 5    # unit 7 [TUNE] — uncalibrated stopping rule
+
+    # ---- unit P1: the PLOTTABLE ARRAYS of a run ---------------------------------------
+    # Write <run_dir>/arrays/plot_arrays.npz — the target frame, the recovered model's
+    # rolled-out field, sigma(k) recovered AND true, the RAPS of both, the morphology
+    # vectors and the training trajectory. ON by default: a run whose arrays were not saved
+    # cannot be plotted afterwards without re-running it, and re-running a phase-C recovery
+    # costs ~9 minutes. Turn it OFF deliberately for a very large sweep. MEASURED: 645 KB for
+    # the full phase-C shape (96x96 grid, N=3, 64 restarts, 400 steps, history_every=10, both
+    # fields present), of which the training trajectory is ~0.51 MB; 110 KB for a short run
+    # with no history and no model field. See docs/DECISIONS.md D-PLOT-1.
+    save_plot_arrays: bool = True            # unit P1
 
 
 @dataclass
@@ -114,6 +214,46 @@ class Config:
 
     def config_id(self) -> str:
         return hashlib.sha256(self.canonical().encode()).hexdigest()[:12]
+
+    # Seed fields neutralised by `arm_id`.
+    #
+    # `model.seed` is neutralised ONLY WHEN IT IS None. That is the "derive from
+    # train.seed" case (see ModelConfig.seed), where it varies per replicate and must not
+    # split the group. Set to an INT it is the opposite — ModelConfig.seed's own note says
+    # "set an int only to hold the model init FIXED while train.seed varies", which is a
+    # DIFFERENT EXPERIMENT from the free-init arm, and precisely the shape of D-EVID-4
+    # (a constant model.seed=0 made K "replicates" one draw). Neutralising it there would
+    # pool a pinned-init run with a free-init run on the same target and mix a degenerate
+    # zero spread into a real `kstar_identifiability_std`. So an explicit int is left in
+    # the hash and separates arms, while still being constant across the replicates of
+    # either arm.
+    _ARM_ID_SEED_FIELDS = (("train", "seed"),)
+
+    def arm_id(self) -> str:
+        """Identity of the EXPERIMENT ARM: this config with the seeds neutralised.
+
+        `config_id` hashes the whole config, seeds included — correct for "which exact run
+        was this", and wrong for "which runs are replicates of each other". `optim/sweep.py`
+        and `optim/target_report.py` set `train.seed` per seed, so keying a cross-seed
+        aggregation on `config_id` puts every replicate in its own group of one: `n_seeds`
+        was always 1 and `kstar_identifiability_std` — the spread ACROSS seeds — was always
+        NaN (docs/DECISIONS.md D-EVID-13).
+
+        `arm_id` is that same hash with `train.seed` and `model.seed` held at a fixed
+        sentinel, so K seed replicates of one arm share it while any other difference —
+        `data.sample_key`, `model.N`, a loss weight, a step budget — still separates them.
+        Grouping on it therefore keeps `build_table`'s stated contract, "one row per
+        (config x target), averaged over seeds", instead of silently breaking it.
+        """
+        import copy
+        SENTINEL = "__ARM_ID_SEED_NEUTRALISED__"
+        stripped = copy.deepcopy(self)
+        for section, field_name in self._ARM_ID_SEED_FIELDS:
+            setattr(getattr(stripped, section), field_name, SENTINEL)
+        # model.seed only when it is DERIVED (None) — see _ARM_ID_SEED_FIELDS above.
+        if stripped.model.seed is None:
+            stripped.model.seed = SENTINEL
+        return hashlib.sha256(stripped.canonical().encode()).hexdigest()[:12]
 
     def to_yaml(self, path: str):
         with open(path, "w") as fh:

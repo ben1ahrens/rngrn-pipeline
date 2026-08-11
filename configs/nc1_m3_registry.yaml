@@ -1,0 +1,16 @@
+# Milestone 3 (registry), non-competitive (nc1) form — mirrors m3_registry.yaml with
+# model.form overridden to nc1. Unit 6: nc1 was implemented but never exercised by any
+# config; this is the first one. See docs/STATE_OF_THE_SCIENCE.md / TUNING.md for status.
+_base_: [base.yaml]
+data:
+  source: registry
+  # was `three_gene_val` until 2026-08-10; repointed to the canonical training source with
+  # m3_registry.yaml (D-CANON-4). The legacy set may not support a k* claim. Callers such as
+  # scripts/c2_cell.sh override this with --dataset-id anyway.
+  dataset_id: turing_spots
+  sample_key: sample_0000
+  # no L here: the sample's own L attr is authoritative (this dataset spans many
+  # domain sizes). Set data.L_override only to cross-check one specific sample.
+model: {N: 3, m: 3, form: nc1, observed_idx: [0, 1, 2]}
+train: {adam_steps: 2000, n_restarts: 4}
+tracking: {run_name: nc1_m3_registry}

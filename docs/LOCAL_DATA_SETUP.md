@@ -29,8 +29,14 @@ mkdir -p data/datasets/three_gene_val   && cp /tmp/tg/val.h5   data/datasets/thr
 mkdir -p data/datasets/three_gene_test  && cp /tmp/tg/test.h5  data/datasets/three_gene_test/payload.h5
 
 mkdir -p /tmp/2g && tar xzf ~/Downloads/two_gene_classical.tar.gz -C /tmp/2g
-mkdir -p data/datasets/two_gene_val     && cp /tmp/2g/val.h5    data/datasets/two_gene_val/payload.h5
+mkdir -p data/datasets/two_gene_classical_val  && cp /tmp/2g/val.h5   data/datasets/two_gene_classical_val/payload.h5
 ```
+
+The **directory name becomes the dataset id** — `scan-datasets` indexes each directory
+under `data/datasets/` by its own name. Configs reference that id, so the directory name
+and the `dataset_id` in a config must match exactly. (The Experiment B configs originally
+said `two_gene_val` while the directory was `two_gene_classical_val`; the id in the
+configs is now the directory name.)
 
 ## 3. Index them
 

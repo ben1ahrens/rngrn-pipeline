@@ -1,0 +1,17 @@
+# EXPERIMENT A — identifiability under a hidden channel.
+# N=3 truth (a real third gene exists), but only 2 of its 3 channels are observed.
+# The model assumes N=3 and infers the hidden species as a latent field.
+# Question: is the hidden gene recoverable? Scored PERMUTATION-INVARIANTLY, because the
+# model's species indices are arbitrary — only the observed ones are pinned.
+_base_: [base.yaml]
+data:
+  source: registry
+  dataset_id: three_gene_val      # drop in + `rngrn scan-datasets` (docs/LOCAL_DATA_SETUP.md)
+  sample_key: sample_0000
+  # no L here: the sample's own L attr is authoritative (this dataset spans many
+  # domain sizes). Set data.L_override only to cross-check one specific sample.
+model:
+  N: 3
+  m: 2
+  observed_idx: [0, 1]            # gene 2 hidden; sweep this to rotate which is hidden
+tracking: {run_name: expA_hidden}

@@ -6,7 +6,8 @@ object is a differentiable reaction–diffusion model (the RNGRN) whose weights
 *are* the recovered network.
 
 > **Status: TEMPLATE.** Every component of the six-stage pipeline is present, wired
-> together, and dry-runs end-to-end on CPU (24 tests pass; all six CLI subcommands
+> together, and dry-runs end-to-end on CPU (420 tests pass, 1 skipped, measured
+> 2026-08-04; all eleven CLI subcommands
 > run). It does **not** yet *recover* correctly — tuning the objective and proving the
 > milestones is the next stage, on a CUDA machine. See **[TUNING.md](TUNING.md)** for
 > the explicit list of knobs, stubs, and unproven science to work on.
@@ -52,8 +53,9 @@ src/rngrn/
   optim/
     sweep.py             outer loop over fit() -> run index
     benchmark.py         cross-run comparison table + identifiability metric
-  cli.py                 rngrn {generate-data,register-data,list-datasets,
-                                train,evaluate,analyze,sweep,benchmark}
+  cli.py                 rngrn {generate-data,register-data,scan-datasets,list-datasets,
+                                train,evaluate,analyze,sweep,benchmark,
+                                target-report,export}
 configs/                 base.yaml + milestone1/2/3 + sweep_example.yaml
 tests/                   firewall audit · science anchors · end-to-end smoke
 ```
@@ -62,19 +64,50 @@ tests/                   firewall audit · science anchors · end-to-end smoke
 
 ```bash
 pip install -e .            # torch, numpy, scipy, h5py, matplotlib, pyyaml, networkx
-pytest -q                   # 24 tests: firewall + science anchors + smoke dry-run
+pytest -q                   # 420 tests: firewall + science anchors + scorers + smoke dry-run
 
-# the six-stage CLI (dry-run scale shown; drop the overrides for real runs)
+# the six-stage CLI (dry-run scale shown; drop the overrides for real runs).
+# NOTE: launch trainers through the memory guard — see CLAUDE.md §7a.
 rngrn generate-data --config configs/milestone1_schnak.yaml
-rngrn train         --config configs/milestone1_schnak.yaml
+bash scripts/guarded_run.sh rngrn train --config configs/milestone1_schnak.yaml
 rngrn evaluate      --config configs/milestone1_schnak.yaml --run-id <run_id>
 rngrn analyze       --config configs/milestone1_schnak.yaml --run-id <run_id>
-rngrn sweep         --sweep  configs/sweep_example.yaml
+bash scripts/guarded_run.sh rngrn sweep --sweep configs/sweep_example.yaml
 rngrn benchmark     --format markdown
+
+# the auditable per-target instrument the pre-registration is judged on
+bash scripts/guarded_run.sh rngrn target-report --config configs/m3_registry.yaml \
+    --dataset-id three_gene_val --sample-key sample_0000 --form competitive --seeds 0 1 2
+rngrn export        --out-dir exports     # indexes -> tidy/long CSV
 ```
 
 Config is composed from `base.yaml` via `_base_:` and overridden on the CLI with
 `-o dotted.key=value` (e.g. `-o loss.weights.resid=0.6 train.adam_lr=0.03`).
+
+## Identifiability experiments
+
+Two validation experiments feed the model 2 observed channels and ask for a 3x3 GRN:
+**A** recovers a genuinely hidden gene (N=3 truth); **B** tests whether spare capacity
+invents one (N=2 truth, N=3 model). They need different metrics and are read against their
+own controls — see [docs/IDENTIFIABILITY_EXPERIMENTS.md](docs/IDENTIFIABILITY_EXPERIMENTS.md).
+`rngrn benchmark --degradation` prints the per-arm comparison. Agent/collaborator handoff:
+[docs/HANDOFF_identifiability.md](docs/HANDOFF_identifiability.md).
+
+## Handoff: the target goal and the state of the science
+
+Four documents written for a zero-context reader picking this up (information, not
+instructions — every number is either measured here or cited):
+
+| doc | contents |
+|---|---|
+| [docs/GOAL_tica_equivalent.md](docs/GOAL_tica_equivalent.md) | What Tica et al. built, what "equivalent but more robust" could mean (four incompatible readings), and the measured gap between here and there |
+| [docs/STATE_OF_THE_SCIENCE.md](docs/STATE_OF_THE_SCIENCE.md) | Every measured result, every rejected approach, and the numbers that superseded earlier over-optimistic ones. **Read before running anything.** |
+| [docs/ROBUSTNESS_MEASUREMENT.md](docs/ROBUSTNESS_MEASUREMENT.md) | The robustness baseline of the 127 generator systems, four measured defects in `robustness_cloud`, and what a Tica-comparable claim needs |
+| [docs/CODE_REALITY.md](docs/CODE_REALITY.md) | What is wired vs stubbed, where docs disagree with source, the cost model, and the open decisions |
+
+The shared working contract (**[CLAUDE.md](CLAUDE.md)**) is tracked at the repo root on this
+branch (brought over in `c53ebf6`). It originated on `docs/agent-conventions`; that branch is
+no longer the copy to read.
 
 ## The three milestones
 
@@ -82,7 +115,7 @@ Config is composed from `base.yaml` via `_base_:` and overridden on the CLI with
 |---|---|---|
 | M1 | `milestone1_{gm,schnak}.yaml` | N=m=2 fully observed — tune the objective here |
 | M2 | `milestone2_gm_partial.yaml` | N=2, m=1 — latent v field, identifiability degradation |
-| M3 | `milestone3_3gene.yaml` | N=3 from the 3-gene HDF5 dataset |
+| M3 | `m3_registry.yaml` | N=3 from a registered dataset — defaults to the canonical `turing_spots` |
 
 ## Where datasets come from — four sources, one firewall
 
@@ -112,7 +145,7 @@ cp /path/to/val.h5 data/datasets/three_gene_v1/payload.h5
 rngrn scan-datasets
 
 rngrn list-datasets
-rngrn train --config configs/registry_example.yaml    # source: registry, dataset_id: three_gene_v1
+rngrn train --config configs/m3_registry.yaml         # source: registry, dataset_id: turing_spots
 ```
 
 **One-time per machine:** see [docs/LOCAL_DATA_SETUP.md](docs/LOCAL_DATA_SETUP.md)
@@ -134,15 +167,17 @@ GROUP BY config_id`) once runs pile up. Same rows either way — switch freely.
 ## Tests: run them locally, before you push
 
 The authoritative test run is **local**, via a `pre-push` hook. Enable it once per
-clone:
+repository — the setting is shared by every worktree, so you do not repeat it when you
+add one:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-From then on `git push` runs `pytest -q` first (using this repo's `.venv` if present,
-so the tests exercise the same torch build you develop against) and aborts the push
-on failure. Bypass deliberately with `git push --no-verify`.
+From then on `git push` runs `pytest -q` first (using the `.venv` of whichever worktree
+you push from, so the tests exercise the same torch build you develop against) and aborts
+the push on failure. Bypass deliberately with `git push --no-verify`. To run the suite
+through the hook without pushing: `git hook run pre-push`.
 
 The GitHub Actions workflow in `.github/workflows/tests.yml` is kept as a definition
 but should not be relied on: Actions minutes for private repos are metered, and runs

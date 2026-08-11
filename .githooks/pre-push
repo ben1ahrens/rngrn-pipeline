@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # pre-push: run the test suite locally before anything leaves the machine.
 #
-# This is the local stand-in for CI. Enable it once per clone with:
+# This is the local stand-in for CI. Enable it ONCE PER REPOSITORY (local config is shared
+# across worktrees — a worktree's .git is a pointer file, not a config store) with:
 #
 #     git config core.hooksPath .githooks
 #
@@ -14,16 +15,37 @@ set -uo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root" || exit 1
 
+# A git worktree created off this repo has no .venv of its own, and many environments ship
+# python3 but no bare `python`. Both were true for every worktree in the 13-unit wave, so
+# this hook silently took the "skipping tests" branch and protected nothing while still
+# reading as a passing push. Look harder — and ABORT rather than skip when nothing is
+# found: a hook that quietly passes without running the suite is worse than no hook.
 if [ -x .venv/bin/python ]; then
     PY=.venv/bin/python
+elif [ -x ../turing-training/.venv/bin/python ]; then
+    PY=../turing-training/.venv/bin/python      # sibling worktree's venv
+elif command -v python3 >/dev/null 2>&1; then
+    PY=python3
 elif command -v python >/dev/null 2>&1; then
     PY=python
 else
-    echo "pre-push: no python interpreter found; skipping tests." >&2
-    exit 0
+    echo "pre-push: no python interpreter found — REFUSING to push untested." >&2
+    echo "          Install one, or bypass deliberately with: git push --no-verify" >&2
+    exit 1
 fi
 
+# TEST THE TREE BEING PUSHED, not whatever a .pth points at. The sibling venv above was
+# created by an EDITABLE install, which writes that worktree's absolute src path into a
+# .pth file — so from any OTHER worktree `pytest` silently imported
+# ../turing-training/src/rngrn and tested code that is not the code being pushed. MEASURED
+# on unit c-bioviab: 4 tests for a change made in THIS worktree failed under the hook and
+# passed under PYTHONPATH, because the hook was exercising the other tree. A hook that
+# green-lights a push after testing different source is the same class of defect as
+# D-EVID-2 (the hook that printed "skipping tests" and exited 0).
+# PYTHONPATH takes precedence over .pth entries, so this pins it.
+export PYTHONPATH="$repo_root/src${PYTHONPATH:+:$PYTHONPATH}"
 echo "pre-push: running test suite with $PY"
+echo "pre-push: importing rngrn from $("$PY" -c 'import rngrn,os;print(os.path.dirname(rngrn.__file__))')"
 start=$(date +%s)
 "$PY" -m pytest -q
 status=$?

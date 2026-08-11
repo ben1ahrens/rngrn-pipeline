@@ -15,11 +15,14 @@ dependencies = [
     "matplotlib",
     "pyyaml",
     "networkx",
+    "pandas",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
 tracking = ["wandb"]
+# for notebooks/ — needed to RUN or re-execute the inspection notebook, not to import rngrn
+notebook = ["nbformat", "nbconvert", "ipykernel", "jupyterlab"]
 
 [project.scripts]
 rngrn = "rngrn.cli:main"

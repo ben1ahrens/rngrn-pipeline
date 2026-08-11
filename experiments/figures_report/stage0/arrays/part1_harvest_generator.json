@@ -1,0 +1,22 @@
+{
+  "competitive/mobile3": {
+    "seen": 22500,
+    "hits": 6,
+    "rate": 0.0002666666666666667
+  },
+  "competitive/immobile": {
+    "seen": 2500,
+    "hits": 6,
+    "rate": 0.0024
+  },
+  "nc1/mobile3": {
+    "seen": 300000,
+    "hits": 5,
+    "rate": 1.6666666666666667e-05
+  },
+  "nc1/immobile": {
+    "seen": 27500,
+    "hits": 6,
+    "rate": 0.00021818181818181818
+  }
+}

@@ -55,7 +55,7 @@ def read_run_index(root: str, backend: str = "jsonl") -> list[dict]:
 def save_checkpoint(rdir: str, model, extra: dict | None = None):
     import torch
     payload = dict(state_dict=model.state_dict(), N=model.N, form=model.form,
-                   n_hill=model.n_hill)
+                   n_hill=model.n_hill, dispersion_backend=model.dispersion_backend)
     if extra:
         payload.update(extra)
     torch.save(payload, os.path.join(rdir, "checkpoints", "model.pt"))
@@ -65,6 +65,7 @@ def load_checkpoint(rdir: str):
     import torch
     from .model import RNGRN
     payload = torch.load(os.path.join(rdir, "checkpoints", "model.pt"), weights_only=False)
-    model = RNGRN(N=payload["N"], form=payload["form"], n_hill=payload["n_hill"])
+    model = RNGRN(N=payload["N"], form=payload["form"], n_hill=payload["n_hill"],
+                  dispersion_backend=payload.get("dispersion_backend", "eig"))
     model.load_state_dict(payload["state_dict"])
     return model, payload

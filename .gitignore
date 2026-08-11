@@ -4,12 +4,67 @@ __pycache__/
 .venv/
 build/
 dist/
-# generated data & runs (regenerate from configs)
+# generated data (regenerate from configs / re-drop per docs/LOCAL_DATA_SETUP.md)
 data/cache/
 data/three_gene_dataset/*.h5
-experiments/
 data/datasets/*/payload.h5
 data/staging/
+
+# RUN RECORDS ARE TRACKED. `experiments/` used to be ignored wholesale, which meant the
+# audit trail behind every number in docs/ was absent from version control: you could read
+# a claim but not the run that produced it. This project is headed for a paper, so the
+# evidence is versioned alongside the claims. It is affordable because the model is tiny
+# (3N^2+3N parameters): a whole run directory is ~15 KB and the run index ~5 KB per 30 runs.
+#
+# RECOVERED MODELS ARE TRACKED TOO. A checkpoint is ~3 KB here (the model has 3N^2+3N
+# parameters), and it is what `rngrn evaluate --run-id ...` reloads to re-simulate a
+# recovered network. results/train_results.json carries the same parameters as text for
+# reading and citing; the .pt carries them in the form you can RUN. Both, deliberately:
+# text survives a torch upgrade, the checkpoint reproduces the dynamics exactly.
+#
+# THE PLOTTABLE ARRAYS ARE TRACKED TOO (unit P1, docs/DECISIONS.md D-PLOT-1). Scalars audit
+# a number; ARRAYS draw a figure, and none of the figures a paper on inverse Turing patterns
+# needs — the pattern, the dispersion relation, the spectrum, the learning curve — can be
+# drawn from runs.jsonl. `arrays/*.npz` is therefore version-controlled with the claims it
+# supports. MEASURED cost: 110 KB (no history, no model field) to 645 KB (the full phase-C
+# shape: target frame + rolled-out field + sigma(k) recovered and true + both RAPS + the
+# thinned training trajectory), i.e. ~10-62 MB for a 96-run phase-C wave, and 0.82 MB per
+# cross-L evaluation. That is affordable; a bare
+# `*.npz` rule was not the reason it was excluded before — nothing was writing one.
+#
+#   tracked  — runs.jsonl / target_reports.jsonl / lgen_eval.jsonl / lgen_summary.jsonl
+#              (the append-only indexes),
+#              config/frozen_config.yaml (the config that ACTUALLY ran),
+#              results/*.json (metrics, provenance, recovered parameters + Jacobian),
+#              checkpoints/*.pt (the runnable recovered model),
+#              arrays/*.npz (the PLOTTABLE arrays: fields, spectra, sigma(k), trajectory),
+#              exp*.json / exp*.csv (the experiment-script evidence ledger)
+#   ignored  — only regenerable bulk: figures (redrawn from arrays/ in seconds by
+#              scripts/make_figures.py), HDF5 dumps, bare .npy, and any npz OUTSIDE
+#              arrays/ (which by convention is a scratch dump, not a run artefact).
+experiments/**/figures/
+experiments/**/*.h5
+experiments/**/*.npz
+!experiments/**/arrays/*.npz
+experiments/**/*.npy
+experiments/**/*.png
+
+# ...WITH ONE EXCEPTION. `experiments/figures_report/` holds REPORT figures, where the
+# IMAGE is the deliverable rather than a regenerable view of an array — the Stage-0
+# biological-viability check exists because the owner asked to "visually verify ... that
+# our model does in fact form turing patterns under the biological conditions", and a
+# boolean in a JSON file does not answer that. These PNGs are therefore tracked, together
+# with the arrays/ behind every panel (already tracked by the rule above), so the figure
+# and its data are auditable as a pair. This is deliberately NOT a global un-ignore: the
+# per-run sweep figures must stay regenerable from arrays/ by scripts/make_figures.py, or
+# a 96-run wave would add ~100 MB of PNGs to the repo.
+!experiments/figures_report/**/*.png
+
+# tidy CSV exports (`rngrn export`) — a pure projection of the tracked indexes
+exports/
+
+# downloaded literature (not ours to redistribute)
+papers/
 
 # machine-local Claude Code overrides. The rest of .claude/ is TRACKED and shared: the
 # agents, skills, rules and the trainer guard are project conventions, not personal setup.

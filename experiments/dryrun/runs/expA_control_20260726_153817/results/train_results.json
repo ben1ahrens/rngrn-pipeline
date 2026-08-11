@@ -1,0 +1,42 @@
+{
+  "loss": 0.769889893699849,
+  "kstar_model": 0.008913955169465686,
+  "kstar_obs": 0.3956977584732843,
+  "restarts": [
+    {
+      "restart": 0,
+      "total": 0.769889893699849,
+      "sig_max": -0.2686859951299475,
+      "kstar_model": 0.008913955169465686,
+      "rel_err": 0.9774728161682514
+    }
+  ],
+  "metric": {
+    "kstar_model": 0.008913955169465686,
+    "kstar_true": NaN,
+    "kstar_rel_err": NaN,
+    "recovered_turing": false,
+    "recovered_sig_max": -0.2686447604468883,
+    "recovered_tr0": -1.4785103844631955,
+    "n_true": 3,
+    "n_model": 3,
+    "subblock_sign_match": 0.4444444444444444,
+    "subblock_fro_rel_err": 0.9676203023277309,
+    "sign_match_frac": 0.4444444444444444,
+    "sign_match_frac_aligned": 0.4444444444444444,
+    "sign_match_frac_identity": 0.4444444444444444,
+    "best_perm": "(0, 1, 2)",
+    "n_permutations_searched": 1,
+    "scoring_mode": "permutation_aligned",
+    "arm": "fully_observed",
+    "observed_idx": "[0, 1, 2]"
+  },
+  "provenance": {
+    "git_revision": "949b4f5",
+    "python": "3.11.15",
+    "platform": "Linux-6.6.114.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "torch": "2.13.0+cu130",
+    "cuda_available": true,
+    "device": "cuda:NVIDIA GeForce RTX 5070 Ti Laptop GPU"
+  }
+}

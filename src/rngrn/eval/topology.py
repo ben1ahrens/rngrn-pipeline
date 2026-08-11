@@ -126,12 +126,12 @@ def plot_topology(model, title="Learned GRN Topology", labels=None, threshold_fr
     node_colors    : optional list of colors, one per node.
     Returns the matplotlib Figure.
     """
-    KA = np.asarray(model.KA.detach().numpy() if hasattr(model.KA, "detach") else model.KA, float)
-    KR = np.asarray(model.KR.detach().numpy() if hasattr(model.KR, "detach") else model.KR, float)
-    alpha = np.asarray(model.alpha.detach().numpy() if hasattr(model.alpha, "detach") else model.alpha, float)
-    beta = np.asarray(model.beta.detach().numpy() if hasattr(model.beta, "detach") else model.beta, float)
-    delta = np.asarray(model.delta.detach().numpy() if hasattr(model.delta, "detach") else model.delta, float)
-    D = np.asarray(model.D.detach().numpy() if hasattr(model.D, "detach") else model.D, float)
+    KA = np.asarray(model.KA.detach().cpu().numpy() if hasattr(model.KA, "detach") else model.KA, float)
+    KR = np.asarray(model.KR.detach().cpu().numpy() if hasattr(model.KR, "detach") else model.KR, float)
+    alpha = np.asarray(model.alpha.detach().cpu().numpy() if hasattr(model.alpha, "detach") else model.alpha, float)
+    beta = np.asarray(model.beta.detach().cpu().numpy() if hasattr(model.beta, "detach") else model.beta, float)
+    delta = np.asarray(model.delta.detach().cpu().numpy() if hasattr(model.delta, "detach") else model.delta, float)
+    D = np.asarray(model.D.detach().cpu().numpy() if hasattr(model.D, "detach") else model.D, float)
     N = int(model.N)
     if labels is None:
         labels = [rf"$x_{{{i+1}}}$" for i in range(N)]

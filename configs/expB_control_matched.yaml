@@ -1,0 +1,12 @@
+# EXPERIMENT B CONTROL — same N=2 data with a correctly-sized N=2 model.
+# Isolates the cost of the extra species: anything worse in expB_overparam than here is
+# attributable to over-parameterisation, not to the data or the objective.
+_base_: [base.yaml]
+data:
+  source: registry
+  dataset_id: two_gene_classical_val
+  sample_key: sample_0000
+  # no L here: the sample's own L attr is authoritative (this dataset spans many
+  # domain sizes). Set data.L_override only to cross-check one specific sample.
+model: {N: 2, m: 2, observed_idx: [0, 1]}
+tracking: {run_name: expB_control}

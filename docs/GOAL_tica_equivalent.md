@@ -181,11 +181,18 @@ in `STATE_OF_THE_SCIENCE.md` §11: the measured biological ratio (Nodal/Lefty ~7
 an order of magnitude below the generators' 108–140, and Tica's own argument is that a
 third node relaxes the requirement.
 
-**What is not yet defined:** there is no implemented plausibility *score*. Nothing in
-`validate.score_recovery` checks whether recovered parameters lie in a plausible box, and
-no such column reaches the run index. "Biologically realistic" is currently a stated
-intent, not a measured quantity — which makes it the least instrumented of the three goal
-components after robustness.
+**Corrected 2026-08-11 — this now exists.** This paragraph used to say there was no
+implemented plausibility *score*, that nothing in `validate.score_recovery` checked whether
+recovered parameters lie in a plausible box, and that no such column reached the run index.
+All three were overtaken within days of being written. `src/rngrn/scoring/plausibility.py`
+landed 2026-07-29 (`ee9d1c0`, unit 5); `validate.py:70,394-397` imports it and does
+`out.update(PLAUS.plausibility_report(...))` on the recovered model's own α, δ, β and
+D-ratio, scored against `configs/bio_box.yaml`. `plausibility_score` is on the run row —
+`LGEN_TRANSFER_FIRST_RESULT.md:31` already quotes `plausibility_score 0.667`.
+
+**What is still open** is not instrumentation but calibration: the box itself is an argued
+bracketing rather than a fitted range (D-BIO-7, marked UNCALIBRATED), so a score of 1.0 means
+"inside the argued box", not "matches measured biology".
 
 ### 2.3 Inferring a 3-gene circuit from N=2 data
 
@@ -275,13 +282,23 @@ published circuit.
 
 ### 4.2 Two of the three goal components are uninstrumented
 
-**Robustness.** The quantity Tica reports — local Turing parameter volume — is the
-natural axis, and this repo has a function for it (`eval/analysis.robustness_cloud`). It
-has never been run on a recovery result, never validated, and does not reach the run
-index. It also has four measured defects that make its current output non-comparable to
-Tica's number. See `ROBUSTNESS_MEASUREMENT.md` §3.
+> **CORRECTED 2026-08-11 — the heading and both bullets below are out of date.** Robustness
+> and plausibility are now both instrumented and both on every run row. What remains open is
+> *calibration and comparability*, not wiring. Kept below as the record of the gap that
+> motivated the work.
 
-**Biological plausibility.** No score, no column, no check (§2.2).
+**Robustness.** ~~It has never been run on a recovery result, never validated, and does not
+reach the run index.~~ Since `8321133` (2026-07-29) `robustness_cloud` perturbs the physical
+(J, D), uses the strict criterion, and is vectorised; `validate.py:386` calls
+`robustness_volumes(...)` so `turing_volume_{1pct,4p8pct,10pct,20pct}` lands on every run
+row, and it has been run on real recoveries (`C1_COMPETITIVE_TUNING.md` §9.2). The four
+defects of `ROBUSTNESS_MEASUREMENT.md` §3 are fixed. **Still open:** whether our volume is
+numerically comparable to Tica's, which depends on the perturbation model for D — see
+`ROBUSTNESS_MEASUREMENT.md` §5 items 4–6.
+
+**Biological plausibility.** ~~No score, no column, no check.~~ `scoring/plausibility.py` is
+wired into `validate.score_recovery` and `plausibility_score` is on the run row (§2.2).
+**Still open:** the box is an argued bracketing, not a fitted range (D-BIO-7, UNCALIBRATED).
 
 **N=2 → N=3 inference.** Harness complete, never run (§2.3).
 
@@ -355,9 +372,11 @@ the gaps as they currently read.
    unresolved, and Tica's own point is that a third node *relaxes* the requirement.
    Note §4.4: our data says the third node helps only in the immobile-slow-node
    configuration.
-3. **Robustness is uninstrumented.** No robustness number reaches the run index;
-   `robustness_cloud` perturbs raw θ (not physical parameters), can flip signs, ignores
-   `dispersion_backend`, and costs ~59 ms/draw serially.
+3. ~~**Robustness is uninstrumented.**~~ **FIXED 2026-07-29 (`8321133`), corrected here
+   2026-08-11.** `turing_volume_*` now reaches the run index on every row, the perturbation
+   is on the physical (J, D) so signs cannot flip, `dispersion_backend` is moot (no per-draw
+   rebuild), and the draws are batched numpy rather than ~59 ms/draw serial. What is still
+   open is comparability to Tica's number, not instrumentation.
 4. **The dataset's L defect.** `L = clip(6·2π/k*, 18, 220)` makes k*_true ≡ 6·2π/L for
    94.8 % of samples, so the domain size carries the answer. Only regeneration fixes
    it. Any k* result on the current data is confounded by this.
@@ -400,4 +419,5 @@ the gaps as they currently read.
 - `DATA_INTO_MODEL.md` (already in this directory) — the firewall audit: exactly what
   the model sees, what it must never see, and where the current guard is weaker than
   the docs claim.
-- `../CLAUDE.md` on branch `docs/agent-conventions` — the shared working contract.
+- `CLAUDE.md` at the repo root on `main` — the shared working contract. (It originated on
+  `docs/agent-conventions`; that branch is now superseded history, not where to read it.)

@@ -13,6 +13,10 @@ executable form. Every line is a check that has caught a real defect in this rep
       path **inside this worktree**. If it does not, every test result below is meaningless —
       an editable install's `.pth` is pinning a sibling tree's `src/`.
 - [ ] `pytest -q` is green against that venv, with the count recorded in the merge message.
+- [ ] The suite was run with the **sandbox DISABLED**. `payload.h5` is on the sandbox
+      read-deny list, so a sandboxed run reports ~15 `PermissionError` failures that look
+      exactly like code faults and are not. A "failing" suite is not a finding until it has
+      been re-run unsandboxed. See `CLAUDE.md` §3.
 - [ ] GitHub Actions was **not** consulted as a signal. `tests.yml` is `workflow_dispatch`-only
       and the account's Actions billing has lapsed; runs are skipped and reported as failures
       unrelated to the code.
@@ -32,7 +36,13 @@ executable form. Every line is a check that has caught a real defect in this rep
 - [ ] `firewall-auditor` agent run if the branch touched `model.py`, `observables.py`,
       `recover.py`, `losses/`, `eval/`, `scoring/`, `train.py` or `validate.py`.
 - [ ] Any new module under `eval/` or `losses/` has been classified recovery-side or not, and
-      `tests/test_firewall.py`'s module list updated to match.
+      `tests/test_firewall.py`'s module list updated to match. Inside `src/rngrn/` the
+      completeness test enforces this for you; it will fail on an unclassified module.
+- [ ] **Any new `scripts/` module that opens `payload.h5` was added to `FORBIDDEN`.** The
+      completeness test globs `src/rngrn` only, so it is blind to `scripts/` — and scripts are
+      importable by bare top-level name because the suite and notebooks put `scripts/` on
+      `sys.path`. Forgetting this leaves the suite green, which is exactly what happened when
+      the canonical-dataset scripts were written. See `CLAUDE.md` §5.
 - [ ] No criterion used to *judge* recovery is derived from ground truth. `kstar_obs` from an
       FFT of the observed frame is legal; anything from the generating parameters is not.
 

@@ -2420,3 +2420,69 @@ now a fraction of the pattern's own wavelength squared, read from the field's sp
 canonical frames (round domains 0.94–1.57, worms 0.29–0.77) and is **not calibrated against a
 control**. It is used for labelling only, never as a pass condition, and no threshold in
 `docs/PREREGISTRATION.md` depends on it.
+
+---
+
+### D-EVID-17 — the `~15%` k\* tolerance is UNCALIBRATED *and* unreachable: both Milestone-1 reference frames diverge on their own shipped defaults
+
+**Date:** 2026-08-11. **Status:** DECIDED (marked **[UNCALIBRATED]**; no calibration attempted).
+**Decided by:** the implementing agent under §10 delegated authority, during a repo-wide docs
+audit. This is a bookkeeping correction, not a threshold change — `TUNING.md` is not
+`docs/PREREGISTRATION.md`, no pass condition is touched, and nothing is weakened.
+
+**The gap.** `TUNING.md:131-132` said: *"[TUNE] Milestone 1 (N=m=2) — `configs/milestone1_{gm,schnak}.yaml`.
+Get recovery to land in-regime and match k\* within ~15% on both reference frames."* That `~15%`
+dates from the initial template commit and has never been measured against anything. It carried
+only a `[TUNE]` tag, and no entry in this file addressed it — so it failed CLAUDE.md §8's
+"thresholds are calibrated, never inherited" and §10's requirement that an uncalibratable number
+be marked UNCALIBRATED in **both** the code/doc and here.
+
+**Measured, and worse than uncalibrated — the frames cannot be generated at all.** Running the
+two shipped systems through `data/solver.py::simulate_to_attractor` at its own defaults
+(`resolution=128, T_max=4000, dt=0.1`), with the classes' shipped parameters:
+
+| config | system | result |
+|---|---|---|
+| `configs/milestone1_gm.yaml` | `GiererMeinhardt(a=0.5, b=1.0, c=6.1, K=0.003, n=2, Du=1.0, Dv=100.0, L=100.0)` | `FloatingPointError: solver diverged at step 133; reduce dt` |
+| `configs/milestone1_schnak.yaml` | `Schnakenberg(a=0.1, b=0.9, gamma=100.0, Du=1.0, Dv=40.0, L=100.0)` | `FloatingPointError: solver diverged at step 29; reduce dt` |
+
+Both overflow in the reaction term before the diffusion step (`rd_models.py:80` for GM,
+`rd_models.py:105` for Schnakenberg). This is **live code, not dead code** — both systems are
+registered in `data/rd_models.py` and the `data.source="reference"` dispatch in `train.py` is
+fully wired — so it fails loudly rather than silently, per §4. Reproduced twice independently
+(an audit subagent, then re-run directly) before this entry was written.
+
+**Root cause — `solver.py` has no diffusion CFL bound.** `data/solver.py:55-59` picks the
+timestep from the *reaction* Jacobian alone:
+
+```python
+rate      = float(np.max(np.abs(np.linalg.eigvals(J0))))
+dt_stable = 0.2 / (rate + 1e-9)
+dt_eff    = min(dt, dt_stable)
+```
+
+The diffusion half is explicit (`_laplacian_fft` each step) and is never consulted. Explicit
+diffusion needs roughly `dt < dx^2 / (2*D_max)`; at the shipped `L=100, resolution=128` →
+`dx ≈ 0.78`, so with `Dv=100` that bound is `~3e-3` while the reaction cap leaves `dt = 0.1`,
+about **30x too large**. GM (`Dv=100`) therefore blows up sooner in D-terms than
+Schnakenberg (`Dv=40`) survives longer in step count only because its reaction cap is much
+tighter (`gamma=100`). The comment above that code says the cap "keeps the reference
+generator stable without a config edit" — it does not, for any diffusion-dominated system.
+
+**This also means the README quickstart is broken**, since its first command is
+`rngrn generate-data --config configs/milestone1_schnak.yaml`. README now says so inline.
+
+**So the tolerance is unreachable, not merely unmeasured.** A number cannot be calibrated
+against a frame that cannot be produced. `TUNING.md` now tags the knob `[UNCALIBRATED]` and
+names the divergence, so nobody tunes against it believing it is a real bar.
+
+**What was rejected.** (a) *Deleting the Milestone-1 line.* The reference-frame path is a real,
+wired capability and the milestone is still a sensible target; deleting it would hide a defect
+rather than record it. (b) *Picking a defensible tolerance now (e.g. the 10% used elsewhere).*
+That would be inventing a threshold with no measurement behind it — precisely the failure §8
+names. (c) *Fixing the solver by reducing `dt`.* Tempting and probably correct, but it is a
+numerics change with no owner request and no test behind it; the divergence is now recorded so
+it can be fixed deliberately. See `docs/FUTURE_WORK.md`.
+
+**Not established.** Whether the reference frames are recoverable at a smaller `dt`, and hence
+what a calibrated k\* tolerance for Milestone 1 would actually be. Both remain open.

@@ -6,11 +6,20 @@ object is a differentiable reaction–diffusion model (the RNGRN) whose weights
 *are* the recovered network.
 
 > **Status: TEMPLATE.** Every component of the six-stage pipeline is present, wired
-> together, and dry-runs end-to-end on CPU (420 tests pass, 1 skipped, measured
-> 2026-08-04; all eleven CLI subcommands
+> together, and dry-runs end-to-end on CPU (**551 tests pass, 1 skipped, re-measured
+> 2026-08-11** with the sandbox disabled; all eleven CLI subcommands
 > run). It does **not** yet *recover* correctly — tuning the objective and proving the
 > milestones is the next stage, on a CUDA machine. See **[TUNING.md](TUNING.md)** for
 > the explicit list of knobs, stubs, and unproven science to work on.
+>
+> **This banner is out of date and needs an editorial pass (flagged 2026-08-11).** The
+> "next stage" framing predates a great deal of work that has since happened on CUDA:
+> canonical dataset generation, the C1/C2 tuning campaigns, morphology scoring, and the
+> D-ratio prior are all recorded with dated evidence in
+> **[docs/DECISIONS.md](docs/DECISIONS.md)**, **[docs/PREREGISTRATION.md](docs/PREREGISTRATION.md)**
+> and **[docs/STATE_OF_THE_SCIENCE.md](docs/STATE_OF_THE_SCIENCE.md)**. Read those for where
+> the project actually stands; how to characterise overall status is the owner's call, so
+> the wording above is left rather than rewritten.
 
 ## The one non-negotiable rule — the firewall
 
@@ -64,10 +73,21 @@ tests/                   firewall audit · science anchors · end-to-end smoke
 
 ```bash
 pip install -e .            # torch, numpy, scipy, h5py, matplotlib, pyyaml, networkx
-pytest -q                   # 420 tests: firewall + science anchors + scorers + smoke dry-run
+pytest -q                   # 551 passed, 1 skipped: firewall + science anchors + scorers + smoke
+                            # RUN THIS WITH THE SANDBOX DISABLED. payload.h5 is on the sandbox
+                            # read-deny list, so a sandboxed run fakes ~15 PermissionError
+                            # failures that look exactly like code faults. See CLAUDE.md §3.
 
 # the six-stage CLI (dry-run scale shown; drop the overrides for real runs).
 # NOTE: launch trainers through the memory guard — see CLAUDE.md §7a.
+#
+# !! BROKEN AS SHOWN (2026-08-11, D-EVID-17). The two `milestone1_*` reference frames
+# !! CANNOT BE GENERATED at their shipped defaults: solver.py caps dt by the reaction
+# !! Jacobian only and never by the diffusion CFL condition, so `generate-data` raises
+# !! `FloatingPointError: solver diverged` at step 29 (schnakenberg, Dv=40) and step 133
+# !! (gierer_meinhardt, Dv=100). Use a registry dataset instead, e.g.
+# !!     rngrn train --config configs/m3_registry.yaml    (data.source: registry)
+# !! The lines below are kept as the shape of the pipeline, not as a working quickstart.
 rngrn generate-data --config configs/milestone1_schnak.yaml
 bash scripts/guarded_run.sh rngrn train --config configs/milestone1_schnak.yaml
 rngrn evaluate      --config configs/milestone1_schnak.yaml --run-id <run_id>

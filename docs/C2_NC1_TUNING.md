@@ -5,7 +5,9 @@ nothing here moves a bar. Every number below names the runs-root, the targets an
 that produced it, and every runs-root is committed under `experiments/`.
 
 **Form:** `nc1`. **Data:** `three_gene_qvar` `sample_0000` … `sample_0004` — the TUNING half
-of §1a's split. `sample_0008` … `sample_0033` untouched. **Seeds:** K = 8 independent
+of §1a's split. *(`three_gene_qvar` was PRIMARY when this ran; it was superseded as primary
+by `turing_spots`/`turing_labyrinth` on 2026-08-10, D-CANON-4. No threshold changed and no
+recovery has been run against the canonical sets, so these measurements stand.)* `sample_0008` … `sample_0033` untouched. **Seeds:** K = 8 independent
 `train.seed` values (0…7), post-`f78ae74`, so they are 8 independent draws and not the
 pre-fix K-identical replicate.
 

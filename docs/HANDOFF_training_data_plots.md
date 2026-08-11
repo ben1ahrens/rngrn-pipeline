@@ -43,7 +43,11 @@ case. Nothing else in the repo changed; no recovery-side module was touched.
 
 ## 3. What is VERIFIED
 
-All 413 samples across all 11 registered datasets.
+All 413 samples across the **11 datasets registered as of 2026-08-10 14:00** — which was
+every one that existed when this ran. It is no longer "all": `turing_spots` and
+`turing_labyrinth` were generated six hours later the same day and are **not** among these
+413. Their patterning is verified separately and differently — see
+`docs/HANDOFF_canonical_datasets.md` §2.
 
 - **Every field panel carries a colorbar, both axes labelled, and tick marks in physical
   length units** (`extent=(0, L, 0, L)`), so a wavelength is readable straight off the

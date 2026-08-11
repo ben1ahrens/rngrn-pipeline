@@ -2537,3 +2537,259 @@ it can be fixed deliberately. See `docs/FUTURE_WORK.md`.
 
 **Not established.** Whether the reference frames are recoverable at a smaller `dt`, and hence
 what a calibrated k\* tolerance for Milestone 1 would actually be. Both remain open.
+
+### D-FFT-1 — training gains a forward map: implicit differentiation at the patterned steady state
+
+**Date:** 2026-08-11 (Fourier-training design session, `feature/fft-training`). **Status:** DECIDED
+**Decided by:** the owner, choosing among options laid out by the implementing agent.
+
+**The decision:** training acquires a model-side predicted pattern: the QSS
+reaction–diffusion system is integrated to its patterned stationary state `u*(θ)` under
+`no_grad` (existing `eval/numerics.integrate_etdrk4_rfft`), and spectral losses of `u*` are
+differentiated through the stationarity condition `D∇²u* + f(u*;θ) = 0` by the implicit
+function theorem — one adjoint linear solve, no backprop through the integrator. This makes
+`CLAUDE.md` §7c ("training never simulates") false; the plan schedules its amendment in the
+change that lands the solve.
+
+**Evidence:** the current objective consumes exactly two frame statistics (`kstar_obs`,
+`recover.py:417`; `frame.mean()`, `losses/total.py:79`) against ~3N²+3N parameters — data
+starvation, with the measured failure mode to match (C1: 7/8 seeds never reach the Turing
+regime, `docs/C1_COMPETITIVE_TUNING.md`). Linear theory cannot predict the saturated
+spectrum, so any spectral data term needs a nonlinear forward map. No `torch.fft` exists
+anywhere in the training path (grepped this session).
+
+**What was rejected and why:** (a) *BPTT through the rollout* — backprop through thousands
+of stiff PDE steps; most expensive and fragile, and structurally identical gradients to IFT
+at the fixed point. (b) *Analytic-only enrichment* (dispersion-shape terms, no simulation) —
+cannot constrain saturated amplitudes or morphology, so it cannot close the gap the stopping
+criterion demands; retained as ablation arm A0/A1 territory instead.
+
+**Not independently validated:** nothing is implemented. Diagnostic D1
+(`docs/PLAN_fourier_training.md` §3) — IFT gradient vs finite differences, translational
+zero-mode orthogonality — is the go/no-go before any training code is accepted.
+
+**Where it lives:** `docs/SPEC_fourier_training.md` §3; `docs/PLAN_fourier_training.md` §3 (D1).
+
+### D-FFT-2 — the stopping criterion is revised: wavelength is primary, ground-truth topology match is reported-only, reproducibility is the binding recovery gate
+
+**Date:** 2026-08-11 (design session). **Status:** DECIDED
+**Decided by:** the owner, explicitly superseding the session kickoff's own criterion 1.
+
+**The decision:** recovery no longer requires the learned GRN to match the generator's
+topology. Binding instead: (R1) over 5 independent runs, all 5 recovered sign structures
+identical under the identity species mapping; (R2) parameter similarity on
+time-scale-invariant combinations, reported-only until calibrated per D-FFT-9. Forward
+validation (Criterion 2) gates on: strict Turing instability, stationary non-homogeneous
+rollout, and wavelength within one radial bin (D-FFT-3). Ground-truth sign comparison stays
+in every report as a diagnostic.
+
+**Evidence:** the identifiability concern is structural — many (J, D) share a k\*, and the
+owner's stated goal is a GRN that *produces the pattern*, reproducibly, not the generator's
+circuit per se. R2's restriction to time-scale-invariant combinations follows from a
+verified degeneracy: a single stationary frame is invariant under jointly scaling (f, D), so
+absolute rates are pinned only by priors and would fail a similarity gate uninformatively.
+
+**What was rejected and why:** the originally proposed ground-truth bar (9/9 signed entries
+under identity) — rejected by the owner as the wrong claim; also the softer 8/9 and
+off-diagonal-only variants, mooted with it. Permutation-aligned scoring as the headline —
+rejected because channels are observed and ordered (m = N), so species are not anonymous.
+
+**Where it lives:** `docs/SPEC_fourier_training.md` §1, §9.3–9.4.
+
+### D-FFT-3 — the wavelength tolerance is one radial bin: |k\*_sim − k\*_obs| ≤ 2π/L
+
+**Date:** 2026-08-11 (design session). **Status:** DECIDED
+**Decided by:** the owner, from options with the resolution argument laid out.
+
+**The decision:** forward-validation F3 and the training-side check use
+`|k\*_sim − k\*_obs| ≤ 2π/L`, both sides measured by the same estimator
+(`observables.raps`) on the same grid and L. Per-sample: rel-err ≤ 1/p — 12.5 % at p=8
+(`turing_labyrinth/sample_0000`), 2.9 % at p=35. Always reported with
+`kstar_fft_bin_width` and the L-only trivial-predictor control (D-EVID-7/8 discipline).
+
+**Evidence:** the RAPS resolution *is* Δk = 2π/L; the pre-registered 8.3 % was derived on
+the three_gene sets and D-EVID-8 records it is not dataset-independent — at p=8 it demands
+sub-bin precision the measurement does not carry. One bin clears the trivial predictor
+(33–37 % error on canonical sets, `docs/HANDOFF_canonical_datasets.md`) by ~3×, so the
+number is meaningful against its control.
+
+**What was rejected and why:** (a) *importing the 8.3 %* — an inherited threshold, exactly
+what §8 forbids, and sub-resolution at p=8. (b) *half a bin* — leans on sub-bin centroid
+precision characterised but not certified at this p. (c) *a fixed percentage for all
+samples* — either loose at high p or sub-resolution at low p, the failure D-EVID-8
+documents.
+
+**Where it lives:** `docs/SPEC_fourier_training.md` §9.1.
+
+### D-FFT-4 — forward validation gates on the QSS rollout; the finite-μ lift is a later milestone, never the gate
+
+**Date:** 2026-08-11 (design session). **Status:** DECIDED
+**Decided by:** the owner (who had asked for "simulated under the dynamical lift"), after
+the numerics risk was laid out.
+
+**The decision:** the DoD's forward validation runs the existing QSS rollout
+(`eval/rollout.simulate`, spectral ETDRK4). Spatial simulation of the μ-lifted system is
+milestone M6, post-DoD, admissible only after `docs/FUTURE_WORK.md`'s preconditions:
+demonstrated dt-convergence and reproduction of the QSS field at μ ≤ 1e-4 (the lift's gates
+relax at 1/μ; a stiff integrator that damps the instability manufactures "patterns die at
+finite μ" for free).
+
+**Evidence:** `docs/FUTURE_WORK.md` — the lifted system has never been simulated in space;
+`eval/lifted.py` is written, not validated. Putting never-built stiff numerics on the DoD
+critical path would let a numerics artefact read as a recovery failure.
+
+**What was rejected and why:** (a) *lift as the gate* — strongest biological claim, but see
+above. (b) *dropping the lift entirely* — abandons the owner's stated interest; kept as
+evidence-stage instead.
+
+**Where it lives:** `docs/SPEC_fourier_training.md` §1; `docs/PLAN_fourier_training.md` §4 (M6).
+
+### D-FFT-5 — Stage 0 is `turing_labyrinth/sample_0000` with a k-band + channel holdout, gated beat-all against an alternative-sign-structure null
+
+**Date:** 2026-08-11 (design session). **Status:** DECIDED
+**Decided by:** the owner, through the "GRN-mechanism lens" he set: a split must certify
+mechanism, not curve-fitting.
+
+**The decision:** Stage 0 fits species 0 only, spectral terms restricted to the training
+annulus `B_train` around k\*_obs; held out are the k-bands `B_low ∪ B_harm` and channels
+1–2 entirely. Gate 1: the recovered model's held-out-band prediction error beats **every**
+member of a ≥6-member null ensemble — alternative sign structures from the multistart
+restarts plus single-edge flips of the winner, each refit to `B_train` with gates frozen,
+identical budget. Gate 2: predicted channel-1/2 amplitude ratios beat every null member's.
+Patch (quadrant) consistency is reported, never gated. Sample: `sample_0000` (tuning role).
+A Stage-0 pass licenses only "the machinery fits and the gates discriminate" — never a
+recovery claim.
+
+**Evidence:** the canonical set stores single final frames (time-snapshot splits
+impossible, D-CANON discussion) and `sample_0000`'s channels 1–2 are near-flat (cv ≈ 0.075
+vs 0.81) yet noise-free, so channel prediction tests the eigenvector structure of
+`J − k²D` with clean signal; spectral bands are coupled by the kinetics' nonlinearity, so
+held-out-band prediction is forced by mechanism, which a 3N²+3N-parameter model cannot
+fake by memorisation. `sample_0004` (the other measured labyrinth) is **held-out role** —
+using it for iteration burns 1 of 6 held-out samples corpus-wide
+(`docs/PREREGISTRATION.md` split).
+
+**What was rejected and why:** (a) *sample_0004 first* — contaminates the pre-registered
+split. (b) *spatial patches as the gate* — near-trivial under statistical homogeneity;
+demoted to reported control. (c) *channel prediction as the sole primary gate* — tiny
+dynamic range, no calibrable null on its own. (d) *beat-the-null-median* — with a ≤10-member
+ensemble, "beats most wrong mechanisms" is the weaker story; beat-all keeps every outcome
+informative, including fail-no-spread, which IS the identifiability measurement.
+
+**Where it lives:** `docs/SPEC_fourier_training.md` §9.5–9.7; `docs/PLAN_fourier_training.md` §2.
+
+### D-FFT-6 — composition: every existing term stays on throughout; spectral terms ignite on detected patterning, omitted-not-zeroed
+
+**Date:** 2026-08-11 (design session). **Status:** DECIDED
+**Decided by:** the owner, ratifying the implementing agent's recommendation verbatim.
+
+**The decision:** the existing objective (kstar, turing, anchor, anticollapse) runs
+unchanged for the whole optimisation — it is the ignition system that reaches the Turing
+regime and the recovery net when a model drifts out of it. The forward solve runs only when
+the model is currently Turing-unstable; spectral terms contribute only when the solve
+actually patterned (amplitude above a floor, D-FFT-9); otherwise they are **omitted** with a
+`spectral_skipped` flag (the `resid_skipped` precedent), never computed-and-zeroed. The
+current default objective is frozen as a permanent baseline config
+(`configs/baseline_linear.yaml`, ablation arm A0).
+
+**Evidence:** a random init is almost never Turing-unstable (0/398 measured for the
+low_basal family, `model.py:158-166`), so a spectral loss is undefined exactly when the
+model most needs guidance; the linear-theory terms are what fixed 0 % → 36.8 % Turing
+convergence (D8, `docs/STATE_OF_THE_SCIENCE.md` §2.1).
+
+**What was rejected and why:** (a) *joint-from-step-0* — identical up to wasted forward
+solves on homogeneous states and muddier logs. (b) *spectral replaces the k\*-anchor* —
+removes the only data term that works pre-pattern and destroys the cleanest ablation
+(status quo vs status quo + spectral); "spectral-only after ignition" survives as ablation
+arm A4, a measurement rather than a commitment. (c) *schedule-based ramp
+(`DataFirstStaging`) for the spectral terms* — ignition is checkable, so a schedule that
+fires before the model patterns just burns solves.
+
+**Where it lives:** `docs/SPEC_fourier_training.md` §3, §5; `docs/PLAN_fourier_training.md` §5 (A0, A4).
+
+### D-FFT-7 — spectral shape terms are gain-invariant; amplitude enters only through separate, opt-in terms
+
+**Date:** 2026-08-11 (design session). **Status:** DECIDED
+**Decided by:** the owner.
+
+**The decision:** `spec_shape` and `spec_aniso` are normalised by training-band power only
+(gain-invariant, and normalisation over held-out bands would be leakage); amplitude enters
+solely through `spec_amp_mean` and `spec_amp_fluct` — separate term keys, ON for Stage 0,
+individually ablatable, wholesale switch-off-able. This consciously breaks, as a *mode*,
+the repo's scored-spectral-quantities-are-amplitude-blind convention
+(`docs/STATE_OF_THE_SCIENCE.md` §2.8) while preserving it as the available configuration.
+
+**Evidence:** Stage-0 frames are synthetic, noise-free, absolute concentrations — amplitude
+is legal, clean signal, and the channel co-gate (D-FFT-5) is only meaningful if the loss
+sees amplitude somewhere; the amplitude-blind convention exists for unknown fluorescence
+gain on future real data, which flipping two weights restores.
+
+**What was rejected and why:** (a) *fully amplitude-blind* — guts the channel co-gate and
+drops the "amplitudes inform concentration fields" premise. (b) *one amplitude-aware
+spectral distance* — shape and amplitude errors become inseparable in logs and ablations,
+and restoring gain-invariance later means redesigning the term, not flipping a weight.
+
+**Where it lives:** `docs/SPEC_fourier_training.md` §4, §5. The Stage-2 observation-noise
+arm is the scheduled decision point for demoting the amplitude terms
+(`docs/PLAN_fourier_training.md` §6).
+
+### D-FFT-8 — morphology is reported-only in forward validation, for now
+
+**Date:** 2026-08-11 (design session). **Status:** DECIDED (the deferral); the gating
+question itself is OPEN, scheduled at Stage 2.
+**Decided by:** the owner: *"start with morphology being reported only, and focus on
+recovering Turing patterns."*
+
+**The decision:** the DoD's forward-validation gate is F1 (strict Turing) + F2 (stationary,
+non-homogeneous) + F3 (one-bin wavelength). The rollout's morphology class — judged by
+`scripts/phase_topology.measure`, the canonical sets' own annotator, at matched grid and L —
+plus `morphology_distance` and the 2-D spectral distance are recorded in every report but
+gate nothing. All comparisons are rotation-invariant; pattern orientation never matters.
+Whether morphology becomes binding is decided at Stage 2 (M4), when rollouts exist in
+numbers.
+
+**Evidence:** the two available classifiers disagree in provenance (the scoring-side bank
+was trained on the superseded three_gene sets; `phase_topology` labelled the canonical
+data and caught its 3 mislabelled holes samples, D-CANON-5), and its 0.55 circularity cut
+is UNCALIBRATED — a binding gate today would hang on an uncalibrated judge.
+
+**What was rejected and why:** (a) *gating on class match now* — premature per the owner's
+priority ordering, though noted as non-trivial (sample_0000's class margin, 0.035, is the
+smallest in the dataset). (b) *gating on class + calibrated distance* — adds a calibration
+burden Stage 0 does not need.
+
+**Where it lives:** `docs/SPEC_fourier_training.md` §1, §8; `docs/PLAN_fourier_training.md` §4 (M4).
+
+### D-FFT-9 — calibration ledger for the Fourier-training knobs
+
+**Date:** 2026-08-11 (design session). **Status:** OPEN — each item below is UNCALIBRATED
+until its named measurement closes it; none may gate before then.
+**Decided by:** the implementing agent under delegated authority (the *rules* below are the
+decision; the numbers are deliberately not chosen yet).
+
+**The decision:** every new knob is born UNCALIBRATED with a pre-registered calibration
+rule, so the number that eventually closes it cannot be tuned-to-pass:
+
+- **Zero-call threshold** (edge-absent rule; inherited 5 %-of-max is uncalibrated):
+  from Stage-0 ≥10-seed runs, place the cut at the separation point of the magnitude
+  distributions of consistently-present vs consistently-absent edges. Non-separation is a
+  finding (sign structure unstable), not a licence to pick a cut. Closes R1 (D-FFT-2).
+- **Parameter-similarity threshold (R2):** measured within-cluster log-space spread of the
+  Stage-0 seed set on time-scale-invariant combinations, plus margin. R2 reports until then.
+- **Band edges `b_lo, b_hi`** (provisional 0.5/1.5 × k\*_obs): set from the measured
+  spectral support of `sample_0000` (diagnostic D3), including whether `B_harm` carries any
+  measurable signal at p=8 — if not, the held-out-band gate leans on `B_low` and says so.
+- **Ignition amplitude floor:** from diagnostic D2's separation between "patterned" and
+  "still relaxing" forward solves.
+- **New term weights** (`spec_shape`, `spec_aniso`, `spec_amp_*`, `real_moments`): swept at
+  Stage 0 on the tuning-role sample; settled values recorded here.
+- **Channel co-gate threshold:** beat-all against the D-FFT-5 null ensemble (a rule, not a
+  number — inherits the null's spread).
+
+**What was rejected and why:** binding provisional numbers today (e.g. log-spread ≤ 0.2 for
+R2) — an UNCALIBRATED-but-binding gate passes or fails for reasons nobody can defend, the
+failure §8 exists to prevent. The two live precedents (the ~15 % k\* tolerance, D-EVID-17;
+`coupling_threshold = 0.05`) show how inherited numbers calcify.
+
+**Where it lives:** `docs/SPEC_fourier_training.md` §9.3–9.8; `docs/PLAN_fourier_training.md`
+§3 (D2, D3, D5). Each closure appends its number and evidence to this entry.

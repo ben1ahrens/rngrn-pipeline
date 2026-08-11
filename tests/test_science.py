@@ -133,41 +133,138 @@ def test_reference_answer_keys():
     assert abs(sc["kstar"] - 4.2059) < 0.2, sc["kstar"]
 
 
-def test_low_basal_init_turing_unstable_fraction():
-    """MEASURED MOTIVATION (docs/STATE_OF_THE_SCIENCE.md section 10): default-init
-    Jacobian diagonals are always negative (0/200 converged inits Turing-unstable),
-    vs 88/88 true systems that have a positive diagonal. model.init='low_basal' is a
-    firewall-safe prior measured at 82% Turing-unstable at init. Fast check: init
-    draw + Newton steady state + Jacobian sign, no fit."""
+# ======================================================================================
+# turing_ok must use the STRICT uniform-stability criterion (D-EVID-11)
+#
+# It used to test tr(J) < 0. A negative trace does NOT imply stability: the sum of the
+# eigenvalues can be negative while one of them is positive. Combined with a default
+# k-grid starting at 1e-3 — where sigma(k) is still essentially sigma(0) — BOTH halves of
+# the Turing test could be satisfied by a system that is simply uniformly unstable, and the
+# reported k* was then the grid floor rather than a real mode.
+# ======================================================================================
+def test_turing_ok_rejects_a_uniformly_unstable_system():
+    """The counterexample. tr(J) < 0 but max Re eig(J) > 0 — not Turing, not anything."""
+    from rngrn.eval.analysis import turing_ok
+
+    J = np.diag([0.5, -1.0, -1.0])          # trace -1.5, but an eigenvalue at +0.5
+    D = np.array([1.0, 10.0, 20.0])
+    assert np.trace(J) < 0                                   # the loose test passes...
+    assert np.linalg.eigvals(J).real.max() > 0               # ...on an unstable system
+
+    ok, info = turing_ok(J, D)
+    assert ok is False, "a uniformly unstable system is not Turing-unstable"
+    assert info["stable_uniform"] is False
+    # the old loose verdict stays visible rather than being silently dropped
+    assert info["turing_loose"] is True
+    assert info["stable_uniform_loose"] is True
+
+
+def test_turing_ok_accepts_the_reference_turing_systems():
+    """The fix must not reject genuine Turing systems — both references still pass."""
+    from rngrn.data.rd_models import GiererMeinhardt, Schnakenberg
+    from rngrn.eval.analysis import turing_ok
+
+    for cls in (GiererMeinhardt, Schnakenberg):
+        ak = cls().answer_key()
+        ok, info = turing_ok(np.asarray(ak["J"], float), np.asarray(ak["D"], float))
+        assert ok is True, f"{cls.__name__} must remain Turing-unstable"
+        assert info["stable_uniform"] is True
+        assert info["kstar"] > 1e-3, "k* must be a real mode, not the grid floor"
+        assert abs(info["kstar"] - ak["kstar"]) / ak["kstar"] < 0.15, (
+            cls.__name__, info["kstar"], ak["kstar"])
+
+
+def test_turing_ok_kstar_comes_from_k_greater_than_zero():
+    """k=0 is the uniform mode; it can never BE the structured instability."""
+    from rngrn.data.rd_models import GiererMeinhardt
+    from rngrn.eval.analysis import turing_ok
+
+    ak = GiererMeinhardt().answer_key()
+    kgrid = np.concatenate([[0.0], np.linspace(1e-3, 10.0, 500)])
+    ok, info = turing_ok(np.asarray(ak["J"], float), np.asarray(ak["D"], float), kgrid=kgrid)
+    assert ok is True
+    assert info["kstar"] > 0.0, "k*=0 would mean the uniform mode was selected"
+
+
+def test_turing_ok_agrees_with_the_robustness_cloud_criterion():
+    """One definition of 'Turing', not two.
+
+    `_perturb_cloud` has always used the strict criterion (analysis.py:86) and excluded
+    k=0 from the structured max (analysis.py:92). `turing_ok` did neither, so the run
+    index's `recovered_turing` and its `turing_volume_*` columns were answering different
+    questions. A zero-noise cloud must now agree with turing_ok exactly.
+    """
+    from rngrn.data.rd_models import GiererMeinhardt
+    from rngrn.eval.analysis import turing_ok, _perturb_cloud
+
+    for J, D, expected in [
+        (np.asarray(GiererMeinhardt().answer_key()["J"], float),
+         np.asarray(GiererMeinhardt().answer_key()["D"], float), True),
+        (np.diag([0.5, -1.0, -1.0]), np.array([1.0, 10.0, 20.0]), False),
+    ]:
+        ok, _ = turing_ok(J, D)
+        res = _perturb_cloud(J, D, 0.0, np.random.default_rng(0), 8)   # sigma=0 -> no noise
+        assert ok is expected
+        assert (res["frac_strict"] > 0.5) is expected, (ok, res["frac_strict"])
+
+
+def test_low_basal_init_gains_the_positive_diagonal_but_NOT_turing_reachability():
+    """RE-MEASURED 2026-08-04 after the turing_ok correction (docs/DECISIONS.md D-EVID-11).
+
+    This test previously asserted `low_basal_frac > 0.5` on `turing_ok`, and passed only
+    because `turing_ok` tested tr(J) < 0. Under the strict criterion the low-basal init is
+    **0.0% Turing-unstable at init, not 82%** — every one of the 206/398 draws that used to
+    pass was uniformly UNSTABLE with k* pinned to the grid floor. The 82% figure in
+    `docs/STATE_OF_THE_SCIENCE.md` §10 could not be reproduced under any definition; the
+    closest is the 51.8% loose artefact.
+
+    What survives, and is the honest motivation for the init: a positive Jacobian diagonal
+    is a PREREQUISITE for Turing instability (all 88/88 true systems have one), the default
+    init never produces one, and low_basal does. That separation is real and is what this
+    test now pins.
+
+    Measured at N=3 over 400 seeds, denominator = converged inits:
+
+        init        converged   any positive J diagonal   STRICT Turing
+        default        400          0/400  = 0.000          0/400 = 0.000
+        low_basal      398        114/398  = 0.286          0/398 = 0.000
+
+    The strict-Turing assertions are a REGRESSION GUARD: if someone restores the loose
+    criterion, low_basal jumps back to ~0.52 and this test fails loudly.
+    """
     from rngrn.losses.terms import steady_state
     from rngrn.eval.analysis import turing_ok
 
-    def turing_unstable_fraction(init, n_seeds=400):
-        # denominator is CONVERGED inits, matching docs/STATE_OF_THE_SCIENCE.md section 10
-        # ("0/200 converged inits have any positive diagonal") and its 82% ladder.
-        n_unstable = 0
-        n_converged = 0
+    def measure(init, n_seeds=400):
+        n_conv = n_posdiag = n_strict = 0
         for seed in range(n_seeds):
             m = RNGRN(N=3, seed=seed, init=init)
             xstar, converged = steady_state(m)
             if not converged:
                 continue
-            n_converged += 1
             J = m.jacobian(xstar, create_graph=False).detach().numpy()
             if not np.all(np.isfinite(J)):
                 continue
-            D = m.D.detach().numpy()
-            ok, _ = turing_ok(J, D)
-            if ok:
-                n_unstable += 1
-        return n_unstable / n_converged
+            n_conv += 1
+            n_posdiag += bool(np.any(np.diag(J) > 0))
+            n_strict += bool(turing_ok(J, m.D.detach().numpy())[0])
+        return n_posdiag / n_conv, n_strict / n_conv
 
-    default_frac = turing_unstable_fraction("default")
-    low_basal_frac = turing_unstable_fraction("low_basal")
-    # decisive separation: measured ladder puts default near 0% and low_basal near 82%.
-    assert default_frac < 0.05, default_frac
-    assert low_basal_frac > 0.5, low_basal_frac
-    assert low_basal_frac - default_frac > 0.3, (default_frac, low_basal_frac)
+    default_posdiag, default_strict = measure("default")
+    low_basal_posdiag, low_basal_strict = measure("low_basal")
+
+    # THE REAL EFFECT: low_basal buys the positive diagonal; default never gets one.
+    assert default_posdiag == 0.0, default_posdiag
+    assert low_basal_posdiag > 0.20, low_basal_posdiag
+    assert low_basal_posdiag - default_posdiag > 0.20, (default_posdiag, low_basal_posdiag)
+
+    # WHAT IT DOES NOT BUY: neither init is Turing-unstable at init under the strict
+    # criterion. Stated as plainly as the effect above (CLAUDE.md §8).
+    assert default_strict == 0.0, default_strict
+    assert low_basal_strict == 0.0, (
+        f"low_basal strict-Turing fraction is {low_basal_strict}, expected 0.0. If this "
+        "rose, either turing_ok regressed to the loose tr(J) < 0 criterion or the init "
+        "genuinely changed — check which before quoting any number.")
 
 
 # ======================================================================================

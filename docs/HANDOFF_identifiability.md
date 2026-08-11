@@ -8,8 +8,11 @@ where to start.
 
 ## Status in one line
 
-The harness for both experiments is built, wired, and now dry-runs end to end **on real
-registered data** for all four arms (77 tests pass). **Nothing is tuned and no scientific
+The harness for both experiments is built and wired. **Corrected 2026-08-04: it no longer
+dry-runs for all four arms.** `expA_hidden_channel` and `expB_overparam` are both `N=3, m=2`,
+and `recover.py:376` now raises `ValueError` when `m < N` and the stationarity residual has
+weight 0 — which is the default (`configs/base.yaml:33`, `resid: 0.0`). Only the two control
+arms run as written; see the corrected recipe below. (420 tests pass, 1 skipped.) **Nothing is tuned and no scientific
 result has been produced** — the dry run uses 6 Adam steps and recovers nothing meaningful.
 That is expected and correct for this stage; do not present dry-run numbers as findings.
 
@@ -153,18 +156,29 @@ more than the code does — a prior audit caught overstated provenance in this r
 ```bash
 pip install -e ".[dev]"
 export KMP_AFFINITY=disabled OMP_NUM_THREADS=1   # only if torch aborts with OMP Error #179
-pytest -q                                        # expect 77 passed
+pytest -q                                        # expect 420 passed, 1 skipped
 
 # datasets are local and gitignored — see docs/LOCAL_DATA_SETUP.md
 rngrn scan-datasets
 
-for c in expA_control_full expA_hidden_channel expB_control_matched expB_overparam; do
-  rngrn --runs-root experiments train --config configs/$c.yaml
+# Only the two CONTROL arms run as written — see the note below. Trainers go through the
+# memory guard (CLAUDE.md §7a).
+for c in expA_control_full expB_control_matched; do
+  bash scripts/guarded_run.sh rngrn --runs-root experiments train --config configs/$c.yaml
 done
 rngrn --runs-root experiments benchmark --degradation
 ```
 
-Datasets needed: `three_gene_val` (A) and `two_gene_val` (B). Both already match the registry
+> **Corrected 2026-08-04.** `expA_hidden_channel` and `expB_overparam` (`N=3, m=2`) raise
+> `ValueError` at `recover.py:376`: `m < N` with the stationarity residual at weight 0, which
+> is the default. Pass `-o loss.weights.resid=<nonzero>` to run them — there is no known-good
+> value, so picking one is a science decision under CLAUDE.md §10. Full explanation in
+> `docs/IDENTIFIABILITY_EXPERIMENTS.md` §"Running them".
+
+Datasets needed: whatever `configs/expA_*.yaml:6` and `configs/expB_*.yaml:7` pin — today
+`three_gene_val` (A) and `two_gene_classical_val` (B). **Read the ids from the configs, do not
+restate them here:** this line said `two_gene_val` until 2026-08-04, which is the exact bug
+lines 25-30 of this file document being fixed once already. Both already match the registry
 layout — no conversion.
 
 ## Where to start (suggested order)
@@ -173,11 +187,17 @@ layout — no conversion.
    Experiment-B verdict depends on it.
 2. **Tune recovery on the controls first** (`expA_control_full`), where the problem is easiest.
    An experiment arm is only interpretable once its control recovers sensibly. Knobs: TUNING.md.
-3. **Then run the experiment arms** with several seeds; read `kstar_identifiability_std`
+3. **Then run the experiment arms** with several seeds. NOTE: `kstar_identifiability_std`
+   was NaN on every row until 2026-08-04 — `build_table` grouped on `config_id`, which
+   hashes `train.seed`, so seeds never aggregated (`DECISIONS.md` D-EVID-13). Fixed, but
+   runs recorded before that date cannot be regrouped and must be re-run to read it. Read
+   `kstar_identifiability_std`
    (spread across in-regime seeds) as seriously as the means — this is a degenerate inverse
    problem.
 4. **Consider ≥2 hidden species** (N=4, m=2) if you want the permutation machinery to be
    exercised for real; the current N=3/m=2 setup cannot.
 
 Unrelated stubs still open elsewhere: `eval/numerics.bdf1_newton_krylov`, GradNorm/NTK
+(which now **raise `NotImplementedError`** rather than falling back to fixed weights —
+`weighting.py:69`, `:87`; corrected 2026-08-04)
 weighting in `losses/weighting.py`, coupled-matrix ETDRK4. See TUNING.md.

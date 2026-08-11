@@ -113,6 +113,52 @@ def test_sign_zero_rtol_is_a_real_parameter():
     assert s2[0, 2] == -1.0
 
 
+# ======================================================================================
+# THE RAW JACOBIAN MUST SURVIVE SCORING (D-EVID-12)
+#
+# `repro_sign_vector` is already collapsed to {-1, 0, 1}, and `sign_structure` is
+# idempotent on such a matrix for ANY rtol < 1. So re-thresholding a stored sign vector
+# cannot change anything — which silently made PREREGISTRATION §3.1's committed
+# 0.02 / 0.05 / 0.10 sensitivity sweep return three identical numbers under three
+# different labels. Keeping the raw J is what makes that sweep possible at all.
+# ======================================================================================
+def test_per_run_fields_records_the_raw_jacobian():
+    """`repro_J_vector` must round-trip to the ORIGINAL J, not its sign structure."""
+    J = _J3()
+    J[0, 2] = 0.07                                   # sub-threshold at rtol=0.05
+    out = R.per_run_fields(J, np.array([1.0, 2.0, 3.0]), 1.0)
+
+    assert "repro_J_vector" in out, "the raw Jacobian must be recorded"
+    back = np.array(json.loads(out["repro_J_vector"]), float).reshape(
+        out["repro_N"], out["repro_N"])
+    assert np.allclose(back, J), "repro_J_vector must be the RAW J"
+    assert back[0, 2] == pytest.approx(0.07)         # not collapsed
+    sign = np.array(json.loads(out["repro_sign_vector"]), float).reshape(3, 3)
+    assert sign[0, 2] == 0.0                         # the sign vector still collapses
+
+
+def test_raw_jacobian_makes_the_rtol_sweep_bite():
+    """The prereg §3.1 sweep must give DIFFERENT numbers on a threshold-sensitive
+    topology. Re-thresholding a stored sign vector cannot, which was the defect."""
+    J1 = np.array([[1.0, -1.0, 0.07], [0.5, -1.0, 0.0], [0.0, 0.5, -1.0]])
+    J2 = np.array([[1.0, -1.0, 0.00], [0.5, -1.0, 0.0], [0.0, 0.5, -1.0]])
+    D = np.array([1.0, 2.0, 3.0])
+
+    got = []
+    for rtol in (0.02, 0.05, 0.10):
+        Js = []
+        for J in (J1, J2):
+            f = R.per_run_fields(J, D, 1.0)          # scored at the DEFAULT 0.05
+            Js.append(np.array(json.loads(f["repro_J_vector"]), float).reshape(3, 3))
+        got.append(R.reproducibility_report(Js, [1.0, 1.0], [2.0, 2.0],
+                                            rtol)["topology_consistency"])
+
+    assert got[0] == pytest.approx(0.5)
+    assert got[1] == pytest.approx(0.5)
+    assert got[2] == pytest.approx(1.0), "the 0.10 cell must differ — that IS the sweep"
+    assert len(set(got)) > 1, "three identical numbers means the sweep measured nothing"
+
+
 def test_sign_structure_idempotent_on_already_signed_input():
     """A matrix already valued in {-1, 0, 1} passes through unchanged — this is the
     property optim.benchmark relies on to re-hydrate a stored repro_sign_vector."""

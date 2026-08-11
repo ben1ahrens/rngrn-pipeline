@@ -34,9 +34,18 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
 - **[TUNE] loss weights** — `loss.weights = {kstar, turing, resid, anticollapse, morphology}`
   (`config.py::LossConfig`, starting values from design-doc §5). These are the primary tuning
   axis. k* and turing lead; resid is normalised to O(1); anticollapse floors ‖J‖.
-- **[TUNE] k\* tolerance band `tau`** — `loss.tau` (0.12). Absorbs the measured +5%–+13%
-  selected-vs-linear-wavelength bias. Widen if recovery is fighting the bias, tighten to
-  sharpen k* selectivity. **[VALIDATE] flagged 2026-07-29 (unit 8, kstar-honesty):** one
+- **[IMPL] k\* tolerance band `tau` — INERT. Reads nothing; sweeping it is a no-op.**
+  `loss.tau` (0.12) is threaded `train.py:211` → `recover.py:224` → `total.py` →
+  `terms.kstar_anchor` (`losses/terms.py:291`, and `kstar_anchor_batched` at `:732`) and is
+  **never referenced in either function body** — those bodies use only `sig`, `temp`,
+  `kgrid` and `kstar_obs`. It is exported to the run index (`export.py:47`), so a sweep over
+  `loss.tau` will produce differently-labelled rows carrying bit-identical losses and
+  bit-identical recovered models. Do not report such a sweep as "k\* tolerance has no
+  effect"; it measures nothing. `docs/DATA_INTO_MODEL.md:439` already recorded this.
+  *Intended* behaviour, if implemented: absorb the measured +5%–+13% selected-vs-linear
+  wavelength bias — widen if recovery fights the bias, tighten to sharpen k\* selectivity.
+  Either implement the band or delete the parameter from the whole chain.
+  **[VALIDATE] flagged 2026-07-29 (unit 8, kstar-honesty):** one
   FFT bin is measured at 16.7% of k* (`validate.py::_leak_instrumentation`'s
   `kstar_fft_bin_width`), so `tau=0.12` is only 0.72 of one bin — BELOW the FFT
   estimator's own resolution. Since scoring now heads on `kstar_fft_rel_err` (the
@@ -102,12 +111,18 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
 
 - **[TUNE] inner schedule** — `train.{n_restarts, adam_steps, adam_lr, lbfgs_steps, grad_clip}`
   (`config.py::TrainConfig`). Restarts matter because the inverse problem is multi-modal.
-- **[IMPL] GradNorm weighting** — `losses/weighting.py::GradNormWeighting.combine` is a stub that
-  runs with fixed weights. Implement the gradient-magnitude balancing update (backprop each term,
-  measure ‖∂θ(w_k L_k)‖, nudge weights toward equal magnitude every `update_every` steps).
-- **[IMPL] NTK weighting** — `losses/weighting.py::NTKWeighting.combine` stub. Implement the
-  NTK-trace / residual-decay-rate estimator and set weights inversely (handles the dissimilar
-  per-term convergence rates, incl. structural-parameter sensitivity — the inverse-problem case).
+- **[IMPL] GradNorm weighting** — `losses/weighting.py::GradNormWeighting` **raises
+  `NotImplementedError` in `__init__`** (`weighting.py:69`) and defines no `combine`. *(Corrected
+  2026-08-04: it does NOT silently run with fixed weights — that was the old behaviour, and
+  raising is the deliberate replacement.)* Implementing it means writing `__init__` **and** a new
+  `combine`: the gradient-magnitude balancing update (backprop each term, measure ‖∂θ(w_k L_k)‖,
+  nudge weights toward equal magnitude every `update_every` steps).
+- **[IMPL] NTK weighting** — `losses/weighting.py::NTKWeighting`, same shape: raises in `__init__`
+  (`weighting.py:87`), no `combine`. Implement the NTK-trace / residual-decay-rate estimator and
+  set weights inversely (handles the dissimilar per-term convergence rates, incl.
+  structural-parameter sensitivity — the inverse-problem case).
+- **[NOTE] `ratio` weighting IS implemented** — `losses/weighting.py:94`, selectable as
+  `loss.strategy: ratio`. No other doc mentions it.
 - **[TUNE] seed replicates** — `optim/sweep.py::run_sweep(seeds=...)`. Rank configs by a seed
   aggregate, never one init. `sweep_example.yaml` shows the axis format.
 
@@ -224,12 +239,19 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
   a fixed budget is confounded by this. The L-free repair is to set the D init from the frame's
   own `k*_obs` (`D ~ |J| / k*_obs**2`, firewall-clean), which would change BOTH paths and so
   invalidate every recorded number — it belongs with the priors/init work, not here.
-- **[VALIDATE] `_kgrid_for`'s absolute 2.0 floor is an L-generalisation bug in the DIMENSIONAL
-  path** — `kmax = max(2.0, 8 * kstar_obs)` is in rad/length, so once `kstar_obs < 0.25` the
-  k-grid stops tracking the observed wavenumber and becomes a fixed absolute window. On this data
-  that is `L > 150.8`: 11 of the 287 registered samples (3.8%). The nondim path cannot hit it
-  (`k_hat*` is 37.7 for every three_gene sample). NOT fixed here — changing it alters the
-  dimensional path and every number recorded against it.
+- **[FIXED 2026-07-29, unit B4] `_kgrid_for`'s absolute 2.0 floor was an L-generalisation bug in
+  the DIMENSIONAL path.** *(This entry said "NOT fixed here" until 2026-08-04; it had been fixed
+  for a week.)* The old `kmax = max(2.0, 8 * kstar_obs)` is in rad/length, so once
+  `kstar_obs < 0.25` the k-grid stopped tracking the observed wavenumber and became a fixed
+  absolute window — on this data `L > 150.8`, i.e. **11 of the 287 registered samples (3.8%)**,
+  pinned to the wrong band. The nondim path could not hit it (`k_hat*` is 37.7 for every
+  three_gene sample).
+  **Now** (`recover.py:129-139`): `kmin = kstar_obs/50 + 1e-3`,
+  `kmax = max(span * kstar_obs, 2 * kmin)` — scale-free, no absolute constant. See
+  `CLAUDE.md` §7c point 2.
+  **Comparability:** numbers recorded on the dimensional path *before* the fix for those 11
+  samples are not comparable to numbers after it. The 3.8 % measurement is retained above as the
+  record of what it affected.
 - **[TUNE] the cross-L agreement statistic** — `scoring/lgen.py::modal_sign_agreement` is entrywise
   modal agreement and the control is within-L across-seed agreement. Both are choices, both are
   documented in that module, and NO pass threshold is defined. Settle them against real

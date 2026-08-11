@@ -139,9 +139,16 @@ def cmd_evaluate(args):
 
 def cmd_analyze(args):
     from .eval.analysis import linear_stability, robustness_cloud
+    from .eval.lgen_eval import physical_model_from_checkpoint
     from .losses.terms import steady_state
     model, payload = IO.load_checkpoint(os.path.join(args.runs_root, "runs", args.run_id))
     cfg = _load(args)
+    # Converting here is not optional, exactly as in cmd_evaluate above: a checkpoint from
+    # the non-dimensional path stores theta_D = log(D/L**2), so both readouts below would
+    # otherwise be computed at the wrong diffusivity and printed to stdout with nothing
+    # saying so — measured at L=60 that turns turing_volume 0.835 into 0.010 (D-EVID-14).
+    # No-op on the dimensional path; raises on a pre-unit-12 checkpoint rather than guessing.
+    model, _L_train = physical_model_from_checkpoint(model, payload)
     xs, _ = steady_state(model)
     lin = linear_stability(model, xs.detach().cpu().numpy())
     rob = robustness_cloud(model, n_samples=cfg.solver.robustness_samples,

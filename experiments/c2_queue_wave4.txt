@@ -1,0 +1,28 @@
+# c2_queue_wave4.txt -- the TRIMMED nc1 queue.
+#
+# WHAT IS LEFT TO MEASURE. c2_L_t8k8 and c2_P_t8k8_consol established the best nc1
+# configuration so far -- turing=8.0 WITH kstar=8.0 -- on sample_0000 (turing_frac 0.750)
+# and sample_0001 (turing_frac 1.000), with sample_0004 completed in wave 3. Two targets
+# of the five-target tuning set remain unmeasured at that configuration:
+#     sample_0003  -- attempted in wave 3 and LOST to the 2400 s cap (rc=124). Retried here
+#                     under the harmonised 3600 s budget. If it times out again that is a
+#                     MEASURED cost failure and is reported with its wall clock, not
+#                     silently dropped -- it is one of the expensive non-patterning targets
+#                     the ~30x spread is about.
+#     sample_0002  -- never attempted at this configuration.
+#
+# WHAT WAS DROPPED FROM WAVE 3, AND WHY. The kstar-weight arms (16, 32) and the
+# turing-weight curve (2, 4, 16, 32) refine a curve but cannot change a conclusion. The
+# pair already measured says what the sweep was for: the turing weight buys the RATE and
+# pays in WAVELENGTH (kstar_fft_rel_err 4.765 at t8/k1), and the kstar weight buys the
+# wavelength back at no measured cost in rate (0.115 at t8/k8), taking criterion 3.3 from a
+# 57x shortfall to 1.4x. Consolidating t8k8 across the remaining targets is worth more than
+# another point on either curve, because a best_config resting on two targets is a lead and
+# one resting on five is a result.
+#
+# TIMEOUT. Set by scripts/c2_cell.sh, now 3600 s and identical to competitive's -- see the
+# note there for why the previous 2400 vs 7200 split was a methodological defect rather
+# than a preference.
+#
+# format: runs_root|seeds_csv|targets_csv|workers|overrides
+c2_P_t8k8_consol|0,1,2,3,4,5,6,7|sample_0003,sample_0002|4|-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=8.0

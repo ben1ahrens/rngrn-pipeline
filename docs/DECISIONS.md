@@ -148,6 +148,601 @@ be re-checked against `model_seed` before it is quoted.
 `src/rngrn/optim/target_report.py` (`run_target_report`'s per-seed overrides). The new
 `seed` / `model_seed` columns on the run row are what make it visible.
 
+### D-EVID-7 — the k\* leak control was measured against the SECONDARY reference, so the headline column shipped with no control
+
+**Date found / fixed:** 2026-08-04 (multi-agent branch review). **Status:** SUPERSEDED
+(defect; now fixed). **Decided by:** the implementing agent under delegated authority (§10).
+
+`validate.score_recovery` reports two k\* errors against two different references:
+`kstar_fft_rel_err` (**headline**, vs `answer_key.kstar_fft`) and `kstar_rel_err`
+(secondary, vs `answer_key.kstar`). `_leak_instrumentation` was called as
+`_leak_instrumentation(L, out["kstar_true"])` — the **linear** reference only — so the
+image-blind control `trivial_kstar_err` and the resolution floor `kstar_fft_bin_width` were
+both normalised by `kstar`, and **neither controlled the column the claim is gated on**.
+
+**Why it matters.** The legacy generators set `L = clip(6*2*pi/k*, 18, 220)`, so the
+image-blind predictor `k_trivial = 6*2*pi/L` is exact against `kstar` (~1e-16) while
+`kstar_fft` differs from `kstar` by a measured median of **8.4%** (`data/gate.py:59`). A row
+reading `kstar_fft_rel_err = 0.046` beside `trivial_kstar_err = 0.000` therefore looked like
+a 14-order-of-magnitude win over a baseline that had **never been measured on that column**.
+
+**Evidence — this is present in the tracked ledger, not hypothetical.**
+`experiments/stage0_bioviab/runs.jsonl`, `stage0_prior_off_0004`: `trivial_kstar_err =
+0.000` (periods-per-box exactly 6) next to `kstar_fft_rel_err = 0.0458`. The honest control
+for that row is ~4–8%, i.e. the same order as the result.
+
+**Fix:** `_leak_instrumentation(L, kstar_true, kstar_fft_true)` now emits four columns
+paired by reference — `trivial_kstar_err` / `kstar_fft_bin_width` (vs `kstar`) and
+**`trivial_kstar_fft_err` / `kstar_fft_bin_width_rel_fft`** (vs `kstar_fft`). Each is NaN
+when its own reference is absent, never a fallback to the other. `trivial_kstar_err` keeps
+its exact former meaning, so rows recorded before this change stay comparable. The pairing
+is propagated to `optim/benchmark.py` (`COLUMNS`, `DEGRADATION_COLUMNS`, both table
+builders) and `optim/target_report.py` (`_pattern_block`, the per-seed rows). Five tests in
+`tests/test_gate_contract.py` pin it, including that the new column does **not** fall back
+to the linear reference.
+
+**What was rejected and why:** silently renormalising the existing `trivial_kstar_err` onto
+`kstar_fft`. Rejected because it would change the meaning of a column already present on
+every tracked row, making old and new rows non-comparable without saying so — exactly the
+failure §10.4 forbids. Adding a second column keeps both readable.
+
+**Consequence for earlier results:** every k\* claim read against `trivial_kstar_err`
+overstates the margin over the image-blind baseline wherever the leak relation happens to
+hold. Re-read them against `trivial_kstar_fft_err`.
+
+**Corrected 2026-08-04 — an earlier draft of this paragraph said non-legacy datasets are
+"unaffected in kind", and that was wrong in a way that contradicted this entry's own
+evidence.** `scripts/gen_tg3.py` draws periods-per-box from 3..14 rather than fixing it at
+6, so the leak relation does not hold *by construction* there — but a free draw can still
+land on 6, and it did: the evidence row cited above, `stage0_prior_off_0004`, is
+`three_gene_qvar` and carries `trivial_kstar_err` of exactly 0.000. All 13 tracked rows are
+`three_gene_qvar` / `three_gene_multiL`, and **every one of them was mis-paired**. The
+mitigation on the new generators is statistical, not categorical, and must not be stated as
+categorical.
+
+**Where it lives:** `src/rngrn/validate.py::_leak_instrumentation`;
+`src/rngrn/optim/benchmark.py`; `src/rngrn/optim/target_report.py`.
+
+### D-EVID-8 — the pre-registered 8.3 % k\* bar is HALF AN FFT BIN, which is not a constant across datasets
+
+**Date:** 2026-08-04. **Status:** OPEN — the resolution below is the owner's, not an
+agent's, because it bears on a pre-registered pass condition (§10).
+
+**Not circular, which was the first thing checked.** `PREREGISTRATION.md` §3.3 derives
+8.3 % as *half an FFT bin*: one bin is 16.7 % of k\*, so ±8.33 % is the estimator's own
+resolution floor. That derivation is independent of the measured median
+`|kstar_fft/kstar − 1| = 0.084`. The near-coincidence of 0.083 and 0.084 is **not**
+circularity — both are ~half a bin, because half-a-bin *is* what FFT quantisation error
+looks like.
+
+**But the consequence is real:** the bar sits exactly at the noise floor, so "passing" means
+"indistinguishable from the FFT's own quantisation". That is the same fact as D-EVID-7 — it
+is *why* an image-blind predictor can pass it.
+
+**And the floor is dataset-dependent.** One bin as a fraction of k\* is `1/(periods per
+box)`. The legacy generators fix that at 6 (hence 16.7 %). `scripts/gen_tg3.py` draws it
+freely from 3..14. Measured over the 13 tracked run rows, `kstar_fft_bin_width` ranges
+**0.100 → 0.333**, i.e. half-bin floors of **5.0 % → 16.7 %**. On **7 of 13 rows the
+pre-registered 8.3 % bar is BELOW the estimator's own resolution** — it demands precision
+the measurement cannot deliver. *(Corrected 2026-08-04: this said "6 of 13". The measured
+floors are 5.00, 5.00, 6.25, 6.25, 7.14, 7.14, 8.33, 8.33, 12.50, 12.50, 16.67, 16.67,
+16.67 %; seven exceed 8.3 %, counting the two 8.33 % rows, which sit at the bar to within
+rounding. Re-measure rather than trusting the tally.)*
+
+**What this does not do:** it does not weaken or amend §3.3. Only the owner may do that.
+
+**Options, for the owner:** (a) keep 8.3 % as a fixed bar and restrict §3.3 claims to
+periods-per-box ≈ 6 samples; (b) make the bar per-sample at
+`kstar_fft_bin_width_rel_fft / 2`, which is what the prereg's own calibration argument
+implies; (c) keep both and report them side by side. Note §1 already excludes legacy data
+from k\* claims, so the honest answer may be that nothing intended for publication changes.
+
+**Where it lives:** `docs/PREREGISTRATION.md` §3.3; the new
+`kstar_fft_bin_width_rel_fft` column (`src/rngrn/validate.py`).
+
+### D-EVID-9 — the firewall audit was a hand-copied name allowlist, so new modules were unaudited by default
+
+**Date found / fixed:** 2026-08-04. **Status:** SUPERSEDED (defect; now fixed).
+**Decided by:** the implementing agent under delegated authority.
+
+`RECOVERY_SIDE` was re-typed verbatim in **four** test files (`test_firewall.py:19`,
+`test_plot_arrays.py:319`, `test_permutation_scoring.py`, `test_morphology_scoring.py`) —
+the same eleven module names each time, deliberately mirrored "so the audits stay
+independent". The cost of that independence was completeness: a module on **no** list is
+audited by **nobody**, and the suite stays green.
+
+Two such modules existed. `eval/lgen_eval.py` (564 lines, added this branch) was on none of
+them. `history.py` was on none of them **and** did
+`from .scoring.plausibility import d_ratio_of` while running inside the Adam loop
+(`recover.py:245`, `:492`) — recovery-side code reaching into the scoring package, whose
+siblings `overparam.py` and `permutation.py` do read the answer key.
+
+**Not a truth leak.** `d_ratio_of` is a pure function of the model's own `D`. The defect is
+that nothing would have caught it if it had not been.
+
+**Fix (three parts):**
+1. `test_every_loss_and_eval_module_is_classified` — every module under `losses/` and
+   `eval/`, plus `history.py`, must be declared `RECOVERY_SIDE` **or** `SCORING_SIDE`.
+   Membership of neither fails. This forces the classification at the moment a module is
+   added. Verified to fire by adding a throwaway module and watching it fail.
+2. `test_recovery_side_does_not_import_the_scoring_package` — the package-level rule
+   `CLAUDE.md` §5 states, enforced in the firewall test itself rather than only in three
+   scorers' own files. `history.py` added to `RECOVERY_SIDE`.
+3. `d_ratio_of` / `_to_numpy` **moved** to the side-neutral `rngrn/utils.py`, re-exported
+   from `scoring/plausibility.py` so every existing caller is unchanged.
+   `FORBIDDEN` gained `data.gate` and `data.registry` — `gate.from_registry` returns the
+   full `(RecoveryInput, AnswerKey)` pair, so importing it was a two-line route to ground
+   truth that passed every previous version of the audit. The names must stay **dotted**:
+   a bare `registry` false-positives on `rngrn/registry.py`, the component registry that
+   `model.py` and `losses/weighting.py` legitimately import.
+
+**What was rejected and why:** copying `d_ratio_of` into `history.py` (the obvious local
+fix). Rejected because the definition is a recorded science decision (D2, largest /
+second-largest, chosen so a near-immobile node never enters the ratio) and two copies would
+drift. Also rejected: sharing one `RECOVERY_SIDE` constant across all four test files —
+the mirroring is deliberate and keeps the audits independent; completeness is what was
+missing, not deduplication.
+
+**Consequence for earlier results:** none. No truth reached recovery; this closes the route,
+it does not correct a number.
+
+**Where it lives:** `tests/test_firewall.py`; `src/rngrn/utils.py`;
+`src/rngrn/scoring/plausibility.py`; `src/rngrn/history.py`.
+
+### D-EVID-10 — ledger sweep: which recorded rows the 2026-08-04 review affects
+
+**Date:** 2026-08-04. **Status:** DECIDED (a measurement, recorded so the next fix does not
+have to redo it). **Decided by:** the implementing agent.
+
+Before changing anything, all **13 tracked run rows** (`experiments/audit_check`,
+`experiments/lgen_transfer`, `experiments/stage0_bioviab`) were swept for the columns the
+review's six headline defects touch. Result:
+
+| defect | affects recorded rows? | evidence |
+|---|---|---|
+| M1 leak control (D-EVID-7) | **YES** | `trivial_kstar_err` on all 13; the 6-periods case is live on `stage0_prior_off_0004` |
+| M2 `turing_ok` uses `tr(J)<0` | **YES** | `recovered_turing` / `recovered_sig_max` on all 13 |
+| M3 sign-rtol sweep is a no-op | no | every row has `repro_sign_zero_rtol = 0.05`; nothing was ever run at 0.02 / 0.10 |
+| M4 cross-seed grouping dead | no *reported* number | max group size is 1 on every index, so no aggregate has been published yet |
+| M5 `morphology_match` species mismatch | **no** | `observed_idx = [0,1,2]` on all 13, so `observed_idx[0] == 0` and the comparison was correct |
+| M6 nondim `D` misread | **no** | `nondim = False` on all 13; no committed config sets it |
+
+**Consequence:** M5 and M6 can be fixed with **zero** comparability impact, and M3/M4 have
+produced no wrong published number yet. Only M1 and M2 touch recorded values, and M2 is the
+larger of the two because it would move `recovered_turing` itself.
+
+**Where it lives:** `experiments/*/runs.jsonl` (tracked).
+
+### D-EVID-11 — `turing_ok` tested `tr(J) < 0`, so uniformly UNSTABLE systems were scored Turing-unstable
+
+**Date found / fixed:** 2026-08-04 (multi-agent branch review, M2). **Status:** SUPERSEDED
+(defect; now fixed). **Decided by:** the implementing agent under delegated authority (§10).
+
+**The defect.** `eval/analysis.turing_ok` evaluated uniform stability as `tr(J) < 0`. The
+trace is the **sum** of the eigenvalues, so it can be negative while one eigenvalue is
+positive — i.e. while the homogeneous state is unstable. Compounding it, the default scan
+grid began at `k = 1e-3`, where `sigma(k)` is still essentially `sigma(0)`, so the *same*
+uniform instability also satisfied the "structurally unstable" half. Both conditions could
+therefore be met by a system that merely blows up uniformly, with `kstar` reported as the
+grid floor.
+
+**Reproduced exactly:** `J = diag(0.5, -1, -1)`, `D = (1, 10, 20)`. `tr(J) = -1.5 < 0`;
+`max Re eig(J) = +0.5 > 0`. Old `turing_ok` → `ok=True`, `kstar=0.001`, `sig_max=0.5`.
+
+**The correct criterion already existed in the same file.** `_perturb_cloud` has always
+used `np.linalg.eigvals(Jp).real.max() < 0` and taken the structured max over `sig[:, 1:]`,
+excluding `k=0`. So `recovered_turing` and the `turing_volume_*` columns — both on every run
+row — were answering different questions. `scripts/exp11_robustness_baseline.py:23` recorded
+the discrepancy in prose and it was never fixed in the library.
+
+**Fix:** `turing_ok` now computes `sigma(0) = max Re eig(J)` exactly (independent of the
+caller's grid), requires `sigma(0) < 0`, and takes the structured max over `k > 0` only. It
+raises if the supplied grid has no `k > 0`. The superseded verdict is returned alongside as
+`turing_loose` / `stable_uniform_loose`, and surfaced on the run row as
+`recovered_turing_loose`, so rows recorded either side of the change stay readable against
+each other — the convention `_perturb_cloud` already used with `frac_loose`. A new
+`recovered_sig0` column exposes the uniform mode directly.
+
+**Consequence for earlier results — MEASURED, and smaller than feared.** All 12 tracked run
+records that store a Jacobian were re-scored under both criteria: **0 of 12 change verdict.**
+No published recovery number moves. The correction bites at **initialisation**, not on
+recoveries, because a trained model that reaches Turing does so genuinely.
+
+**Consequence for the low-basal init — this is the real casualty.** Re-measured at N=3 over
+400 seeds:
+
+| init | converged | any positive J diagonal | STRICT Turing | loose (superseded) |
+|---|---|---|---|---|
+| `default` | 400 | 0/400 = 0.000 | **0/400 = 0.000** | 0/400 |
+| `low_basal` | 398 | 114/398 = **0.286** | **0/398 = 0.000** | 206/398 = 0.518 |
+
+The recorded "0 % → 82 % Turing-unstable at init" (D9, `STATE_OF_THE_SCIENCE.md` §10,
+`model.py`, `exp03_turing_first.py`) is **withdrawn**. Note the loose figure is 51.8 %, not
+82 %, even before the criterion change: D9's 80.8 % was `206/255 converged`, and unit B3's
+steady-state multistart since raised convergence to 398/400 while the loose-Turing numerator
+stayed at **exactly 206**. So the number moved twice, for two independent reasons.
+
+**What survives:** low_basal produces the positive Jacobian diagonal Turing requires
+(28.6 % vs 0 %). Necessary, not sufficient. `tests/test_science.py::
+test_low_basal_init_gains_the_positive_diagonal_but_NOT_turing_reachability` pins both the
+effect and the absence of the claimed one, and fails loudly if the loose criterion returns.
+
+**What was rejected and why:** (a) renaming `recovered_turing` to `recovered_turing_loose`
+and introducing a new strict column — rejected because the plain name should carry the
+correct verdict, and because the ledger sweep showed no recorded row changes, so there is
+nothing to protect by renaming; (b) leaving `turing_ok` loose and adding a separate strict
+column — rejected because two live definitions of "Turing" in one library is what caused
+this; (c) changing the default k-grid — deliberately **not** done, so `kstar` values stay
+comparable. That grid (`linspace(1e-3, 50, 4000)`) is an absolute band in rad/length and is
+now marked `[UNCALIBRATED]` at `analysis.py::_TURING_KGRID`: it is the same class of defect
+unit B4 removed from `recover._kgrid_for`, currently wide enough for the registered L range
+(18..220 → k\* 0.17..2.09) but not scale-free and untested at its boundary.
+
+**Where it lives:** `src/rngrn/eval/analysis.py::turing_ok`, `::_TURING_KGRID`;
+`src/rngrn/validate.py` (`recovered_turing`, `recovered_turing_loose`, `recovered_sig0`);
+`tests/test_science.py`.
+
+### D-EVID-12 — the pre-registered sign-threshold sweep was a no-op, and reported the wrong threshold's answer under the requested threshold's label
+
+**Date found / fixed:** 2026-08-04 (multi-agent branch review, M3). **Status:** SUPERSEDED
+(defect; now fixed). **Decided by:** the implementing agent under delegated authority (§10).
+
+**The defect, in one line:** the threshold was applied once at score time and the
+information needed to apply a different one was thrown away at that moment, so every later
+"re-threshold" silently returned the score-time answer.
+
+`validate.score_recovery` calls `REPRO.per_run_fields(...)` without a `sign_zero_rtol`, so J
+is collapsed to {-1, 0, +1} at `DEFAULT_SIGN_ZERO_RTOL = 0.05` and only the collapsed
+`repro_sign_vector` was stored. Every downstream consumer re-applied `sign_structure` to
+that already-collapsed vector — and `sign_structure` is a **no-op** on such a matrix for any
+`rtol < 1`, because the entries are 0 or ±1 and the scale is 1, so `|arr| > rtol * scale`
+never changes an outcome. The module docstring even relied on this idempotence as a feature.
+
+So `aggregate_target_report(..., sign_zero_rtol=0.02)` computed at **0.05** and wrote
+`reproducibility_sign_zero_rtol: 0.02`.
+
+**Why it matters.** `docs/PREREGISTRATION.md` §3.1 commits, in writing, to reporting
+`topology_consistency` at **0.02 / 0.05 / 0.10** "so the conclusion's sensitivity to that
+choice is visible rather than hidden". The shipped path returned **three identical numbers
+under three different labels** — the sensitivity was not merely hidden, it was affirmatively
+misreported. Both `DEFAULT_SIGN_ZERO_RTOL = 0.05` and the modal-fraction definition were
+flagged UNCALIBRATED by unit 3, which is precisely why the sweep was promised.
+
+**Reproduced.** Two seeds differing only in one edge at 7 % of max|J|:
+
+| sign_zero_rtol | from the raw Jacobians | through the shipped path |
+|---|---|---|
+| 0.02 | 0.500 | 0.500 |
+| 0.05 | 0.500 | 0.500 |
+| 0.10 | **1.000** | 0.500 ← labelled 0.10 |
+
+**Fix, three parts:**
+1. `per_run_fields` now also stores **`repro_J_vector`** — the RAW Jacobian, row-major JSON,
+   N*N floats (9 at N=3), a flat scalar for run-index purposes. This is the actual repair:
+   the collapse is no longer lossy.
+2. `_sign_matrix_from_metric(metric, sign_zero_rtol)` applies the **requested** threshold to
+   that raw J. When a row carries no `repro_J_vector` (recorded before this change) it may
+   still be used at **exactly** its recorded rtol, and otherwise **raises** with a message
+   naming both thresholds. Answering the wrong question quietly is now impossible.
+3. The report emits the three pre-registered cells from **one** run —
+   `topology_consistency_rtol_0p02` / `_0p05` / `_0p10` — because the threshold is applied
+   post hoc, so re-running `target-report` per threshold would burn K trainings to recompute
+   a number that only needs the stored Jacobians. A cell that the rows cannot answer is
+   **NaN**, never a repeated number. Defaults are seeded into the block's `base` dict so
+   every early return (`insufficient_seeds`, `error`) emits the same schema.
+
+**Consequence for earlier results:** none — no sweep was ever run. `docs/DECISIONS.md`
+D-EVID-10 measured that all 13 tracked run rows carry `repro_sign_zero_rtol = 0.05`, i.e.
+nothing was ever computed at 0.02 or 0.10, so no published number is wrong. What was missing
+is a pre-registered deliverable, not a correction. **Rows recorded before this change cannot
+be swept retroactively** — they carry no raw J — so the §3.1 sweep requires re-running the
+targets it will be reported on.
+
+**What was rejected and why:** (a) the interim guard alone (raise when
+`sign_zero_rtol != metric["repro_sign_zero_rtol"]`) — it makes the lie impossible but leaves
+the pre-registered sweep impossible too, and §3.1 is binding; (b) re-deriving J from the
+tracked checkpoints at aggregation time — the checkpoint holds parameters, not the Jacobian
+at the recovered steady state, so it would mean re-solving Newton per seed inside a
+reporting function; (c) storing the raw J only in `arrays/*.npz` — the aggregation reads the
+run index, and reaching into per-run array files from the reporting path couples them
+needlessly.
+
+**Still open, and NOT decided here:** `optim/benchmark.py::_row_to_sign_matrix` has the same
+lossy shape. It feeds `reproducibility_table`, which the same review confirmed has **zero
+callers repo-wide and no CLI flag**. Whether that table is wired up or deleted is
+housekeeping for the owner; fixing dead code was not worth the churn, but it must not be
+wired up as-is.
+
+**Where it lives:** `src/rngrn/scoring/reproducibility.py::per_run_fields`;
+`src/rngrn/optim/target_report.py` (`_sign_matrix_from_metric`, `_sensitivity_cells`,
+`PREREGISTERED_SIGN_ZERO_RTOLS`); `tests/test_reproducibility_scoring.py`;
+`tests/test_target_report.py`.
+
+### D-EVID-13 — every cross-seed aggregation was dead: `build_table` grouped on `config_id`, which hashes the seed
+
+**Date found / fixed:** 2026-08-04 (multi-agent branch review, M4). **Status:** SUPERSEDED
+(defect; now fixed). **Decided by:** the implementing agent under delegated authority (§10).
+
+`optim/benchmark.build_table` promises "one row per (config × target), **averaged over
+seeds**". Its `_group_key` included `row["config_id"]`, and `Config.config_id()` is a SHA of
+`asdict(self)` — the **whole** config, `train.seed` included. Both `optim/sweep.py:63` and
+`optim/target_report.py:493` set `train.seed` per seed via `apply_overrides`. So every
+K-seed replicate landed in its **own group of one**.
+
+Consequences, on every row of that table:
+- `n_seeds` was always **1**;
+- `kstar_identifiability_std` — defined as the spread of recovered k\* *across* seeds, and
+  computed only `if len(kstars_ok) > 1` — was always **NaN**.
+
+`docs/HANDOFF_identifiability.md:176` and `docs/IDENTIFIABILITY_EXPERIMENTS.md:107` both
+instruct the reader to weigh that column "as seriously as the means". It could never be
+computed. `degradation_table` keys differently (`arm`, dataset, `n_true`, `n_model`) and was
+unaffected, which is why the defect was invisible in the one table anyone had run.
+
+**Reproduced:** `train.seed=0 → a36b4723c040`, `seed=1 → f94d58ade69e`, `seed=2 →
+23cad61cdcc3`.
+
+**Fix.** New `Config.arm_id()` — the same hash with the seed fields (`train.seed`,
+`model.seed`) held at a fixed sentinel. `model.seed` is included because it defaults to
+`None` meaning "derive from `train.seed`", so leaving it in would reintroduce the seed
+dependence whenever it is set explicitly. Verified on the real code path: three configs
+built exactly as `sweep.py`/`target_report.py` build them share `arm_id = 7688d6ecb934`
+while their `config_id`s all differ, and changing `data.sample_key` still separates them.
+
+`arm_id` is now written on every run row (`train.py`, both the meta and the index row) and
+`_group_key` keys on it. The table reports `arm_id` in place of `config_id` — a row of that
+table is an *arm* aggregated over seeds, and `config_id` is per-run by construction — plus
+**`seeds`**, the sorted list actually aggregated, because `n_seeds` alone cannot be audited:
+a group of 3 built from seeds `[0,0,0]` would otherwise be indistinguishable from one built
+from `[0,1,2]`.
+
+**`sample_key` is now in the group key explicitly.** It never was — it reached the key only
+via `config_id`. Simply dropping `config_id` and keying on the coarse tuple would have
+**pooled different targets into one mean**, a worse defect than the one being fixed. It is
+also covered by `arm_id` (it is part of the config), so the two agree; both are present
+because the failure mode is severe and silent.
+
+**Legacy rows keep splitting per seed.** A row written before `arm_id` existed carries no
+seed-independent identity, so `_group_key` falls back to `config_id` and the row reports
+`arm_id = None`. Deliberate: guessing a grouping risks pooling genuinely different configs,
+and an honest ungrouped row beats a plausible wrong mean. Confirmed against the tracked
+ledger — all 10 `stage0_bioviab` rows come back as `arm_id=None, n_seeds=1`.
+
+**Consequence for earlier results:** none, and this was already measured. D-EVID-10 found
+max group size 1 on every tracked index, so **no cross-seed aggregate has ever been
+published** — there is nothing to retract. What was missing is the capability. Note the
+corollary: **`kstar_identifiability_std` and the §3.1 sweep both require targets re-run
+after today**, since existing rows carry neither `arm_id` nor `repro_J_vector` (D-EVID-12).
+
+**What was rejected and why:** (a) keying on an enumerated tuple of row fields
+(`source, dataset, sample_key, N, m, form, strategy, adam_steps, …`) — retroactively
+groupable, but two configs differing in any field not enumerated (a loss weight, a staging
+fraction) would pool silently, trading a visible defect for an invisible one; (b) reading
+each run's `config/frozen_config.yaml` at aggregation time to recompute an exact arm
+identity — retroactive and exact, but couples the aggregator to the run-directory layout and
+breaks for pruned directories; (c) dropping config identity from the key entirely — pools
+different step budgets and loss weights into one mean, breaking the function's own contract.
+
+**Still open:** `reproducibility_table` shares `_group_key` and so inherits the fix, but it
+remains uncalled repo-wide with no CLI flag (see D-EVID-12's closing note). Wiring it up or
+deleting it is housekeeping for the owner.
+
+**Where it lives:** `src/rngrn/config.py::Config.arm_id`;
+`src/rngrn/optim/benchmark.py` (`_group_key`, `COLUMNS`, `build_table`);
+`src/rngrn/train.py`; `tests/test_benchmark_grouping.py`.
+
+### D-EVID-14 — three physics consumers read the DIMENSIONLESS `model.D` on the non-dimensional path
+
+**Date found / fixed:** 2026-08-04 (multi-agent branch review, M6). **Status:** SUPERSEDED
+(defect; now fixed). **Decided by:** the implementing agent under delegated authority (§10).
+
+`recover(nondim=True)` optimises on the unit box, where the learned parameter is
+`D_hat = D / L**2`. `recover()` returns the model **unchanged** (`recover.py`'s "back to
+physical units" block converts the *reported* values into `RecoveryResult.D_phys` and
+leaves `model.theta_D` alone — correctly, since rewriting it would corrupt the objective's
+own parameterisation). So `result.model.D` is dimensionless on that path while
+`result.D_phys` is physical.
+
+Three consumers read `result.model.D` and then applied it at the **physical** length scale:
+
+| site | consequence |
+|---|---|
+| `validate.py` → `robustness_volumes` | a **wrong number**: the unstable band moves outside `_CLOUD_KGRID`'s absolute 4.0 cap, so the cloud reports ~0 |
+| `train.py` → `_morphology_rollout` → `simulate` | diffusion starved by L\*\*2, so `patterned=False`, `rollout_status='unpatterned'`, morphology never scored |
+| `scoring/overparam.py` | `D_observed_max` / `D_extra_max` reported 1/L\*\*2 off |
+
+`validate.py` already did this correctly for `turing_ok` (it reads `result.D_phys` with a
+`model.D` fallback), two lines above the `robustness_volumes` call that did not — so the
+correct pattern was present and simply not applied.
+
+**Reproduced** on the branch's own Turing fixture (`tests/test_rollout.py::turing_model`,
+L = 60, D = [0.467, 3.338, 0.299]):
+
+| `turing_volume_` | 1 % | 4.8 % | 10 % | 20 % |
+|---|---|---|---|---|
+| physical D | 1.000 | 0.995 | **0.835** | 0.595 |
+| dimensionless D | 0.000 | 0.005 | **0.010** | 0.015 |
+
+A maximally robust circuit reported as maximally fragile, with no error raised.
+
+**Fix:** `analysis._model_JD`, `robustness_cloud`, `robustness_volumes` and
+`rollout.simulate` all take an explicit `D=`, defaulting to `model.D` (correct on the
+dimensional path, where `D_phys == model.D` by construction). `validate.score_recovery`
+passes the `D_rec` it already computes; `_morphology_rollout` passes `result.D_phys`;
+`overparam_report` reads `result.D_phys` with the same fallback.
+
+**Consequence for earlier results: none.** All 13 tracked run rows carry `nondim=False`
+(D-EVID-10), and no committed config or script sets `nondim: true`. Nothing recorded is
+affected — this is a latent defect fixed before it could produce a number. The natural
+trigger is `PREREGISTRATION.md` §3.5b, which is precisely the work that would have run it.
+
+**What was rejected and why:** (a) rewriting `model.theta_D` to the physical value inside
+`recover()` so `model.D` is always physical — rejected because the model *is* the object the
+non-dimensional objective was optimised in; mutating it would make the returned model
+inconsistent with the loss that produced it and silently change what a reloaded checkpoint
+means; (b) a module-level "always convert" helper that inspects `result.nondim` — rejected
+because it would still be something a caller must remember to call, i.e. the same failure
+mode one level up. An explicit `D=` parameter puts the units question in the signature,
+where a reviewer sees it.
+
+**Also marked here:** `_CLOUD_KGRID`'s absolute 4.0 cap is now flagged `[UNCALIBRATED]`.
+It is the same class of defect unit B4 removed from `recover._kgrid_for` (an absolute band
+in rad/length rather than a scale-free one), it is adequate for the registered L range, and
+it is the reason this defect showed as ~0 rather than as a merely shifted k\*.
+
+**Where it lives:** `src/rngrn/eval/analysis.py` (`_model_JD`, `robustness_cloud`,
+`robustness_volumes`, `_CLOUD_KGRID`); `src/rngrn/eval/rollout.py::simulate`;
+`src/rngrn/validate.py`; `src/rngrn/train.py`; `src/rngrn/scoring/overparam.py`;
+`tests/test_nondim_units.py`.
+
+### D-EVID-15 — what the adversarial re-review of D-EVID-7..14 found, including a regression those fixes introduced
+
+**Date:** 2026-08-04. **Status:** DECIDED (a correction round). **Decided by:** the
+implementing agent under delegated authority, after three independent reviews — two Claude
+subagents and an independent Codex 0.144.4 pass. All three re-derived the six diagnoses;
+**all six were confirmed sound.** The objections were to *completeness*, and one was a
+regression the fixes themselves caused.
+
+**1. D-EVID-13 BROKE `reproducibility_table` — and the commit message said the opposite.**
+Widening `_group_key` to an 8-tuple updated `build_table` but left
+`reproducibility_table` unpacking seven, so it raised
+`ValueError: too many values to unpack` on **every** call. Both the commit message and this
+register claimed it "shares `_group_key` and so inherits the fix". It did not; it was broken
+by it, and nothing caught that because the function has zero callers and had zero tests.
+Fixed (unpack, `arm_id`/`sample_key` in `REPRODUCIBILITY_COLUMNS`), plus
+`test_reproducibility_table_still_runs` so **dead code cannot silently become broken code**.
+Its D-EVID-12 limitation — it re-thresholds an already-collapsed sign vector — is now stated
+in its docstring with an explicit "do not wire this up before porting the raw-J path".
+
+**2. D-EVID-14 missed a fourth consumer: `rngrn analyze`.** `cmd_analyze` loaded a raw
+checkpoint and called `linear_stability` and `robustness_cloud` without
+`physical_model_from_checkpoint`, which its sibling `cmd_evaluate` calls twelve lines above
+with a comment saying not doing so "would integrate the wrong diffusivity silently". Measured
+on the Turing fixture: at L=220 a genuinely Turing-unstable circuit prints `turing: false`
+with `sig_max = −0.033`. Fixed; `linear_stability` also gained an explicit `D=`.
+
+**3. D-EVID-7's own DECISIONS entry contradicted its own evidence.** It said the new
+generators are "unaffected in kind". The cited evidence row, `stage0_prior_off_0004`, **is**
+`three_gene_qvar` with `trivial_kstar_err = 0.000` — a free draw from 3..14 can still land
+on 6. The mitigation is statistical, not categorical. Corrected above.
+
+**4. A published conclusion built on the defect was never revisited.**
+`docs/BIO_VIABILITY.md` §4.4 concluded that `sample_0004`'s k\* "carries no information
+about the model either way" because `trivial_kstar_err = 0.000`. Recomputed against the
+honest reference: the control is **0.0754**, so prior-OFF (0.046) **does** beat it — the
+strongest k\* number in that table — while prior-ON (0.116) **loses** to it, a cost the old
+framing hid. Corrected, with both directions stated.
+
+**5. Counts.** "6 of 13 rows" where the resolution floor exceeds the 8.3 % bar is **7 of
+13** (floors: 5.00, 5.00, 6.25, 6.25, 7.14, 7.14, 8.33, 8.33, 12.50, 12.50, 16.67, 16.67,
+16.67 %). The separate claim of "12 tracked run rows that store a Jacobian" was challenged
+and is **correct** — 13 result files, 12 carrying `recovered.J`.
+
+**6. `arm_id` was neutralising `model.seed` unconditionally, pooling two different
+experiments.** `ModelConfig.seed`'s own note says an int "holds the model init FIXED while
+train.seed varies" — a *design* variable, and the shape of D-EVID-4. Now neutralised **only
+when None** (the derived case), so a pinned-init arm and a free-init arm no longer share a
+`kstar_identifiability_std`.
+
+**7. `_sensitivity_cells` violated fail-loud.** A bare `except Exception: nan` made a
+truncated `repro_J_vector`, a shape mismatch and a scorer bug render identically to "this
+row predates the column". Narrowed to `ValueError`, and every cell now carries a
+`..._status` recording the reason rather than discarding it.
+
+**8. Smaller repairs.** `arm_id` added to `export.RUN_ID_COLS` (it was melting into an
+observation row, so the tidy frame could not be grouped by arm — the one thing it exists
+for); `REPORT_ID_COLS` corrected from the never-emitted `n_seeds` to `n_seeds_requested`;
+`build_table` now emits `n_unique_seeds` because duplicate rows for one seed are weighted in
+every mean; `turing_criterion` recorded on each row so a ledger spanning 2026-08-04 can
+separate the two `recovered_turing` definitions, with `index.py` documenting it; a
+`SIDE_NEUTRAL` firewall class added so `utils.py` — imported by both sides after D-EVID-9
+moved `d_ratio_of` there — is audited rather than being an unaudited hop; and the stale
+`pytest.skip` in `test_gate_contract.py` (whose message "train.fit does not yet thread
+RecoveryInput.L" had been false for some time) replaced by hard assertions, since it was the
+only end-to-end guard that the leak controls populate at all.
+
+**What this round did NOT fix — see the review backlog.** Three reviewers surfaced further
+findings that are real but larger than a correction round, including several where a
+*pre-registered pass condition does not compute what it says*. Two are owner-only under §10:
+`PREREGISTRATION.md` §3.3 still mandates pairing the headline with `trivial_kstar_err`
+(D-EVID-7 established that is the wrong control), and §3.1's `topology_consistency`
+denominator is the surviving-seed count rather than K. Neither may be amended by an agent.
+
+**Where it lives:** `src/rngrn/optim/benchmark.py`, `src/rngrn/cli.py`,
+`src/rngrn/eval/analysis.py`, `src/rngrn/config.py`, `src/rngrn/export.py`,
+`src/rngrn/index.py`, `src/rngrn/validate.py`, `src/rngrn/optim/target_report.py`,
+`docs/BIO_VIABILITY.md`, `tests/test_firewall.py`, `tests/test_benchmark_grouping.py`,
+`tests/test_gate_contract.py`, `tests/test_target_report.py`.
+
+### D-EVID-16 — branch consolidation: `model.init` was a silent no-op, and the ledger sweep is redone at 154 rows
+
+**Date:** 2026-08-04. **Status:** DECIDED (a consolidation + one defect fix).
+**Decided by:** the implementing agent under delegated authority, after a read-only survey of
+all 12 worktrees by three explore agents.
+
+**The survey.** Of 32 local branches, **26 were fully merged** into `feature/turing-training`
+— the July wave landed correctly. Five carried unmerged work: `docs/agent-conventions` (2
+commits, 100 % superseded — dropped), `docs/hooks-config` (3; one genuinely missing —
+cherry-picked), `feature/rngrn-c-mu` (2, deliberately PARKED and unvalidated — left
+unmerged), `feature/rngrn-c-tune-nc1` (10) and `feature/rngrn-c-tune-comp` (21).
+
+**The defect: `model.init` was a silent no-op with asserting provenance.** `train.py::fit()`
+never passed `cfg.model.init` to `recover()`. It referenced it in exactly one place — writing
+`model_init` onto the run-index row — so `-o model.init=low_basal` ran the **default** init
+while `frozen_config.yaml` and the `model_init` column both asserted `low_basal`. Same class
+as D-EVID-4 (`train.seed`) and D-EVID-5 (`param_prior`): the knob does nothing and the
+evidence record says it did something. D9 had *documented* this as a known limitation since
+2026-07-29 without fixing it; unit C1 fixed it, and the fix reached this branch only now.
+
+**Consequence for recorded results: NONE — all four `low_basal` rows are genuine.** Of 154
+consolidated run rows, **4 carry `model_init: low_basal`**, all `three_gene_qvar/sample_0000`,
+seed 0, in `experiments/runs.jsonl`: two at `git_sha 570f3c8`, two at `git_sha 1a2363b`.
+Everything else is `model_init: default`, where the no-op was harmless by construction.
+
+> **CORRECTED before publication of this entry.** A first draft of this paragraph claimed the
+> `570f3c8` pair predated the fix and so "used `default`" while the record said `low_basal`.
+> **That was wrong**, and the error is worth recording because the instrument was wrong, not
+> just the answer: I tested `git merge-base --is-ancestor 326822c 570f3c8`, which fails —
+> but it fails because **`570f3c8` is a REBASE TWIN of the fix commit**, not its predecessor.
+> Ancestry is the wrong test for a rewritten hash. Three checks settle it:
+> `git show 570f3c8:src/rngrn/train.py` carries `init=cfg.model.init` at line 232;
+> `git diff 570f3c8 326822c -- src/rngrn/train.py` is **empty**; and the two pairs' losses
+> agree **bit-for-bit** at `1.7522335969650809` and `0.8104004347760894`. Sixteen significant
+> figures cannot coincide across two different inits.
+>
+> **The real finding is the opposite one.** Those four rows are **two pairs of deterministic
+> re-runs** — the same computation recorded twice. They must be **de-duplicated, not
+> discarded**: `build_table("experiments")` reports them as `n_seeds=2, n_unique_seeds=1,
+> seeds=[0,0]`, i.e. one run counted twice in every mean. The `n_unique_seeds` column added
+> hours earlier under D-EVID-15 is what surfaced it, which is the column doing exactly the
+> job it was added for.
+
+`570f3c8` is on no branch — an orphaned pre-rewrite commit — but the run rows still carry it
+verbatim, and that honesty is what made the pairing recoverable at all. A run row's `git_sha`
+must never be normalised to "the equivalent commit on a branch".
+
+**Ledger sweep redone.** D-EVID-10 audited 13 tracked run rows. Consolidation takes that to
+**154 rows / 130 result files** across 12 experiment roots. Re-swept:
+
+| defect | consolidated impact | evidence |
+|---|---|---|
+| **D-EVID-11** strict `turing_ok` | **0 flips in 129 re-scored runs** | every `recovered.J`/`D_phys` re-scored under σ(0)<0 ∧ max σ(k>0)>0 |
+| **D-EVID-14** dimensionless `D` | **none** | `nondim = False` on all 154 |
+| **M5** morphology species mismatch | **none** | `observed_idx = [0,1,2]` on all 154 |
+| **D-EVID-12** rtol sweep | **no published sweep** | `repro_sign_zero_rtol = 0.05` on all 154 |
+
+So D-EVID-11's "0 of 12" now rests on **0 of 129** — a 10× stronger base, and the strongest
+statement available that the `turing_ok` correction moved no recorded number.
+
+**What the merge did NOT resolve, carried forward:** both new tuning docs
+(`C1_COMPETITIVE_TUNING.md`, `C2_NC1_TUNING.md`) read `kstar_fft_rel_err` against
+`trivial_kstar_err`, which D-EVID-7 established is the wrong control, and both cite the
+"0 % → 82 % Turing-unstable at init" figure D-EVID-11 withdrew. Their *numbers* survive; some
+of their *readings* invert. Correcting them is doc work on evidence that is now in-tree.
+
+**Where it lives:** `src/rngrn/train.py`; `tests/test_smoke.py`; `docs/DECISIONS.md` D9;
+`experiments/**` (12 roots).
+
 ---
 
 ## Part 2 — Decisions
@@ -477,15 +1072,49 @@ the training-time consequence and reported it rather than reversing the default.
 parameter init (`beta` 1e-4..1e-2, `s` 1e-2..10^-0.3, `alpha` 10^0.3..10^1.5, `delta`
 0.1..10^0.3, gate logit ~N(0, 2.5), D-ratio 10^0.9..10^2.4), ported unmodified from
 `scripts/exp03_turing_first.py::low_basal_init`. `ModelConfig.init` defaults to
-`"default"` everywhere; `train.py`'s `cfg.model.init` is **not** threaded into
-`recover()` (out of the unit's file scope), so today the field round-trips into
-`frozen_config.yaml` but has no effect via the CLI path.
+`"default"` everywhere.
+
+> **FIXED 2026-08-04 by the branch consolidation — see D-EVID-16.** This paragraph used to
+> end: *"`train.py`'s `cfg.model.init` is **not** threaded into `recover()` (out of the
+> unit's file scope), so today the field round-trips into `frozen_config.yaml` but has no
+> effect via the CLI path."* That is an accurate description of a **silent no-op whose
+> provenance asserts the opposite** — the same defect class as D-EVID-4 (`train.seed`) and
+> D-EVID-5 (`param_prior`) — and it was recorded here as a known limitation rather than
+> fixed. Unit C1 fixed it (`init=cfg.model.init` on the `R.recover(...)` call, guarded by
+> `tests/test_smoke.py::test_model_init_is_threaded_from_config_into_recover`), and that fix
+> reached this branch only via the consolidation merge. `-o model.init=low_basal` now does
+> what it says.
 
 **Evidence — at init, low_basal is dramatically more Turing-unstable:** 400 seeds per
 setting (Newton steady state + Jacobian-sign check only, no fit) —
 **0/400 (0%)** Turing-unstable-at-init for `default` vs **206/255 converged (80.8%)**
 for `low_basal`, consistent with the ~82% figure already documented in
 `docs/STATE_OF_THE_SCIENCE.md` §10 for this same beta upper bound.
+
+> ### ⚠ THE EVIDENCE ABOVE IS WITHDRAWN — re-measured 2026-08-04, see D-EVID-11
+>
+> That 80.8% was produced by `turing_ok`'s **loose** `tr(J) < 0` criterion, which a
+> uniformly UNSTABLE system can satisfy. Under the corrected strict criterion the
+> low-basal init is **0/398 (0.0%)** Turing-unstable at init.
+>
+> The number moved for **two independent reasons**, and both matter:
+> 1. **The denominator changed.** 255 of 400 inits converged then; **398 of 400** converge
+>    now (unit B3's steady-state multistart). The numerator is **206 in both
+>    measurements** — the extra 143 converged inits contributed no loose-Turing draws. So
+>    the same data now reads 206/398 = **51.8%**, not 80.8%, before any criterion change.
+> 2. **The criterion changed.** All 206 were uniformly unstable with k\* pinned exactly to
+>    the grid floor. Strict fraction: **0.000**.
+>
+> **What survives:** low_basal buys the *positive Jacobian diagonal* that Turing requires —
+> 114/398 (28.6%) vs 0/400 for `default`. That separation is real, is the honest motivation
+> for the init, and is what `tests/test_science.py::
+> test_low_basal_init_gains_the_positive_diagonal_but_NOT_turing_reachability` now pins.
+> A positive diagonal is necessary for Turing instability; it is not sufficient.
+>
+> **Effect on this decision:** D9 stays **OPEN**, but the case for adopting low_basal is
+> materially weaker than recorded — it was never "0% → 82% Turing-reachable". Combined with
+> the 40/40 training failure below, there is now no measured benefit to set against a
+> measured cost.
 
 **Evidence — but it fails under actual training, which is why the default stays off:**
 direct `recover(ri, init="low_basal", adam_steps=200, lbfgs_steps=0)` on
@@ -1281,156 +1910,513 @@ from adopting the alternative, but no one has made that a formal decision.
 
 ---
 
-## Part 2c — Stage 0b: robustness at FINITE mu, i.e. with the QSS reduction UNDONE (unit c-mu, 2026-08-03)
+### D-PERF-1 — an outer CONVERGENCE CHECK on the loss would be fast and WRONG
 
-Full write-up: `docs/TIMESCALE_MU.md`. Code: `src/rngrn/eval/lifted.py`,
-`scripts/stage0b_mu.py`, `scripts/stage0b_figures.py`, `tests/test_lifted.py`.
-Arrays and figures: `experiments/figures_report/stage0b/`.
+**Question asked (owner, 2026-08-03):** "would the code run faster if we had a convergence
+check?" `recover.py:226` and `:474` run `for step in range(adam_steps)` with no early exit,
+so the full budget is always spent. The inner steady-state Newton already has convergence
+checks and an early exit; the outer Adam loop has none.
 
-### D-MU-0 — `mu` here is the QSS lift's FAST-VARIABLE TIMESCALE, not the generator's degradation rate
+**Measured, from 18 committed runs' `hist_scalars` (no new compute):**
 
-**Date:** 2026-08-03. **Status:** DECIDED (terminology, project-wide).
+| quantity | median | p90 | max |
+|---|---|---|---|
+| step reaching 99 % of total loss drop | **30** | 180 | 399 |
+| step reaching 99.9 % of loss drop | **35** | 190 | 400 |
+| last step any restart flips Turing state | **160** | — | **270** |
 
-`mu` names two unrelated quantities in this project and the ambiguity has already cost one
-unit's work. `docs/BIO_VIABILITY.md` / `scripts/stage0_bio_viability.py` swept the
-GENERATOR's `mu[i]` (`scripts/gen_tg3.py:93`), which is the RNGRN's `delta`. This unit
-measures the OTHER one: the promoter-gate relaxation timescale of
-`eval/dynamical.py::lift_check`. Both readings are legitimate and both are now measured;
-what is no longer acceptable is writing `mu` without saying which. Every docstring in
-`src/rngrn/eval/lifted.py` and `scripts/stage0b_mu.py` opens by stating it.
+**The decision: do NOT add a loss-based convergence check.** The loss is done by step ~30,
+but restarts are still flipping into and out of the Turing regime until step 160–270. A
+loss-based early stop would fire at ~35, look like a 10x speedup, and silently change the
+Turing rate — the criterion the project actually scores. It is a concrete instance of the
+standing rule that the lowest-loss configuration is not the best recovery.
 
-**Where it lives:** `src/rngrn/eval/lifted.py` module docstring.
+**A check on Turing-state stability instead would be sound but modest**: ~100 quiet steps
+after the last flip puts the stop at 260–370 of 400, i.e. **25–35 %**, not a transformation.
 
----
+**And it does not touch the real cost.** The ~30x per-target spread occurs at IDENTICAL step
+counts, so it is per-step cost in the steady-state solve, not step count. The correlation
+runs the wrong way for an early stop: legacy 174/512 restarts @ 370 s, qvar/sample_0003
+31/512 @ 1024 s, qvar/sample_0000 2/512 @ 1275 s — monotone in both. The expensive targets
+are the non-patterning ones, where the optimiser thrashes and a convergence check fires
+LEAST. It would accelerate the cheap runs and leave the expensive ones untouched.
 
-### D-MU-1 — the finite-mu cloud perturbs PHYSICAL KINETIC PARAMETERS, not entries of the reduced Jacobian
+**Where the real win is, recorded but NOT taken:** 510 of 512 restarts never reach the
+Turing regime and burn the full budget. Culling provably-dead restarts (sig_max flat and
+negative for N steps) would cut cost on exactly the expensive targets, and the hook already
+exists — `hist_death_step` is in the history arrays and is non-finite for all 64 members,
+i.e. nothing ever dies. NOT taken here because it changes WHICH restart wins: a science
+change needing its own measurement, and it would break comparability with every cell
+measured so far.
 
-**Date:** 2026-08-03. **Status:** DECIDED (forced, with a stated cost).
-
-`eval/analysis.py::_draw_JD_cloud` — the basis of every `turing_volume` number to date —
-perturbs entries of the REDUCED Jacobian `J` directly. That cannot be used on a lifted
-system: the 21×21 `J_full` is *built from* `(KA, KR, alpha, beta, delta)` and `x*`, so a
-perturbed reduced `J` corresponds to no lifted system at all and cannot be lifted. The
-perturbation therefore acts one level down — independent lognormal factors on `KA, KR,
-alpha, beta, delta, D`, with `x*` re-solved and the Jacobian re-derived per draw. This is
-Tica et al.'s own perturbation model, which `analysis.py`'s docstring already names as the
-alternative to its own.
-
-What is preserved by construction: every factor is lognormal hence strictly positive, and
-every perturbed quantity is strictly positive under the model's link functions, so no sign
-flips and no structural zero is created — the two properties that made the original scheme
-correct.
-
-**THE COST, STATED:** absolute volumes under this scheme are NOT comparable to the QSS
-tables in `docs/ROBUSTNESS_MEASUREMENT.md` §4.2 or to the §3.2 calibration table. Measured
-on the two recovered networks at the same 400 draws / seed 0: the repo's reduced-J scheme
-gives `turing_volume_4p8pct` 0.657 / 0.655 and `_10pct` 0.390 / 0.450 for sample_0003 /
-sample_0004, where this scheme gives 0.265 / 0.215 and 0.150 / 0.095. Perturbing kinetic
-parameters moves `x*` as well as `J`, so it is strictly harsher. **Every finite-mu number is
-therefore read against its OWN mu→0 column, computed on the SAME draws from the reduced
-Jacobian** — along a curve the perturbation model is held fixed and only `mu` varies, so the
-mu-dependence is isolated even where the absolute level is not comparable.
-
-**Where it lives:** `src/rngrn/eval/lifted.py::draw_param_cloud`, `robustness_vs_mu`.
-**Evidence:** `experiments/figures_report/stage0b/arrays/robust.json`,
-`qss_repo_scheme_volumes.json`.
+**Cheaper unexplored alternative:** `train.adam_steps` has never been swept. Given 99.9 % of
+the loss drop lands by step 35 and the last Turing flip by 270, a 400-step budget may
+already be generous, and measuring 200/300/400 is a config-only answer to "can this run
+faster" that requires no code change and no comparability argument.
 
 ---
 
-### D-MU-2 — the strict test, on the FULL 21×21 lifted Jacobian; the trace test is not merely loose here, it is broken
+### D-C1-GAUGE — the J-degeneracy of the objective, and what it does and does not explain
+*Decided by unit C1 (competitive tuning), 2026-08-03, under the threshold-setting authority
+recorded in `PREREGISTRATION.md` §0. Evidence: `scripts/c1_gauge.py`,
+`docs/C1_COMPETITIVE_TUNING.md` §8, computed on 24 already-committed runs.*
 
-**Date:** 2026-08-03. **Status:** DECIDED.
+**The finding.** On the region the optimiser occupies (‖J‖_F > 1, true for all 24 runs, where
+the `anticollapse` hinge is exactly flat), the trained objective is a function of
+σ(k) = max Re eig(J − k²D) alone. Since D is diagonal, that makes it **exactly** invariant
+under (i) transpose, (ii) diagonal similarity J → SJS⁻¹ (a 2-parameter continuous gauge at
+N=3), and (iii) node permutation. Verified numerically at max |Δσ| ≈ 1e-15 on real recovered
+(J, D). A dimension count (σ(k) fixes 7 independent functions of J's 9 entries) says these
+are the whole of the blindness, not a subset.
 
-Verdict: `max Re eig(J_full) < 0` at `k = 0` AND `max_{k>0} sigma_full(k) > 1e-9`, with
-diffusion `diag(D_1..D_N, 0, ..., 0)` — only `x` diffuses, promoter states are DNA-bound.
+**What was decided, and it is a negative.** This is **not** adopted as the explanation of the
+criterion 3.1 failure, because quotienting by the full group does not rescue the statistic:
+raw → +perm → +transpose → +balance is 0.125 → 0.375 → 0.375 → 0.375 on the legacy control
+and 0.125 → 0.125 → 0.125 → 0.375 on `baseline`, against a bar of 0.75. The tempting
+conclusion — "the seeds found the same network in different gauges" — is measured to be
+false and is recorded as false so it is not re-proposed.
 
-`eval/analysis.py::turing_ok` uses `trace(J) < 0`, which Stage 0 measured overcounting by
-64×. On a LIFTED system it is worse than loose: `tr(J_full)` is dominated by the `-1/mu`
-gate diagonal and stays negative at ANY `mu`, so it would report "uniform state stable" for
-a system that has already lost stability. It is never used here.
+**What is adopted, as an instrument limitation rather than a threshold change.**
+`topology_consistency`'s hard cut at rtol·max|J| lands on the **median** entry magnitude on
+`baseline` (q50 = 0.0512 against rtol 0.05), with 33 % of entries within a factor 3 of it,
+and the statistic wanders non-monotonically over 0.125–0.500 as rtol is swept 0.005→0.5.
+`PREREGISTRATION.md` §3.1 already flagged the tolerance UNCALIBRATED and required
+0.02/0.05/0.10 to be reported; this quantifies it. **No bar moves and the raw modal fraction
+at rtol 0.05 remains the number read against 0.75** — the criterion fails at every tolerance
+in the sweep, so nothing here converts a failure into a pass. The consequence is for the
+paper's wording and for any *future* instrument, not for this pre-registration.
 
-Separately, a Turing-unstable mode whose leading eigenvalue has `Im ≠ 0` is a travelling
-wave, not the stationary pattern this project claims to recover. `frac_stationary` is
-reported beside `frac_turing` everywhere and the two are never merged. **Measured: 0 of 8000
-draws was oscillatory at any `mu` on the swept axis** — the distinction did not bind here,
-but it is instrumented so it cannot silently start binding.
+**Left explicitly OPEN.** Whether a gauge-invariant, magnitude-weighted reproducibility
+statistic should replace the entrywise one. It must not be decided now: inventing a metric
+after seeing that the current one fails is exactly what `PREREGISTRATION.md` §5 forbids. If
+it is ever adopted it goes in a new dated section that says plainly it was added after
+seeing results.
 
-**Where it lives:** `src/rngrn/eval/lifted.py::verdicts_from_J`, `turing_verdict_lifted`.
+### D-C1-DIAG — `max diag(J) > 0` adopted as a secondary readout, not as a criterion
+*Same unit and date. Evidence: `docs/C1_COMPETITIVE_TUNING.md` §8.5.*
+
+A positive Jacobian diagonal entry separates patterning perfectly across all 24 committed
+runs (10 Turing / 10 positive, 14 non-Turing / 14 negative, no off-diagonal cell). This is a
+**necessary condition being confirmed, not a discovery** — diffusion-driven instability with
+diagonal D requires it — and is recorded that way. It is adopted only as a cheap continuous
+proxy for rate progress, beside the pooled per-restart `sig_max_pos` rate, because
+`turing_frac` is a floored count over K = 8 and cannot rank two failing configurations. It
+replaces no pre-registered criterion.
+
+### D-C1-TURINGW — `loss.weights.turing` promoted to the lead rate axis
+*Same unit and date.*
+
+The axis is not in C1's original eight and had never been tried by this unit. C2 measured
+`-o loss.weights.turing=8.0` moving `nc1` on qvar `sample_0000` from `turing_frac` 0.0625 to
+0.750 at K = 8. Promoted to first position in `scripts/c1_queue4.sh` and proven LIVE on both
+the serial and the batched path before any cell using it is believed, per the standing rule
+that five silent no-ops have already been found in this codebase. Reordering a queue changes
+no threshold and drops no cell.
+
+### D-TDPLOT-1 — "patterned" and "periodic" are scored as two separate verdicts, and the periodicity threshold is calibrated on the corpus
+*2026-08-10. Unit: training-data visual inspection (`feature/training-data-plots`).*
+*Evidence: `notebooks/training_data_simulations.ipynb` §2/§2b, run over all 413 registered*
+*samples; code in `scripts/td_figures.py::patterning_verdict`; tests in*
+*`tests/test_td_figures.py`.*
+
+**The decision.** The inspection notebook reports two independent booleans per sample rather
+than one:
+
+- `has_contrast` — `cv >= 0.05`, the spatial coefficient of variation of species 0. This is
+  **not** a new threshold: it is the generator's own accept/reject rule
+  (`scripts/gen_tg3.py:240-241` discards a simulation with `cv0 < 0.05` as "collapsed to
+  homogeneous"). Reusing the identical number means the verdict carries the meaning it had
+  at generation time.
+- `periodic` — the RAPS peak sits at bin index `>= PEAK_BIN_MIN = 3`.
+
+**`has_contrast` is NEARLY A TAUTOLOGY on this corpus and is recorded as such.** Every
+generator here applies the same `cv < 0.05` reject rule, so "413/413 clear `cv >= 0.05`,
+corpus minimum 0.0633" is what the filter does, not evidence about the data. An earlier
+draft of this branch reported it under "Established"; that was wrong and is corrected. What
+the check *does* establish is payload integrity — the recomputed cv matches the stored
+`cv0` attribute to <= 2.2e-07 across all 413 samples. The informative screen is `periodic`.
+
+**Naming collision, avoided deliberately.** The key is `has_contrast`, **not** `patterned`,
+because `src/rngrn/eval/rollout.py:272` already owns `patterned` for a different quantity —
+rollout amplitude against `max(1e-3, 0.02*|x*_0|)` — and *that* one is pre-registered
+(`docs/PREREGISTRATION.md` §3.5a). The two are never comparable, and no number from this
+notebook may be read against a rollout `patterned` rate.
+`tests/test_td_figures.py::test_the_contrast_key_does_not_collide_with_the_prereg_patterned_name`
+holds the separation.
+
+**Why two and not one.** `cv` asks "is there spatial contrast?" and never "is the contrast
+**periodic**?" A field made of a handful of isolated blobs clears `cv` comfortably while its
+power spectrum decays monotonically from the lowest resolvable bin — there is no interior
+peak, hence no characteristic wavelength, hence no Turing pattern. Merging the two into one
+boolean would have hidden exactly the case the corpus turned out to contain.
+
+**How the threshold was set.** The RAPS peak-bin distribution over all 413 registered
+samples, measured 2026-08-10 — the FULL distribution, summing to 413:
+
+```
+bin:    1   2    3    4    5    6    7    8    9   10   11   12   13   14
+count:  1   0   14   44   78  155   49   12   15   14    8    9   11    3
+                                                  min=1  1st pct=3  median=6  max=14
+```
+
+> **Correction, same day.** The first version of this entry printed the table capped at
+> bin 9 with the residue mislabelled `9+`. That silently dropped the 45 samples at bins
+> 10–14 and summed to 368, not 413. The cap came from the notebook's own generating
+> expression (`range(pb.min(), min(pb.max(), 9) + 1)`), now removed and replaced by an
+> assertion that the histogram accounts for every sample. The gap-at-bin-2 conclusion is
+> unaffected — everything omitted lay further *above* the threshold — but a table in this
+> register that drops 11 % of the corpus is a defect regardless.
+
+Exactly one sample sits at bin 1; **bin 2 is empty**; every other sample is at bin 3 or
+above. `PEAK_BIN_MIN = 3` therefore falls inside a genuine gap in the data rather than
+cutting through a populated region. Had the distribution been continuous across bins 1–3 the
+screen would have been reported as unusable instead of adopted.
+
+**"Calibrated" would be too strong a word, so the limits are recorded here rather than left
+implicit** (CLAUDE.md §8):
+
+- The threshold is set **descriptively**, from the corpus distribution. On real data its
+  decision boundary has been exercised **n = 1** times: one sample is separated, 412 sit on
+  the other side. That makes it a corpus-specific outlier detector, not a transferable
+  periodicity criterion.
+- **`PEAK_BIN_MIN = 2` gives an identical partition** on this corpus, and `4` would flag 15
+  samples. The threshold is insensitive downward and brittle upward.
+- `peak_bin >= 1` is **structural, not a property of the data**: `observables.raps` forces
+  `power[0] = 0`, so bin 0 can never win. "min = 1" is a floor of the estimator.
+- **The known-answer controls are synthetic and live in the tests, not in the corpus.**
+  `tests/test_td_figures.py` passes a synthetic periodic field (must clear the screen) and a
+  synthetic isolated-blob field (must fail it) through this exact code path. No *real*
+  sample of independently-known periodicity was available to read it against.
+
+**What it found.** `three_gene_qvar/sample_0032` in a domain of L = 177.8 — ~95 % of pixels
+within 1 % of the field's *dynamic range* above its minimum (90.4 % within 1 % of the
+minimum *value*; the earlier wording of this sentence conflated the two), species 1 and 2
+flat to `cv = 0.002`, and a
+monotonically decaying spectrum. The generator labelled it `morphology = 'spots'` because
+`gen_tg3.classify` assigns `spots` on `area_fraction < 0.34` alone, with **no lower bound on
+area fraction or component count** — a condition an almost-empty field satisfies trivially.
+It is 1/413 (0.24 %) of the corpus and 1/34 (2.9 %) of `three_gene_qvar`.
+
+**What was rejected.** (a) A "fraction of pixels pinned at the minimum > 0.6" screen: it
+flags 8 samples, of which only one is the real defect. Six are legitimate dense spot
+patterns — e.g. `three_gene_qvar/sample_0023`, 83 connected components with a clean spectral
+peak at bin 9. The seventh is `three_gene_classical_val/sample_0007`, the marginal 4-spot
+case discussed in `docs/HANDOFF_training_data_plots.md` §5: it clears the periodicity screen
+at bin 4 but is *sparse*, not dense, so it is neither a defect nor a dense-spot exemplar.
+The eighth is `sample_0032` itself. So the screen over-flags 7:1 and was rejected.
+(b) Folding periodicity into the cv verdict — that would silently redefine a
+number the generator already owns. (c) Tightening `gen_tg3.classify`'s `spots` rule: that
+would change what every existing dataset's stored `morphology` attribute means, and is a
+generator change, not an inspection change.
+
+**Explicitly NOT decided here.** Whether `sample_0032` should be excluded from training. It
+is reported, not acted on — dropping a sample changes what every `three_gene_qvar` number
+means and is the owner's call, not this unit's.
+
+**Scope.** This decision governs an inspection/reporting notebook only. It introduces no
+recovery criterion and touches nothing on the recovery side of the firewall.
+
+### D-CANON-2 — `stripes` is not a stable pattern class in this generator; it is largely a small-box artefact
+*2026-08-10. Unit: canonical datasets (`feature/canonical-datasets`).*
+*Evidence: `scripts/canon_select.py::compute_stability` over all 57 re-simulatable systems;*
+*probe simulations recorded in `data/canonical_stability_cache.json`.*
+*Status: **DECIDED** (the measurement); the remedy is **OPEN**.*
+
+**This changes how existing `stripes` results should be read, so it is announced rather than
+filed quietly** (CLAUDE.md §10).
+
+**The measurement.** A system's morphology label was re-tested by re-simulating it at a
+different periods-per-box and asking whether the class survives. For `three_gene_multiL` the
+probe is free — those systems were already simulated at p ∈ {4,7,10,13}. For
+`three_gene_qvar` it costs one extra 96×96 run per system.
+
+- **9 of 23 multiL systems (39 %) change class when *only* the box size changes.** Every
+  single flip is `labyrinth ↔ stripes`. No other pair ever flips.
+- **All 5 gated `qvar` stripes candidates flip to `labyrinth`.** Zero stripes survive gates
+  plus stability anywhere in the re-simulatable corpus.
+- **Instability is graded by class**, over the full probed pool of 47 gated systems:
+
+  | class | stable | flips | flip rate |
+  |---|---|---|---|
+  | `spots` | 27 | 1 | **3.6 %** |
+  | `labyrinth` | 10 | 4 | **29 %** |
+  | `stripes` | 0 | 5 | **100 %** |
+
+  The single `spots` flip is `three_gene_qvar:24`. (An earlier draft of this entry said
+  "spots never flips" — that was wrong, read off a truncated log, and is corrected here.
+  The graded gradient is the stronger result anyway: it is exactly what a box-size artefact
+  predicts, since `spots` is the class furthest from the anisotropy cut and `stripes` sits
+  on it.)
+
+**The mechanism, and why it is not a bug.** Anisotropy `A` is a nematic order parameter over
+the dominant Fourier ring. A small box admits few orientations, so the pattern is forced onto
+a near-single axis, `A` rises above 0.55, and `classify` says `stripes`. Give the same system
+room and the pattern relaxes into a labyrinth. The corpus bears this out:
+
+```
+periods/box:   3-4    5-6    7-8   9-10  11-14
+n:              31      5     31     26     33
+median A:    0.122  0.394  0.087  0.072  0.048
+% stripes:     26%    20%    16%     8%     0%
+```
+
+`corr(periods_per_box, anisotropy) = -0.312`. Stripes samples sit at **median p = 4.5**
+(range 3–10) against **9.5** (range 3–14) for everything else, and **no sample at p ≥ 11 is
+ever labelled `stripes`**.
+
+**Consequences.**
+1. `stripes` is **not** shipped as a canonical dataset. The canonical range p = 16..32 lies
+   entirely above the regime where the class has ever occurred, so a "stripes" set generated
+   there would ship the artefact, not the pattern.
+2. The stored `morphology` attribute on the 49 `stripes` samples in the corpus is **partly a
+   statement about their box size**. Any result stratified on `stripes` inherits that.
+3. This is a second, independent reason for the already-documented weakness of the class:
+   49/413 of the corpus, only 7 among the 127 samples every scorer calibration rests on, and
+   33.3 % held-out accuracy. It was never a robust class, and now there is a mechanism.
+
+**What was rejected.** (a) Lowering a gate to reach 5 stripes — the gates are what make the
+strata mean anything. (b) Shipping stripes at low p anyway — it would sit at a 6–12 % k\*
+precision floor against 1.6–3.1 % for the other sets, non-comparable, and would still be the
+artefact. (c) Redefining `classify` to make stripes L-invariant — that would change the
+meaning of the `morphology` attribute on all 413 existing samples, which D-TDPLOT-1 already
+considered and rejected as a generator change rather than an inspection change.
+
+**Left OPEN, deliberately.** Whether genuine, box-independent stripes are reachable at all in
+this generator. There is a principled lever: spots-vs-stripes selection is governed by the
+quadratic coefficient of the amplitude equation, and Hill kinetics are generically asymmetric
+— which is the likely reason `spots` dominates at 54 % of the corpus. Screening for
+near-symmetric systems is the obvious experiment and has not been run. **Nothing here claims
+that real Turing stripes are unreachable**, only that *this* generator's `stripes` label, in
+*this* corpus, does not survive a change of box.
 
 ---
 
-### D-MU-3 — the gate substep is solved EXACTLY at frozen x, so the integrator structurally cannot fake a dead pattern
+### D-CANON-1 — two canonical datasets at 512×512, selected by margin and label stability
+*2026-08-10. Same unit. Evidence: `data/canonical_selection.json`, `scripts/canon_select.py`,*
+*`scripts/canon_generate.py`, tests in `tests/test_canon_{select,generate}.py`.*
 
-**Date:** 2026-08-03. **Status:** DECIDED.
+**The decision.** Ship `turing_spots` and `turing_labyrinth`, 5 distinct 3-gene systems each,
+at 512×512, generated once and reused for all simulated-data experiments. `stripes` is
+excluded per D-CANON-2; `holes` is not shipped as its own class because only 3 gated, stable
+hole systems exist, below the 5 required.
 
-The gates relax at rate `1/mu`, so an explicit scheme needs `dt << mu` and a `mu = 1e-3` run
-costs ~1000× the QSS one. A stiff integrator that silently damped the instability would
-produce "the pattern died at finite `mu`" as an ARTEFACT — the most dangerous failure mode
-available in this unit. It is removed structurally rather than tested away: at frozen `x`
-the gate block is LINEAR in `G` and is integrated in closed form.
+> **Corrected 2026-08-10 by D-CANON-5.** This paragraph originally said `holes` was
+> "structurally unreachable… the observed channel is positively skewed by construction".
+> That is **wrong**. Hole patterns are common — 7 of 57 systems produce them, several with
+> negative skew, and 3 of the 5 shipped `turing_labyrinth` samples are hole patterns. What is
+> unreachable is the *label*: `classify` needs `phi > 0.66` to say `holes`, which a connected
+> bright matrix cannot reach because much of the matrix falls below the `z > 0.4` line. The
+> corpus containing zero samples *labelled* `holes` is a fact about the classifier, not about
+> the physics, and this entry read it the wrong way round.
 
-* **nc1** — diagonal: `G ← G_inf + (G − G_inf) exp(−(1+u) dt/mu)`, `G_inf = u/(1+u)`.
-* **competitive** — per row the `2N` gates obey `dw/dt = (a − (I + a 1ᵀ)w)/mu`, and
-  `A = I + a 1ᵀ` is a RANK-ONE update of the identity whose exponential is closed form:
-  `exp(−Aτ) = e^{−τ}(I + ((e^{−Sτ}−1)/S) a 1ᵀ)`, `S = Σa`, with `w_inf = a/(1+S)` — which
-  IS the QSS occupancy. No linear solve, no `expm`, unconditionally stable, and it reduces
-  EXACTLY to the QSS scheme as `mu → 0`.
+**The eligible pool is 57 systems, not 413.** Re-simulating at a new resolution needs the
+generating kinetics *and* the simulation seed. Only `three_gene_qvar` (34 systems) and
+`three_gene_multiL` (23) carry both. The 127 legacy `three_gene_*` samples carry neither —
+their generator lived in a gitignored tree — and the 160 `*_classical_*` samples carry
+kinetics but no seed and are not 3-gene GRNs.
 
-The `x` substep reuses `eval/numerics.py`'s validated cached-coefficient ETDRK4 (rfft) under
-Strang splitting, and `dt`/horizon follow `eval/rollout.py::simulate`'s own growth-rate-aware
-policy, so the QSS and lifted runs of a model use the SAME `dt` and horizon and are directly
-comparable.
+**Selection rule**, deterministic and seeded: admission gates (`peak_bin ≥ 3`, `cv ≥ 0.30`,
+positive class margin) → rank by distance from the class boundary → require the label to
+survive a probe at a different box size → prefer already-burned systems for tuning slots.
 
-**Evidence:** exact substep vs 2×10⁵-substep explicit Euler of the same ODE, both forms:
-max abs error **< 1e-5** (`tests/test_lifted.py::test_gate_step_is_exact`). dt-halving and
-the `mu → 0` QSS cross-check: `experiments/figures_report/stage0b/arrays/dtconv.json`,
-figure `g5_dt_convergence.png`.
+`peak_bin ≥ 3` is **load-bearing, not cosmetic**: ranking by margin alone puts
+`three_gene_qvar/sample_0032` *first* among spots, because its area fraction of 0.032 gives
+it the largest possible distance below the 0.34 cut — and that sample is the one confirmed
+non-Turing frame in the corpus (D-TDPLOT-1). Without the gate, the worst sample available
+would have become a canonical exemplar.
+
+**Why 512 and not 1024.** Recovery is nearly pixel-count-free — every loss term lives on
+N×N objects, not on the image — so a large frame is cheap to *fit*. The cost is the post-hoc
+ETDRK4 morphology rollout, whose step count is reaction-rate limited and therefore scales
+purely with pixel count: ~45 s typical / ~17 min worst at 512, against ~3 min / ~70+ min at
+1024 with `eval/numerics._phi_contour` peaking at 4–6 GB, on a host with five recorded OOM
+kills. `eval/lgen_eval.grid_for_L` also refuses grids above 512 by design.
+
+**Why periods-per-box is drawn, never fixed.** With a single p, `k* = p·2π/L` inverts exactly
+and the domain size becomes the label again — the leak that made `kstar_rel_err` a gate
+rather than evidence on the legacy data (D6). Each dataset draws 5 *distinct* p from
+{16..32}, seeded with SHA-256 so the draw is process-independent.
+
+**Measured properties of the shipped sets.** px/wavelength 17.1–30.1, all far above the 6.0
+floor of D15, giving a k\* half-bin precision of 1.6–3.1 % against 8.3 % on the legacy data —
+the first time the pre-registered `kstar_phys_cv ≤ 0.10` bar sits meaningfully above the
+estimator's own noise floor rather than on it. Domain sizes run 245.8–794.0.
+
+**A 96²-era bound was relaxed, deliberately and narrowly.** `simulate_and_classify` asserted
+`18 ≤ L ≤ 220`; all ten canonical samples exceed it. Those bounds encode *resolution* at a
+96×96 grid, and `L` enters the physics only as a unit (CLAUDE.md §7c) — the real constraint
+is pixels-per-wavelength, which `canon_generate` now enforces directly at
+`PPW_MIN/PPW_MAX = 16/32`. The bound is now a parameter defaulting to the old values, so
+every existing caller is bit-for-bit unaffected.
+
+**Stored, and not stored.** Final frame at full resolution, all three channels, plus a cv
+time-trace for the saturation gate. **No trajectory** — nothing under `src/rngrn/` reads it,
+so at 512² it would cost 6× the storage for data no consumer touches. All three channels are
+kept even though a real photograph gives one, so `m=1` vs `m=3` stays a controlled comparison
+on identical data rather than two different datasets.
+
+**Split declared before generation**, per `docs/PREREGISTRATION.md`: 2 tuning / 3 held-out per
+class, with tuning slots seeded from systems recovery experiments have already burned and
+held-out slots restricted to systems never run.
+
+**NOT established here.** No recovery result; nothing is fitted. "Patterned" is not
+"Turing-unstable" — σ(k) is evaluated nowhere in this unit. The `m<N` objective remains an
+open problem (exp06 measured the residual as harmful, 9/9 cells collapsed), and `raps` still
+assumes a periodic tile with no windowing, so a cropped real image will bias k\* silently.
+The saturation tolerance (1 % over the last 20 % of the run) is a convergence tolerance, not
+a calibrated threshold, and is enforced as a fail-loud gate rather than used to judge
+anything.
+
+### D-CANON-3 — periods-per-box is a geometric ladder over {8..40}, checked against a leak bar
+*2026-08-10. Same unit. Evidence: `scripts/canon_select.py::draw_periods` /*
+*`oracle_leak_error`; tests in `tests/test_canon_select.py`; the measurement below.*
+
+**The decision.** Each canonical dataset's five periods-per-box are laid out as a geometric
+ladder across {8..40} with a seeded sub-rung offset, and the result is **checked** against
+`LEAK_MIN_ORACLE_ERR = 0.25` and rejected if it fails, rather than assumed adequate.
+
+**Why this needed a decision at all.** The obvious reading of "vary p so L does not encode
+k\*" is *draw distinct integers*. That is not sufficient, and the shortfall was measured on
+generated data rather than reasoned about in advance. A first attempt drew five distinct p
+i.i.d. from {16..32} and produced `{17, 22, 23, 24, 28}` for `turing_labyrinth`. An oracle
+blind predictor `k = q·2π/L` — one fixed integer q chosen *after* seeing the answers — fits
+that to **4.5 %** median error. The legacy leak scores 0.0 % and `three_gene_qvar` 45.5 %, so
+4.5 % sits far closer to the defect this project exists to have fixed than to the fix.
+
+The cause: the predictor's relative error is exactly `|q − p| / p`, so protection comes from
+spread in **log** space. Measured over 4000 random 5-sample draws:
+
+| p range | spread | median oracle error | draws below 15 % | px/wavelength at 512 | k\* floor |
+|---|---|---|---|---|---|
+| 16–32 | 2.0× | 9.1 % | **95 %** | 16.0–32.0 | 1.6–3.1 % |
+| 8–40 | 5.0× | 15.0 % | 48 % | 12.8–64.0 | 1.2–6.2 % |
+| 3–14 (legacy qvar) | 4.7× | 20.0 % | 27 % | 36.6–170.7 | 3.6–16.7 % |
+
+{8..40} gives a wider relative spread than the legacy `qvar` range while keeping every sample
+better than the legacy data on **both** resolution and k\* precision. Replacing the i.i.d.
+draw with a geometric ladder then lifts the realised figures well above the random median:
+
+| dataset | periods | spread | oracle error |
+|---|---|---|---|
+| `turing_spots` | 8, 11, 16, 24, 36 | 4.5× | **37.5 %** |
+| `turing_labyrinth` | 8, 10, 15, 23, 35 | 4.4× | **33.3 %** |
+
+**The limit, recorded because it does not go away.** At n=5 no range decouples strongly — an
+oracle single q can always sit near the middle of five values, and even the legacy {3..14}
+range only reaches 20 % at n=5 against 45.5 % at n=34. **Corpus-level `kstar_rel_err`
+medians are therefore not meaningful on a five-sample dataset at any period range.** These
+sets support per-sample k\* claims; they do not support a corpus median.
+
+**What was rejected: fixing L outright.** A constant L, chosen without reference to any
+system's k\*, would make the leak *structurally absent* rather than small, and would make the
+periods emergent from the physics. It was implemented and measured — L = 300 puts all 37
+gated candidates at 9.1–30.7 emergent periods and 16.7–56.0 px/wavelength — and then
+reverted on owner instruction. The reasoning: `λ = 2π/k*` is set by the network's Jacobian
+and diffusivities either way, so the *periodicity of the pattern* is always the physics.
+Choosing `L = p·λ` only sets how much of it is in view — a field-of-view choice of the kind a
+microscope makes. Commit `948281d` and its revert `ac11847` hold the implementation if the
+question is reopened.
 
 ---
 
-### D-MU-4 — `J_full(mu)` is obtained by scaling the GATE ROWS of `J_full(1)` by `1/mu`, exactly
+### D-CANON-4 — the canonical sets become the training data source
+*2026-08-10. Owner instruction. Status: **DECIDED**.*
 
-**Date:** 2026-08-03. **Status:** DECIDED (implementation, measured exact).
+**The decision.** From 2026-08-10, `turing_spots` and `turing_labyrinth` are the training
+data source for simulated-data work. `docs/PREREGISTRATION.md` §1 is amended to match.
 
-`mu` enters the lifted RHS only as an overall `1/mu` on the `2N²` gate equations; the `x`
-equations do not contain it. So every gate ROW of the Jacobian carries exactly one factor
-`1/mu` and the `x` rows carry none. A whole `mu` axis therefore costs ONE vmapped autodiff
-Jacobian per draw plus one eigen-scan per `mu` point, instead of one autodiff per point.
+**What this does not do.** `three_gene_qvar` is not deprecated and none of its numbers are
+withdrawn. It is the provenance of every canonical system — each canonical sample is a
+re-simulation of a qvar or multiL system at 512² — and existing results against it stand. It
+stops being where *new* headline claims are drawn from. `three_gene_multiL` keeps its
+cross-L role under §3.5a. The legacy and classical families are unaffected: still barred from
+k\* claims, still dormant respectively.
 
-**Evidence:** vs a fresh autodiff Jacobian at `mu` = 1e-3, 0.1, 7.3, both forms: relative
-deviation **< 1e-12** (`tests/test_lifted.py::test_rescale_mu_matches_autodiff`).
+**Two consequences that must be stated rather than discovered.**
 
-A companion fact, also measured and also load-bearing: the lifted FIXED POINT is the QSS one
-at EVERY `mu` (worst `max|f_lift(z*)|` over 8 systems × 7 `mu` from 1e-6 to 1e3: **1.28e-8**),
-so `mu` moves stability and dynamics and never the steady state, and every comparison across
-`mu` is apples-to-apples.
+1. **The primary evidence base is now 10 samples, 6 of them held out**, against 26 held-out
+   in the `three_gene_qvar` split. This follows from the owner's requirement of the smallest
+   number of datasets, one per pattern type, and is not a defect. But it means **a per-sample
+   result is the unit of evidence**, and a median over five samples is not a corpus
+   statistic. Combined with D-CANON-3, `kstar_rel_err` medians must not be quoted from these
+   sets at all.
+2. **No config points here yet.** `configs/m3_registry.yaml`, `nc1_m3_registry.yaml`,
+   `expA_control_full.yaml` and `expA_hidden_channel.yaml` still name `three_gene_val`;
+   `expB_*.yaml` still name `two_gene_classical_val`. Repointing them is a separate change,
+   deliberately not made while generating the data, and it will change what those configs
+   measure — so it is announced here rather than done quietly.
 
----
+### D-CANON-5 — canonical morphology is MEASURED from the field; `turing_labyrinth` is a mixed class
+*2026-08-10. Same unit. Evidence: `scripts/phase_topology.py`, `tests/test_phase_topology.py`,*
+*`scripts/canon_annotate.py`; the cross-tabulation below over all 57 re-simulatable systems.*
 
-### D-MU-5 — ONE finite `mu` (1e-3) plus a one-decade stress point (1e-2); the rest of the axis is context, not a claim
+**Two decisions, one measurement.**
 
-**Date:** 2026-08-03. **Status:** DECIDED (scope, set by the owner).
+**(a) The canonical classes are defined by measured phase topology, not by the generator's
+stored label.** `phase_topology.measure` splits the field at its Otsu threshold and asks two
+questions: which phase fragments into domains, and are those domains round or worm-like.
+Round bright islands in a connected dark matrix → `spots`; round dark voids in a connected
+bright matrix → `holes`; neither → `labyrinth`.
 
-The owner scoped this unit to robustness AT finite `mu`, with timescale *separation* as a
-problem explicitly out of scope. Two values are named and defended and nothing else is
-claimed on:
+**The corpus is NOT relabelled.** All 413 registered samples keep their stored `morphology`
+attribute, so no existing number changes meaning. The measured value is written *alongside*
+it, on the canonical payloads only, as `morphology_measured` plus the statistics behind it.
 
-* `mu = 1e-3` (**headline**). `mu` = (TF-promoter binding time)/(protein turnover time),
-  dimensionless. Live-cell single-molecule tracking gives specific TF-DNA dwell times ~10 s
-  — Chen J. et al. (2014) *Cell* 156:1274-1285 measure Sox2 at 12.0-14.6 s specific,
-  0.75-0.9 s non-specific. Measured morphogen clearance in patterning tissue gives mean
-  lifetimes ~1.4-1.9×10⁴ s — Müller P. et al. (2012) *Science* 336:721-724 report
-  Cyclops/Squint/Lefty1/Lefty2 half-lives of 95-218 min. 10/2×10⁴ ≈ 5×10⁻⁴, rounded up one
-  notch. `configs/bio_box.yaml`'s cited `delta` row `[0.4, 5.0]` puts one model time unit at
-  0.4-5 protein lifetimes, which is inside the rounding.
-* `mu = 1e-2` (**stress**). One decade slower gates than measured; if the verdict holds here
-  it holds at any defensible `mu`.
+**Why.** The generator's rule assigns morphology from the area fraction above a fixed
+contrast threshold. Cross-tabulated against measured topology over the 57 distinct
+re-simulatable systems:
 
-**[ORDER OF MAGNITUDE]** this is not pinned better than a decade and no figure pretends
-otherwise. Schwanhäusser et al. (2011) *Nature* 473:337-342's median protein half-life of
-46 h in cultured NIH3T3 is an order of magnitude LONGER than the developmental anchor and
-would push `mu` DOWN, so the value used is the conservative (larger-`mu`) choice.
+| stored label | → spots | → holes | → labyrinth |
+|---|---|---|---|
+| `spots` (29) | **28** | 0 | 1 |
+| `labyrinth` (17) | 3 | **7** | **7** |
+| `stripes` (11) | 2 | 1 | 8 |
 
-**Where it lives:** `scripts/stage0b_mu.py::MU_FINITE`.
+The `spots` label is reliable — 28 of 29. `labyrinth` is not: only 41 % of it is a labyrinth,
+and most of the rest is a **hole** pattern, a genuinely distinct morphology.
 
----
+**A correction to D-CANON-1, which was wrong.** That entry said `holes` is "structurally
+unreachable, because species 0 is the self-activator in all six topologies, so the observed
+channel is positively skewed by construction". **The patterns are not unreachable — 7 of 57
+systems produce them, several with negative skew.** What is unreachable is the *label*:
+detecting holes requires `phi > 0.66`, i.e. two thirds of all pixels more than 0.4 SD above
+the mean, but a connected bright matrix has its own spread and much of it falls below that
+line. The test can essentially never fire regardless of the field. The corpus contains zero
+samples *labelled* `holes` — which is a fact about the classifier, not about the physics, and
+D-CANON-1 read it the wrong way round.
+
+**(b) `turing_labyrinth` ships as generated, and it is a MIXED class.** Measured composition:
+
+| sample | stored | measured | bright domains / circularity | dark domains / circularity |
+|---|---|---|---|---|
+| `sample_0000` | labyrinth | **labyrinth** | 35 / 0.77 | 3 / 0.29 |
+| `sample_0001` | labyrinth | **holes** | 1 / 0.02 | 64 / 1.22 |
+| `sample_0002` | labyrinth | **holes** | 1 / 0.01 | 95 / 0.94 |
+| `sample_0003` | labyrinth | **holes** | 1 / 0.00 | 297 / 1.29 |
+| `sample_0004` | labyrinth | **labyrinth** | 41 / 0.74 | 189 / 0.42 |
+
+So the dataset is **3 hole patterns + 2 labyrinths**, and its name is to that extent
+misleading. Owner's call, taken with the measurement in hand: keep the data as generated and
+document the mix rather than spend another generation run. Every sample carries its measured
+morphology, and the figures print `stored → MEASURED` wherever the two disagree, so the mix
+is visible at the point of use rather than buried here.
+
+`turing_spots` is unaffected: 5 of 5 measured `spots`, in agreement with the stored label.
+
+**What was rejected.** (a) Re-selecting `turing_labyrinth` as 5 true labyrinths — exactly 5
+qualify, so it was feasible but with zero slack, and the owner chose not to spend the run.
+(b) A `turing_holes` third class — only 3 gated, stable hole systems exist, below the 5
+required. (c) Changing `gen_tg3.classify` — that would alter the meaning of the `morphology`
+attribute on all 413 existing samples, which D-TDPLOT-1 already considered and rejected.
+
+**A bug this surfaced, recorded because the class of error recurs.** The first version of the
+speckle floor discarded domains smaller than a fixed fraction of the FRAME. At 512² with 36
+periods a spot is ~7 px across (area ~38 px) while the floor was 52 px, so every domain was
+deleted and a clean spot lattice measured as `labyrinth` with **zero** domains. The floor is
+now a fraction of the pattern's own wavelength squared, read from the field's spectrum.
+`tests/test_phase_topology.py` pins the regression at the exact resolution that failed.
+
+**Not established.** The circularity cut of 0.55 is read off the separation measured on the
+canonical frames (round domains 0.94–1.57, worms 0.29–0.77) and is **not calibrated against a
+control**. It is used for labelling only, never as a pass condition, and no threshold in
+`docs/PREREGISTRATION.md` depends on it.

@@ -84,7 +84,12 @@ def _morphology_rollout(cfg: Config, result, ri):
             f"got shape {frame.shape}. Set solver.morphology_rollout=false for this source.")
     n_grid = int(frame.shape[1])
 
-    res = simulate(result.model, L=float(ri.L), n=n_grid, seed=cfg.train.seed,
+    # D=result.D_phys, not model.D: this rollout integrates on a box of PHYSICAL size ri.L,
+    # and recover(nondim=True) leaves model.D holding D/L**2. Applying that at physical L
+    # starves diffusion by L**2 (3600x at L=60), so the model silently fails to pattern and
+    # morphology is never scored (D-EVID-14). Identical on the dimensional path.
+    D_phys = getattr(result, "D_phys", None)
+    res = simulate(result.model, L=float(ri.L), n=n_grid, seed=cfg.train.seed, D=D_phys,
                    noise=cfg.solver.noise, xstar=result.xstar,
                    integrator=cfg.solver.morphology_integrator,
                    horizon_growth_times=cfg.solver.horizon_growth_times,
@@ -167,7 +172,7 @@ def _save_run_arrays(cfg: Config, rdir: str, run_id: str, ri, result, J_rec,
                  if metric.get("morphology_scored") == "compared" else None)
     best_member = _best_restart(result.restarts)
     meta = dict(run_id=run_id, git_sha=provenance()["git_revision"],
-                config_id=cfg.config_id(), source=cfg.data.source,
+                config_id=cfg.config_id(), arm_id=cfg.arm_id(), source=cfg.data.source,
                 dataset_id=cfg.data.dataset_id, sample_key=cfg.data.sample_key,
                 form=cfg.model.form, N=cfg.model.N, m=cfg.model.m,
                 seed=int(cfg.train.seed), arm=metric.get("arm"),
@@ -224,6 +229,12 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        model_seed=cfg.model.seed,                       # unit 10
                        dispersion_backend=cfg.model.dispersion_backend,  # unit 10
                        d_init_from_kstar=cfg.model.d_init_from_kstar,   # unit B4
+                       # unit C1: `model.init` round-tripped into frozen_config.yaml and was
+                       # written onto the run-index `model_init` column, but was NEVER handed
+                       # to recover() -- so `-o model.init=low_basal` was a silent NO-OP and
+                       # the index column asserted an init the run had not used. Threading it
+                       # is byte-identical on the default path (init="default").
+                       init=cfg.model.init,
                        batched=cfg.train.batched,                        # unit b2
                        device=cfg.train.device,                          # unit b2
                        # unit 5: the biological prior's own knobs. These were already
@@ -338,7 +349,10 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     row = {k: (v if isinstance(v, (int, float, bool, str)) or v is None else str(v))
            for k, v in metric.items()}          # flat scalars only, for sqlite/jsonl
     row.update(
-        run_id=run_id, config_id=cfg.config_id(),
+        # config_id identifies THIS RUN (it hashes train.seed); arm_id identifies the ARM
+        # this run is a seed replicate OF. optim.benchmark groups on arm_id — grouping on
+        # config_id put every replicate in its own group of one (D-EVID-13).
+        run_id=run_id, config_id=cfg.config_id(), arm_id=cfg.arm_id(),
         source=src, dataset_label=dataset_label,
         dataset_hash=(cfg.data.dataset_hash or getattr(ri, "dataset_hash", None)),
         dataset_id=cfg.data.dataset_id, sample_key=cfg.data.sample_key,

@@ -77,16 +77,47 @@ and `docs/` for per-branch handoffs.
 
 ## 3. Testing
 
-- **The local pre-push hook is the authoritative test run.** Enable once per clone:
-  `git config core.hooksPath .githooks`. It runs `pytest -q` against the repo `.venv`, so
-  tests exercise the same torch build you develop against, and aborts the push on failure.
-  Bypass deliberately with `git push --no-verify`.
+- **The local pre-push hook is the authoritative test run.** It runs `pytest -q` against
+  the repo `.venv`, so tests exercise the same torch build you develop against, and aborts
+  the push on failure. Bypass deliberately with `git push --no-verify`. Run it on demand
+  without pushing: `git hook run pre-push`.
+- **Enable it once per REPOSITORY, not per worktree:**
+
+  ```bash
+  git config core.hooksPath .githooks      # from any worktree; covers them all
+  ```
+
+  Git's local config lives in the one `.git/config` and is **shared by every worktree** (a
+  worktree's `.git` is a pointer file, not a config of its own). The value is a *relative*
+  path and `.githooks/pre-push` is tracked, so it resolves against whichever worktree you
+  push from, and the hook picks up that worktree's own `.venv`. Setting it again in a new
+  worktree is a no-op — but it is also harmless.
+- **Claude Science cannot set this** — in the sandbox `.git/config` (and each
+  `.git/worktrees/*/config.worktree`) is bind-mounted read-only, so any `git config` write
+  fails with `Device or resource busy`. The rest of `.git/` is writable, which is why
+  commits work. An agent pushing from the sandbox must therefore inject the setting per
+  command so the tests still gate the push:
+
+  ```bash
+  git -c core.hooksPath=.githooks push ...
+  # or: GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath \
+  #     GIT_CONFIG_VALUE_0=.githooks git push ...
+  ```
+
+  Both are verified to fire the hook. Do not push from the sandbox without one of them —
+  otherwise the authoritative test run is silently skipped.
 - **GitHub Actions is not a signal here.** `.github/workflows/tests.yml` is
   `workflow_dispatch`-only; the `push`/`pull_request` triggers are commented out, not
   deleted. The account's Actions billing has lapsed, so runs are *skipped* and reported as
   failures that have nothing to do with the code. Do not diagnose those as code failures.
   Restoring CI = uncommenting the two triggers.
-- Current suite: **77 tests**, all CPU, seconds to run. Keep them green.
+- Current suite: **551 passed, 1 skipped**, all CPU, ~3 min 40 s to run (measured 2026-08-10 on
+  `feature/canonical-datasets` after the canonical-dataset work). Keep them green. The count in
+  this line has been stale before — re-measure it rather than trusting it, and update it when
+  it moves.
+- **Run the suite with the sandbox DISABLED.** `payload.h5` is on the sandbox read-deny list,
+  so a sandboxed run reports ~15 `PermissionError` failures and errors that look exactly like
+  code faults and are not. Diagnosing those as code bugs wastes a session.
 
 ## 4. House style
 
@@ -116,9 +147,38 @@ not appear in its imports.
   firewall boundary where `(RecoveryInput, AnswerKey)` are separated. Neither is
   recovery-side.
 
-**Known gap:** `rngrn.scoring` is *not* in the enforced `FORBIDDEN` list, though the
-design intends it to be scoring-side only. No recovery-side module imports it today, so
-the codebase is clean — but the rule is unguarded. Add it to `FORBIDDEN` when convenient.
+**Known gap — restated 2026-08-04. The previous version of this paragraph was wrong in both
+directions.** It said `rngrn.scoring` was unguarded and that no recovery-side module imports
+it. Neither holds.
+
+- *It is guarded, three times over.* `tests/test_permutation_scoring.py::test_no_recovery_side_module_imports_scoring`,
+  `tests/test_morphology_scoring.py::test_no_recovery_side_module_imports_the_morphology_scorer`,
+  and the equivalent in `tests/test_overparam_scoring.py` each assert `"scoring" not in
+  imports` across the recovery-side list. It is absent from `test_firewall.py`'s `FORBIDDEN`
+  only.
+- *And the codebase is not clean.* `history.py:45` does `from .scoring.plausibility import
+  d_ratio_of`, and `TrainingHistory` is called from inside the Adam loop (`recover.py:245`,
+  `:492`). This is **not** a truth leak — `d_ratio_of` is a pure function of the model's own
+  `D` — but it does contradict the stated design intent, and no audit covers it.
+
+**The allowlist gap inside `src/` is CLOSED.** This paragraph used to describe the fix as a
+to-do; it has been implemented and the description was stale. `tests/test_firewall.py` now
+declares `RECOVERY_SIDE` (with `history.py` on it), `SCORING_SIDE` (with `eval/lgen_eval.py`)
+and `SIDE_NEUTRAL` (`utils.py`), and
+`test_every_loss_and_eval_module_is_classified` asserts that every module under `losses/` and
+`eval/`, plus `history.py`, is on one of those lists — membership of none being a failure. A
+new module under `src/rngrn/` is therefore no longer unaudited by default.
+
+**The gap that remains is `scripts/`, and it bit on 2026-08-10.** The completeness test globs
+`src/rngrn/{losses,eval}`, so it cannot see anything in `scripts/` — yet several scripts read
+`payload.h5` (generating kinetics, `x_star`, the generator's `k_star`) *and* are importable by
+bare top-level name, because the suite and the notebooks put `scripts/` on `sys.path`. Those
+are covered only by the hand-maintained `FORBIDDEN` list: `td_figures`, `gen_tg3`,
+`canon_select`, `canon_generate`, `canon_annotate`. Adding a sixth such script and forgetting
+to list it leaves the suite green — which is exactly what happened when the canonical-dataset
+scripts were written. **If you add a script that opens `payload.h5`, add its module name to
+`FORBIDDEN`.** The durable fix would be a completeness test over `scripts/` that classifies
+each module as payload-reading or not.
 
 ## 6. Datasets
 
@@ -183,7 +243,111 @@ wins over the doc (§8).*
   iteration counts on a GPU affordable. This is the standing direction of travel.
 - **CPU runs at short step counts are plumbing checks, not results.** A short run verifies
   that a config resolves, data loads, and scoring routes. It recovers nothing meaningful.
-  20 cores are available; multiprocessing over seeds is the CPU throughput lever.
+  Multiprocessing over seeds is the CPU throughput lever; scale worker counts to the
+  machine's actual usable cores (e.g. `len(os.sched_getaffinity(0))`), not a fixed number.
+
+### 7a. HOST RAM IS THE BINDING RESOURCE. Launch trainers through `scripts/guarded_run.sh`.
+
+Five sessions died between 2026-07-29 and 2026-08-03, each killing hours of GPU compute.
+Diagnosed from `/var/log/syslog`: the **Linux global OOM killer**, five times, with
+**free swap 0 kB and ~90 MiB free RAM at every single event**. Not GPU, not Node, not
+disk, not a UI action — `grep -icE "Xid|NVRM"` returns 0, the `claude` process was only
+0.26–0.50 GiB RSS, and `/` is 7 % full. Two of the kills took down `setsid nohup` sweeps
+that were detached precisely to survive a session exit, which is what proves the event
+was system-wide rather than process-tree-local.
+
+The arithmetic: each trainer is **1.47–1.68 GiB RSS**, and 17–21 ran concurrently. Two
+agents × (1 parent + `--workers 4`) × ~1.6 GiB ≈ **16 GiB** against a VM `MemTotal` of
+**15.34 GiB** — over the ceiling before anything else loads.
+
+**Therefore: run every trainer invocation as `bash scripts/guarded_run.sh <cmd…>`.** It
+serialises sweeps across *all* worktrees with one `flock` (per-agent limits cannot help —
+the overcommit is the sum over agents, and no agent can see the others), waits for a
+`MemAvailable` floor, and raises its own `oom_score_adj` so the kernel kills a trainer
+rather than the session. Before that last part, trainers sat at adj 0 while session
+`systemd`/`dbus-daemon` sat at 100–200, so a memory spike took down the whole user
+session instead of one cell — exactly backwards.
+
+Two things that do **not** fix this, recorded so they are not re-attempted:
+- **The 20 → 14 core reduction.** `processors=` does not affect the memory ceiling, and
+  the queue scripts pass `--workers` explicitly, so fewer cores does not shrink the pool.
+  Failure #5 occurred *after* that change was applied.
+- **Per-agent worker limits alone.** See above: the sum across agents is what matters.
+
+**The ceiling was raised on 2026-08-03** — `.wslconfig` now sets `memory=18874368000`
+(17.58 GiB `MemTotal`, from 15.34) and `swap=8388608000` (7.8 GiB, from 4). Verify with
+`free -h` after any WSL restart.
+
+That is a real improvement but **still below the 18.8 GiB peak demand** measured at the
+worst of the five events (14.87 GiB RSS + 3.96 GiB swap). So the guard is **load-bearing,
+not optional**: two concurrent trainer pools still do not fit, one does. The guard's
+`MemAvailable` floor is 8192 MB for the same reason — a pool is 1 parent + `--workers`
+children at ~1.6 GiB each, so `--workers 4` needs ~8 GiB, and a floor below the pool's own
+footprint would let it launch into headroom it cannot fit in.
+
+### 7b. `ps`, `pgrep` and `pkill` ARE BLIND INSIDE THE SANDBOX. Always disable it to check.
+
+They do not error — they return an **empty result**, which reads exactly like "nothing is
+running". On 2026-08-03 that cost 43 minutes: two queues had been training for 52 minutes,
+every sandboxed `ps` said they were dead, and acting on that I deleted the live stdout file
+of a running trainer (losing a 53-minute cell) and briefly deleted committed run
+directories. `lsof` on `.trainer.lock` with the sandbox disabled showed the truth
+immediately.
+
+This is the same failure mode as the zero-byte reports: **absence of evidence rendered
+indistinguishable from evidence of absence.** So:
+
+- Any process check — `ps`, `pgrep`, `pkill`, `/proc` walks — runs with
+  `dangerouslyDisableSandbox: true`, or its result means nothing.
+- Before concluding a job died, corroborate with something the sandbox cannot hide: file
+  mtimes, `free -h` (a dead pool frees GiB), or `lsof` on the lock.
+- A log whose last line is a START is **not** evidence of death. The next line only arrives
+  when the target finishes, which can be 40 minutes later.
+
+### 7c. There is NO discretised Laplacian in training. It is analytic, in Fourier space.
+
+Repeatedly re-derived from scratch, so it is written down once here.
+
+**Training never simulates.** `losses/terms.py` constrains the reaction *pointwise*; the
+spatial operator enters only through its Fourier eigenvalues, in the dispersion relation
+
+```
+sigma(k) = max Re eig( J - k^2 * diag(D) )        model.py::dispersion
+```
+
+The `-k^2 D` term **is** the Laplacian. No grid, no stencil, no FFT of any field, and
+therefore no spatial discretisation error anywhere in the objective. Cost lives in the
+steady-state Newton solve, never in a spatial operator — which is why the measured ~30x
+per-target spread localises there.
+
+**A real Laplacian appears only post-hoc**, in `eval/numerics.py`, and it is **spectral,
+never finite-difference**: `_spectral_k2` / `_spectral_k2_half` build `|k|^2` from
+`fftfreq(n, d=L/n) * 2*pi` for the ETDRK4 rollout behind the morphology comparison. The
+generator (`scripts/gen_tg3.py`) uses the same spectral IMEX scheme.
+
+Three consequences that matter:
+
+1. **The training k-grid is continuous; the box is not.** A periodic domain of size L
+   admits only `k = 2*pi*|m|/L`. Training hinges on 400 continuous wavenumbers
+   (`recover._kgrid_for`), including ones the domain cannot support — so a model can be
+   Turing-unstable *in training* and still fail to pattern in a rollout, because the
+   realised mode must snap to the admissible lattice. This is exactly the mode-quantisation
+   argument `PREREGISTRATION` §3.5a relies on to make cross-L transfer non-trivial. Milder
+   in 2D than it sounds, since `|k| = 2*pi*sqrt(m^2+n^2)/L` is a denser set than the 1D
+   picture suggests, but genuinely coarse at small L.
+2. **The grid is anchored to the observed k\***: `kmin = kstar_obs/50 + 1e-3`,
+   `kmax = max(8*kstar_obs, 2*kmin)`. Firewall-legal (it comes from an FFT of the observed
+   frame). Unit B4 fixed a real defect here — the floor had been an absolute 2.0
+   rad/length, which is not scale-free and silently dominated whenever `kstar_obs < 0.25`,
+   i.e. 11 of 287 samples (3.8 %), pinning the grid to the wrong band.
+3. **L enters only as a unit.** `L_model = 1.0 if nondim else L`. Since k scales as 1/L and
+   the Laplacian as 1/L^2, the non-dimensional path is an EXACT change of variables — no
+   approximation, only the units of D and k change. That is precisely why §3.5b forbids the
+   nondim path from claiming credit for L-invariance: it is L-invariant by construction.
+
+**So "Turing-unstable" and "patterns" are different claims.** Closing that gap is the entire
+reason `eval/rollout.py` exists, and why `morphology_match` is scored separately from every
+dispersion-derived criterion.
 
 ## 8. Evidence discipline
 
@@ -272,3 +436,26 @@ Spawning subagents inside a dynamic workflow is **allowed and encouraged**. Use 
   green test that hides it — say which, explicitly.
 - **A wave can die wholesale to an upstream outage.** Six phase-B units returned API 500s
   simultaneously. Check whether failures are server-side before diagnosing them as code.
+
+## 12. `.claude/` — the executable form of this file
+
+This file is the contract. `.claude/` holds the parts that work better as a tool than as a
+paragraph. It is **tracked**; only `.claude/settings.local.json` is machine-local. See
+`.claude/README.md` for the full map. Nothing there restates this file — where they could
+drift, **this file wins and the other gets fixed**.
+
+- **Agents** (`.claude/agents/`) — four read-only reviewers for invariants the suite cannot
+  check: `firewall-auditor` (§5), `evidence-auditor` (§8, §10), `numerics-reviewer` (§7, §7c),
+  `merge-damage-hunter` (§11).
+- **Skills** (`.claude/skills/`) — `run-training` (§7a, §7b), `new-worktree` (§2, §11),
+  `record-decision` (§10), `harvest-dataset` (§6, §6a).
+- **Rules** (`.claude/rules/`) — `pre-merge-checklist.md` and `reporting-numbers.md`, the
+  checklist forms of §3/§5/§8/§11 and §8 respectively.
+- **Hook** (`.claude/hooks/guard_trainer.py`) — refuses any Bash command that launches
+  `rngrn train`/`sweep`/`target-report` or a `scripts/exp*.py` experiment outside
+  `scripts/guarded_run.sh`. §7a is the one rule worth enforcing mechanically, because the
+  agent that forgets the guard is the one that has not read §7a. `RNGRN_GUARD_OFF=1` still
+  bypasses it deliberately.
+
+@.claude/rules/pre-merge-checklist.md
+@.claude/rules/reporting-numbers.md

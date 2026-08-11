@@ -11,9 +11,21 @@ Two backends behind one interface, selected by tracking.index_backend:
            Python filter (fine at the scales a template reaches).
   sqlite : <name> table in index.db with a dynamic, additive schema (columns are
            added as new row keys appear). Enables real SQL once runs pile up, e.g.
-           SELECT ... WHERE recovered_turing AND kstar_rel_err < 0.15 GROUP BY config_id.
+           SELECT ... WHERE recovered_turing AND kstar_rel_err < 0.15 GROUP BY arm_id.
 
 Same rows go into either; switching backend does not change what a row means.
+
+BUT A ROW'S MEANING CAN CHANGE OVER TIME, AND THE INDEX DOES NOT VERSION IT. Two columns
+changed definition on 2026-08-04 without changing name, so a ledger spanning that date holds
+two definitions in one column:
+  * `recovered_turing` — was `tr(J) < 0` (which a uniformly UNSTABLE system satisfies), is
+    now the strict `max Re eig(J) < 0` (D-EVID-11). New rows carry
+    `turing_criterion = "strict_max_re_eig"`; ABSENT means the superseded verdict. Filter on
+    it before pooling old and new rows.
+  * grouping — `config_id` hashes `train.seed`, so it identifies a RUN, never an arm. Group
+    on `arm_id` (D-EVID-13); rows written before it existed carry none.
+A query that ignores both silently mixes generations. This is the one thing switching
+backend does not protect you from.
 """
 from __future__ import annotations
 import json
@@ -117,7 +129,11 @@ class SqliteIndex:
 
     def query(self, where=None, params=()):
         """`where` is a SQL predicate string (no leading WHERE), e.g.
-        "recovered_turing=1 AND kstar_rel_err < ?". Returns list[dict]."""
+        "recovered_turing=1 AND kstar_rel_err < ?". Returns list[dict].
+
+        On a ledger spanning 2026-08-04, add `AND turing_criterion = 'strict_max_re_eig'`:
+        `recovered_turing` changed meaning on that date and older rows carry the superseded
+        loose verdict under the same column name — see this module's docstring."""
         if callable(where):        # allow the same predicate-callable API as JSONL
             return [r for r in self.read() if where(r)]
         sql = f'SELECT * FROM "{self.name}"'

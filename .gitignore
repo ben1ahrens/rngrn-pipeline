@@ -65,3 +65,7 @@ exports/
 
 # downloaded literature (not ours to redistribute)
 papers/
+
+# machine-local Claude Code overrides. The rest of .claude/ is TRACKED and shared: the
+# agents, skills, rules and the trainer guard are project conventions, not personal setup.
+.claude/settings.local.json

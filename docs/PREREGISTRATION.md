@@ -35,9 +35,29 @@ biologically plausible." Parameter agreement is not scored anywhere below.
 
 | dataset | n | role |
 |---|---|---|
-| `three_gene_qvar` | 34 systems, periods-per-box ~ U{3..14} | **PRIMARY.** All headline claims. |
+| `turing_spots` | 5 systems, 512², periods 8/11/16/24/36 | **PRIMARY from 2026-08-10.** The training data source. |
+| `turing_labyrinth` | 5 systems, 512², periods 8/10/15/23/35 | **PRIMARY from 2026-08-10.** The training data source. |
+| `three_gene_qvar` | 34 systems, periods-per-box ~ U{3..14} | Superseded as primary. Provenance of the canonical systems; continuity for runs already made against it. |
 | `three_gene_multiL` | 23 systems × 4 domain sizes | **L-generalisation only.** |
 | `three_gene_val` (legacy) | 19, periods-per-box ≡ 6.000 | **Secondary/continuity only. May not support any k\* claim.** |
+
+**Amended 2026-08-10, on owner instruction, before any run against the new sets.** The
+canonical `turing_*` datasets become the training data source for simulated-data work.
+`three_gene_qvar` is not deprecated and its numbers are not withdrawn — it is where the
+canonical systems came from, and every existing result against it stands. It simply stops
+being where new headline claims are drawn from.
+
+This amendment *adds* dataset roles. It weakens no threshold: every pass condition in §3 is
+untouched, and the new sets are strictly better instrumented than the old ones on both
+resolution and k\* precision (see `docs/CANONICAL_DATASETS.md` §4).
+
+**A limitation this creates, stated here rather than discovered later.** The primary evidence
+base is now **10 samples, 6 of them held out** — against 26 held-out in the `three_gene_qvar`
+split of §1a. That is a deliberate choice (smallest number of datasets, one per pattern type)
+but it has a hard consequence: **a per-sample result is the unit of evidence on these sets,
+and a median over five samples is not a corpus statistic.** In particular
+`kstar_rel_err` medians must not be quoted from them — see `CANONICAL_DATASETS.md` §5 for
+why no periods range fixes this at n=5.
 
 **The legacy exclusion is not optional.** Every legacy generator set
 `L = clip(6·2π/k*, 18, 220)`, so an image-blind predictor using `L` alone scores **0.0 %
@@ -75,6 +95,47 @@ the §3 thresholds are untouched.*
 
 ---
 
+### 1b. The canonical `turing_*` split — declared 2026-08-10, before the data existed
+
+`turing_spots` and `turing_labyrinth` (5 systems each, 512×512) were generated for reuse
+across all future simulated-data experiments. Their split is fixed **here, before the
+generation run produced a single frame**, and is recorded in the frozen selection record
+`data/canonical_selection.json` alongside the systems themselves.
+
+| role | n per dataset | rule |
+|---|---|---|
+| **TUNING (burned)** | 2 | seeded from systems recovery experiments have already run against, so no fresh system is spent on tuning |
+| **HELD OUT** | 3 | restricted to systems never used in any run |
+
+Concretely — the `role` attribute is written into every sample's payload, so a run cannot
+mistake one for the other:
+
+| dataset | tuning | held out |
+|---|---|---|
+| `turing_spots` | `three_gene_qvar:2`, `three_gene_qvar:3` | `three_gene_multiL:0`, `three_gene_qvar:30`, `three_gene_multiL:20` |
+| `turing_labyrinth` | `three_gene_qvar:1`, `three_gene_qvar:18` | `three_gene_qvar:9`, `three_gene_multiL:9`, `three_gene_qvar:6` |
+
+A system that appears in `PREVIOUSLY_RUN` may **never** occupy a held-out slot — it is not
+held out in any meaningful sense. `three_gene_qvar:18` occupies a tuning slot despite never
+having been run, because only one previously-run labyrinth system survived the gates; it is
+declared burned here so the held-out three stay clean.
+
+**Why there is no `turing_stripes`.** Every stripes candidate in the re-simulatable corpus
+loses the label when only the box size changes; and across the corpus the stripes fraction
+falls monotonically with periods-per-box to zero at p ≥ 11, while the canonical draw runs
+8–40. See `docs/DECISIONS.md` **D-CANON-2**.
+
+**The leak is measured on these sets, not assumed away.** Periods-per-box is laid out as a
+geometric ladder across {8..40} and checked against a 25 % bar, giving an oracle
+blind-predictor error of 37.5 % (`turing_spots`) and 33.3 % (`turing_labyrinth`) against
+0.0 % for the legacy sets. They may therefore support k\* claims **per sample**. They may
+not support a corpus median: at n=5 no period range decouples strongly, because an oracle
+can always sit near the middle of five values. See `docs/DECISIONS.md` **D-CANON-3**.
+
+*This is a split definition and an addition to §1's dataset roles. It weakens no pass
+condition — every threshold in §3 is untouched.*
+
+
 ## 2. Seeds
 
 **K = 8 independent seeds per target**, and *independent* is load-bearing. Before phase-B
@@ -90,7 +151,9 @@ A seed that raises counts as a **failure**, never as a silent drop from the deno
 
 ## 3. The pass conditions
 
-A target **passes** only if all five criteria below hold. A **form** (competitive / `nc1`)
+A target **passes** only if all **five** criteria below hold. (A sixth, §3.6, was added and
+withdrawn on 2026-08-03 without any measurement being made against it; it is retained there
+as future work and binds nothing.) A **form** (competitive / `nc1`)
 passes only if ≥ **4 of 6** held-out targets pass. The overall claim requires **both** forms
 to pass.
 
@@ -114,6 +177,20 @@ deliberately placed first.
 defined as the modal fraction rather than mean pairwise agreement. Both were flagged
 UNCALIBRATED by unit 3. Results will be reported at 0.02 / 0.05 / 0.10 so the conclusion's
 sensitivity to that choice is visible rather than hidden.
+
+> **Implementation note added 2026-08-04 — the pass condition above is UNCHANGED. Only the
+> machinery that was supposed to report it was broken.** The sweep was a no-op: J was
+> collapsed to signs at score time, and the three cells re-thresholded that
+> *already-collapsed* vector, which cannot change anything. All three returned the 0.05
+> answer, and the 0.02 / 0.10 labels were wrong. See `docs/DECISIONS.md` D-EVID-12.
+>
+> **Fixed:** the raw Jacobian is now recorded per run (`repro_J_vector`) and every report
+> emits `topology_consistency_rtol_0p02` / `_0p05` / `_0p10` from a single run.
+>
+> **Consequence for this pre-registration:** nothing is retracted — no number reported so
+> far was computed at 0.02 or 0.10 (all 13 tracked rows carry rtol 0.05, D-EVID-10). But
+> runs recorded *before* this change carry no raw Jacobian and **cannot be swept
+> retroactively**, so the §3.1 sweep must be reported on targets re-run after 2026-08-04.
 
 ### 3.2 Robustness
 
@@ -283,6 +360,127 @@ construction* and therefore cannot be allowed to claim credit for it. Endres et 
 separated L from the parameter vector — their `x̂ = x·√(c₂/D_u)` folds length and diffusion
 into one variable, and their code hard-codes L via `dx` — so there is no prior result to
 inherit here.
+
+### 3.6 Robustness under finite timescale separation — added AND WITHDRAWN 2026-08-03
+
+> **WITHDRAWN THE SAME DAY IT WAS ADDED, AT THE OWNER'S DIRECTION, BEFORE ANY MEASUREMENT
+> EXISTED AGAINST IT. This is NOT a pass condition. It is future work.**
+>
+> The owner first raised finite-`mu` robustness to the essential criterion, then scoped it
+> out: *"For now, let's stick to finite mu. Separation of time scales is a whole nother
+> problem. My previous work leads me to believe that training under the QSS is sufficient to
+> discover circuits that pattern under finite mu."* and *"Just note work on mu for future
+> work if we have time."*
+>
+> **Nothing was measured against this section before it was withdrawn** — the unit building
+> the machinery was stopped mid-run and its code is parked, unvalidated, on branch
+> `feature/rngrn-c-mu` (commit `17e9ad2`). No run, no number, and no decision anywhere in
+> this repository was judged by §3.6.
+>
+> **Why the text is retained rather than deleted.** A pre-registration whose withdrawn
+> sections vanish is not a pre-registration. Keeping it visible means a reader can see
+> exactly what was considered, when, and on whose authority it was set aside — which is the
+> whole function of this document. It is retained *verbatim as originally written* below.
+>
+> **Scope note, so the record is not misread.** §3.2 continues to bind and is unaffected. It
+> is measured on the QSS Jacobian, and this section is the standing statement of what that
+> does *not* cover: the lifted finite-`mu` system's robustness is **unmeasured in this
+> project**. Any claim of robustness made under §3.2 is a claim about the QSS reduction, and
+> should be worded that way in the paper.
+
+---
+
+*Original text, as written before withdrawal:*
+
+**Added at the owner's explicit direction, before any finite-`mu` number existed.** The
+owner's words: *"what I really care about is the robustness of the circuit when finite mu is
+introduced. That is the most essential thing that needs to hold."*
+
+Amending this way **adds** a criterion and **tightens** the claim; it weakens no threshold
+and moves no bound. §3.2 is retained verbatim above. This section is dated so that the git
+history shows it was fixed before the runs it judges, exactly as §3.5a was.
+
+#### What this measures, and why §3.2 alone does not
+
+The RNGRN trains on a **quasi-steady-state** reaction (`model.py::_reaction_raw`): promoter
+occupancy is assumed to equilibrate *instantaneously* with transcription-factor
+concentration, so the gates never appear as state variables. Real gene regulation does not
+do that — TF–promoter binding is fast but finite, and `mu` parameterises the separation
+between that fast binding and the slow protein production/degradation the model resolves.
+
+`eval/dynamical.py::lift_check` makes the gates explicit fast variables and has existed
+since the scaffold, but it is called from exactly one place — `tests/test_science.py:71`, a
+2-species model at `mu = 1e-4` — and it only checks that the *production algebra* converges
+to the QSS expression as `mu → 0`. **The lift has never been simulated in space, never run
+at finite `mu`, never coupled to diffusion, and never asked whether a pattern forms or
+survives perturbation.** Every `turing_volume_*` number in this project is therefore
+computed on the **QSS** Jacobian, and says nothing about the system the biology actually
+runs.
+
+The lifted state is `(x, G_A, G_R)` of dimension `N + 2N²` (21 at N=3). Only `x` diffuses —
+promoter states are bound to DNA — so the diffusion matrix is `diag(D_x, 0, …, 0)`. The
+lifted system's **fixed points are identical to the QSS fixed points at every `mu`**, since
+setting `dG/dt = 0` recovers the QSS algebraic relations exactly. So `mu` changes stability
+and dynamics, never the steady state, and the QSS and finite-`mu` measurements are
+comparable at the same `x*` by construction.
+
+#### The criterion
+
+> §3.2's bars, recomputed on the **lifted finite-`mu` Jacobian** rather than the QSS one:
+> median `turing_volume_10pct` ≥ **0.90** and median `turing_volume_4p8pct` ≥ **0.95**,
+> holding at **every `mu` across the cited biological band**, not at a point estimate.
+>
+> A draw counts as Turing only if the leading unstable mode is **stationary**. The
+> oscillatory fraction is reported separately and never folded in.
+
+*Calibration — inherited, not invented.* The two numbers are §3.2's, which are calibrated
+against all 127 generator systems at 400 draws each (population mean 0.879 / median 0.935 at
+10 %; 4.8 % is Tica et al.'s measured experimental parameter CV). No new threshold is
+introduced here: the bar is the same height, moved onto the harder system. That is
+deliberate — inventing a softer number for the finite-`mu` case would be the exact move §5
+forbids.
+
+*Why "across the band" and not "at `mu_bio`".* `mu_bio` is a ratio of literature timescales
+(TF–DNA residence seconds against protein turnover tens of minutes to hours) and will not be
+pinned better than an order of magnitude. A criterion evaluated at a point estimate of a
+quantity known only to a decade is a criterion evaluated at an arbitrary point. Requiring it
+to hold across the whole defensible band is what makes the claim mean something, and the
+band's width is set by the literature rather than chosen here. **The band itself is an input
+to this criterion and is marked UNCALIBRATED until Stage 0b's citations land**; the band is
+recorded in `docs/DECISIONS.md` with its sources before any pass/fail is read against it.
+
+*The shape matters as much as the value.* `turing_volume` against `mu` is reported as a
+**curve**, per form, with the 0.90 and 0.95 lines and the biological band drawn on it. A
+circuit that clears the bar at `mu_bio` but cliff-edges just above it is not robust in the
+sense being claimed, and a point value cannot show that. Graceful degradation and a cliff
+are different results and are reported as such.
+
+*Two failure routes, distinguished.* Explicit slow gates classically introduce delay-driven
+oscillation, so the uniform state can go unstable via a Hopf bifurcation *before* the `k > 0`
+band closes. Which of the two eats the volume is reported, because they carry different
+biological meanings — a Hopf route says the circuit oscillates rather than patterning; a
+closing band says it relaxes to uniformity.
+
+*`mu` is itself uncertain.* Perturbing `(alpha, delta, D, K)` at fixed `mu` understates the
+real exposure. Both are reported: the standard parameter cloud at each fixed `mu`, and a
+cloud in which `mu` is drawn from its own band alongside the parameters. **The second is the
+one this criterion is read against.**
+
+*Strict test only.* `max Re eig(J) < 0` for uniform stability, never `tr(J) < 0`. Stage 0
+measured the trace test overcounting by 64× on 80,000 box-constrained draws, with all 1,196
+extra acceptances being uniform instabilities rather than Turing patterns.
+
+*Integrator honesty, stated in advance because it is the dangerous failure mode.* The gates
+relax at rate `1/mu`, so a stiff integrator that numerically damps the instability would
+manufacture a "pattern died at finite `mu`" result as an **artefact**. Any finite-`mu`
+simulation supporting this criterion must show `dt`-convergence and must reproduce the QSS
+field at `mu ≤ 1e-4` before its finite-`mu` runs are quoted.
+
+*Applies to both forms and to the recovered networks, not only synthetic draws.* The
+circuits carrying the claim — currently `three_gene_qvar` `sample_0003` and `sample_0004`,
+prior-ON, the two that are simultaneously `plausibility_score = 1.0` and patterned — are
+evaluated at full depth. If this criterion fails, it fails; §5 applies unchanged and the
+shortfall is reported against the bar as written.
 
 ---
 

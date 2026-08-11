@@ -20,7 +20,10 @@ WHAT IT MEASURES (two things):
 
 CRITERION: "Turing" here is STRICT — max Re eig(J) < 0 (the homogeneous state is
 linearly stable to ALL perturbations) AND an unstable mode exists at some k > 0. Note
-this is stricter than eval/analysis.turing_ok, which tests tr(J) < 0. On the
+this WAS stricter than eval/analysis.turing_ok, which tested tr(J) < 0 — CORRECTED
+2026-08-04 (docs/DECISIONS.md D-EVID-11), so turing_ok now applies this same criterion
+and the library no longer carries two definitions of "Turing". This note is kept because
+it is where the discrepancy was first written down. On the
 UNPERTURBED data the two agree 127/127, but under perturbation the loose criterion
 overcounts by up to 73% of draws for a single sample, so the strict form is used and
 the loose one is recorded alongside for comparison (frac_loose, frac_loose_only).

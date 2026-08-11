@@ -13,7 +13,10 @@ LITERATURE GROUNDING
 
 STRATEGY UNDER TEST
   Stage A  reach the Turing manifold using a firewall-safe low-basal prior
-           (measured 82% Turing-unstable at init).
+           (recorded as "measured 82% Turing-unstable at init" -- WITHDRAWN 2026-08-04,
+           docs/DECISIONS.md D-EVID-11: the strict figure is 0/398 = 0.0%, so Stage A
+           never reached a Turing manifold at all. This script's rejection verdict
+           stands, but the stated reason for expecting it to work does not).
   Stage B  homotopy: anneal the objective from "stay Turing" toward "match k*_obs",
            keeping the Turing hinges active so the path never leaves the manifold.
 
@@ -45,7 +48,9 @@ def turing_hinges_split(model, xstar, kgrid, margin=1e-3, k_min_frac=0.1):
 def low_basal_init(seed, N=3):
     """FIREWALL-SAFE prior. Low basal + sub-saturated binding is what admits a positive
     Jacobian diagonal (self-activation): for the competitive form df_i/dx_i > 0 needs
-    1 + KA*x^n < n. Measured 82% Turing-unstable vs 0% for the default prior."""
+    1 + KA*x^n < n. MEASURED 2026-08-04: 28.6% positive diagonal vs 0% for the default
+    prior -- that is the real effect. The previously recorded "82% Turing-unstable" is
+    withdrawn; the strict figure is 0% (docs/DECISIONS.md D-EVID-11)."""
     g = np.random.default_rng(seed)
     m = RNGRN(N=N, seed=seed)
     with torch.no_grad():

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # pre-push: run the test suite locally before anything leaves the machine.
 #
-# This is the local stand-in for CI. Enable it once per clone with:
+# This is the local stand-in for CI. Enable it ONCE PER REPOSITORY (local config is shared
+# across worktrees — a worktree's .git is a pointer file, not a config store) with:
 #
 #     git config core.hooksPath .githooks
 #

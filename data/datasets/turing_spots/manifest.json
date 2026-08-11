@@ -1,0 +1,29 @@
+{
+  "dataset_id": "turing_spots",
+  "n_samples": 5,
+  "sample_keys": [
+    "sample_0000",
+    "sample_0001",
+    "sample_0002",
+    "sample_0003",
+    "sample_0004"
+  ],
+  "frame_shape": [
+    3,
+    512,
+    512
+  ],
+  "splits": {},
+  "observable_key": "final_frame",
+  "answer_key_keys": [
+    "jacobian",
+    "x_star",
+    "D",
+    "interaction_matrix",
+    "kstar"
+  ],
+  "checksum": "fbb125b704e22057",
+  "provenance": {
+    "source": "manually placed; indexed by scan"
+  }
+}

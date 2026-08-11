@@ -179,7 +179,7 @@ when the hardcoded `L=100.0` bug was fixed).
 | `robustness_cloud` draw | ~**59 ms**, serial |
 | `eval.rollout.simulate` at 96×96 | ~4.2 ms/step × ~128k steps = ~**9 minutes** per field (14 min at the 200k clip) |
 | exp11 robustness baseline, 127 samples × 4 σ × 400 draws | ~60 s (vectorised numpy) |
-| test suite | 551 passed + 1 skipped, ~3 min 50 s via the pre-push hook (re-measured 2026-08-11, sandbox disabled). Was 420 on 2026-08-04 — re-measure rather than trusting this cell |
+| test suite | 557 passed + 1 skipped, ~2 min 55 s via the pre-push hook (re-measured 2026-08-11, sandbox disabled). Was 420 on 2026-08-04 — re-measure rather than trusting this cell |
 
 The rollout figure is the one that bites: an earlier brief assumed ~1.9 s, off by three
 orders of magnitude. Never roll out inside a per-run scoring path.

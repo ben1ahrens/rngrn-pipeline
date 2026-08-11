@@ -2472,6 +2472,57 @@ generator stable without a config edit" — it does not, for any diffusion-domin
 **This also means the README quickstart is broken**, since its first command is
 `rngrn generate-data --config configs/milestone1_schnak.yaml`. README now says so inline.
 
+---
+
+**FIXED 2026-08-11, and a SECOND defect found underneath it.** Owner instruction: fix the
+solver, with the steer that "dt should be around 0.001" — which the measurement above
+confirms exactly (the explicit bound is 6.2e-4 / 1.5e-3).
+
+**The fix.** Making the old fully-explicit scheme CFL-safe would have cost 2.6–6.5 M steps
+per frame (~1.4–3.6 h at the measured 2 ms/step). Instead `simulate_to_attractor` now solves
+the diffusion half **exactly** in Fourier space (Lie-split IMEX, `exp(-D k^2 dt)`), which
+removes the diffusion stability constraint outright rather than paying it. `stable_dt()` still
+computes and enforces the explicit bound for any caller integrating explicitly, and that bound
+is what `tests/test_reference_solver.py` pins. A convergence check was added so the function
+stops when the field stops moving instead of always burning the horizon; its `atol=1e-6` is
+calibrated, not inherited — the measured change-rate floor is 4.2e-7 (gierer_meinhardt, which
+never reaches 1e-8) and 4.4e-13 (schnakenberg).
+
+**Result: both frames now generate.** gierer_meinhardt ~32 s and schnakenberg ~16 min per
+128x128 frame, both finite, both patterned (contrast 0.90 / 1.43).
+
+**THE SECOND DEFECT — the output is stable but NOT dt-converged. Status: UNCALIBRATED, OPEN.**
+Refining `dt -> dt/4` moves gierer_meinhardt's contrast ~35 % (0.891 -> 0.579) and shifts k\*
+by a whole FFT bin (0.5368 -> 0.4785). **Read against its control**, as §8 requires: 6 seeds at
+fixed `dt` spread only **2.6 %** with k\* pinned to a single bin. The dt dependence is
+therefore ~13x the seed variation and is a real integration error, not attractor selection.
+
+Two candidate fixes were tried and **both rejected on measurement**:
+- *Symmetric (Strang) splitting instead of Lie.* No measurable improvement — 34 % -> 35 % —
+  while costing an extra FFT pair per step (gierer_meinhardt 31.7 s -> 39.1 s at 128²). Owner
+  instruction, given the null result: drop back to Lie. **The shipped scheme is Lie.**
+- *RK2 midpoint reaction substep,* to stop the Euler substep capping the order at O(dt).
+  **Worse:** at the shipped dt it destroyed pattern formation entirely, contrast -> 0.000.
+
+**The shipped timestep is the outlier, not the refinements.** Across both schemes and both
+refinement levels the contrast clusters at **0.45–0.58** (Lie dt/4 0.577; RK2 dt/4 0.453,
+dt/16 0.474), while the shipped dt alone gives **~0.88**. Whatever the correct answer is, it is
+much closer to the refined cluster than to what this generator currently produces.
+
+So the dominant error is **not** splitting order, and is not yet diagnosed. Consequence, stated
+plainly: frames from this path are fine for plumbing and for morphology, but **no k\* or
+contrast value measured from them may be quoted as a reference number** until this is closed.
+That is also why the `~15%` tolerance stays UNCALIBRATED rather than being calibrated now — the
+frames it would be calibrated against are themselves not converged.
+
+**A separate resolution finding, recorded so it is not rediscovered.** At the shipped
+`L=100, resolution=128`, schnakenberg's pattern has wavelength ~1.8 against `dx = 0.78` — only
+**2.3 pixels per wavelength**, barely above the Nyquist limit of 2. That is a data-quality
+ceiling set by the config, not by the solver; gierer_meinhardt is comfortable at ~15 px/wavelength.
+
+**NOT ESTABLISHED.** What causes the dt dependence; which dt (if any) gives the correct
+attractor; and therefore what a calibrated Milestone-1 k\* tolerance would be. All open.
+
 **So the tolerance is unreachable, not merely unmeasured.** A number cannot be calibrated
 against a frame that cannot be produced. `TUNING.md` now tags the knob `[UNCALIBRATED]` and
 names the divergence, so nobody tunes against it believing it is a real bar.

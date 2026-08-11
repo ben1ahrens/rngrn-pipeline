@@ -111,8 +111,8 @@ and `docs/` for per-branch handoffs.
   deleted. The account's Actions billing has lapsed, so runs are *skipped* and reported as
   failures that have nothing to do with the code. Do not diagnose those as code failures.
   Restoring CI = uncommenting the two triggers.
-- Current suite: **551 passed, 1 skipped**, all CPU, ~3 min 40 s to run (measured 2026-08-10 on
-  `feature/canonical-datasets` after the canonical-dataset work). Keep them green. The count in
+- Current suite: **557 passed, 1 skipped**, all CPU, ~2 min 55 s to run (measured 2026-08-11 on
+  `fix/reference-solver-cfl`; the +6 are the reference-solver regressions of D-EVID-17). Keep them green. The count in
   this line has been stale before — re-measure it rather than trusting it, and update it when
   it moves.
 - **Run the suite with the sandbox DISABLED.** `payload.h5` is on the sandbox read-deny list,

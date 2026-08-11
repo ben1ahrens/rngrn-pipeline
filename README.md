@@ -5,21 +5,26 @@ converged Turing-pattern image — the **inverse Turing problem**. The learnable
 object is a differentiable reaction–diffusion model (the RNGRN) whose weights
 *are* the recovered network.
 
-> **Status: TEMPLATE.** Every component of the six-stage pipeline is present, wired
-> together, and dry-runs end-to-end on CPU (**551 tests pass, 1 skipped, re-measured
-> 2026-08-11** with the sandbox disabled; all eleven CLI subcommands
-> run). It does **not** yet *recover* correctly — tuning the objective and proving the
-> milestones is the next stage, on a CUDA machine. See **[TUNING.md](TUNING.md)** for
-> the explicit list of knobs, stubs, and unproven science to work on.
+> **Status: TUNING — past template, short of a result.** Rewritten 2026-08-11; it had said
+> "TEMPLATE … the next stage, on a CUDA machine", which stopped being true weeks ago.
 >
-> **This banner is out of date and needs an editorial pass (flagged 2026-08-11).** The
-> "next stage" framing predates a great deal of work that has since happened on CUDA:
-> canonical dataset generation, the C1/C2 tuning campaigns, morphology scoring, and the
-> D-ratio prior are all recorded with dated evidence in
-> **[docs/DECISIONS.md](docs/DECISIONS.md)**, **[docs/PREREGISTRATION.md](docs/PREREGISTRATION.md)**
-> and **[docs/STATE_OF_THE_SCIENCE.md](docs/STATE_OF_THE_SCIENCE.md)**. Read those for where
-> the project actually stands; how to characterise overall status is the owner's call, so
-> the wording above is left rather than rewritten.
+> **What is done.** The six-stage pipeline is wired and runs (**557 tests pass, 1 skipped**,
+> re-measured 2026-08-11 with the sandbox disabled; all eleven CLI subcommands work). Real
+> tuning campaigns have run on real data: **133 recorded runs** across
+> `experiments/`, with run records, frozen configs, checkpoints and plottable arrays tracked
+> in git so every number is traceable to the run behind it. **39 dated decisions** are
+> recorded in **[docs/DECISIONS.md](docs/DECISIONS.md)**, including the C1/C2 tuning
+> campaigns, canonical dataset generation, morphology scoring and the D-ratio prior.
+>
+> **What is NOT done, stated as plainly as the above.** No pre-registered criterion in
+> **[docs/PREREGISTRATION.md](docs/PREREGISTRATION.md)** §3 has been declared met, and
+> criterion 3.1 (`topology_consistency`) has failed three independent ways. All 133 runs are
+> against `three_gene_qvar` or older sets — **nothing has yet been fitted against
+> `turing_spots`/`turing_labyrinth`**, which have been the pre-registered PRIMARY data since
+> 2026-08-10. So: the machine runs and is measured, the science is not yet proven.
+>
+> Read **[docs/STATE_OF_THE_SCIENCE.md](docs/STATE_OF_THE_SCIENCE.md)** for the evidence
+> ledger and **[TUNING.md](TUNING.md)** for the knobs, stubs and unproven science.
 
 ## The one non-negotiable rule — the firewall
 
@@ -73,7 +78,7 @@ tests/                   firewall audit · science anchors · end-to-end smoke
 
 ```bash
 pip install -e .            # torch, numpy, scipy, h5py, matplotlib, pyyaml, networkx
-pytest -q                   # 551 passed, 1 skipped: firewall + science anchors + scorers + smoke
+pytest -q                   # 557 passed, 1 skipped: firewall + science anchors + scorers + smoke
                             # RUN THIS WITH THE SANDBOX DISABLED. payload.h5 is on the sandbox
                             # read-deny list, so a sandboxed run fakes ~15 PermissionError
                             # failures that look exactly like code faults. See CLAUDE.md §3.
@@ -81,13 +86,13 @@ pytest -q                   # 551 passed, 1 skipped: firewall + science anchors 
 # the six-stage CLI (dry-run scale shown; drop the overrides for real runs).
 # NOTE: launch trainers through the memory guard — see CLAUDE.md §7a.
 #
-# !! BROKEN AS SHOWN (2026-08-11, D-EVID-17). The two `milestone1_*` reference frames
-# !! CANNOT BE GENERATED at their shipped defaults: solver.py caps dt by the reaction
-# !! Jacobian only and never by the diffusion CFL condition, so `generate-data` raises
-# !! `FloatingPointError: solver diverged` at step 29 (schnakenberg, Dv=40) and step 133
-# !! (gierer_meinhardt, Dv=100). Use a registry dataset instead, e.g.
-# !!     rngrn train --config configs/m3_registry.yaml    (data.source: registry)
-# !! The lines below are kept as the shape of the pipeline, not as a working quickstart.
+# generate-data was BROKEN until 2026-08-11 (D-EVID-17): the solver capped dt by the
+# reaction Jacobian only, never by diffusion, so both milestone1_* frames diverged.
+# Fixed by solving diffusion exactly in Fourier space; ~32 s (gierer_meinhardt) and
+# ~16 min (schnakenberg) per 128x128 frame.
+#   CAVEAT: the output is stable but NOT dt-converged — refining dt shifts the pattern
+#   contrast ~35 %, against a 2.6 % seed control. Fine for plumbing and morphology; do
+#   NOT quote a k* or contrast value from these frames as a reference number. D-EVID-17.
 rngrn generate-data --config configs/milestone1_schnak.yaml
 bash scripts/guarded_run.sh rngrn train --config configs/milestone1_schnak.yaml
 rngrn evaluate      --config configs/milestone1_schnak.yaml --run-id <run_id>

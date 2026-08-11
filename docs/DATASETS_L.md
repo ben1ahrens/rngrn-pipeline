@@ -89,6 +89,29 @@ rngrn scan-datasets --datasets-root data/datasets
 
 A 3-sample qvar set (seed 3) for fast pipeline smoke tests. Not for science.
 
+```
+python scripts/gen_tg3.py --mode smoke --dataset-id three_gene_qvar_smoke --seed 3 --procs 4
+rngrn scan-datasets --datasets-root data/datasets
+```
+
+`--mode smoke` fixes `want-per-topology=1`, `n_screen=1500` and restricts the topology list
+to `double_inhibitor, relay_chain, cross_repress` (`scripts/gen_tg3.py:520,548`), which is
+where the 3 samples come from.
+
+> **REGENERATED 2026-08-11, and NOT byte-identical to the original.** The payload created
+> alongside `three_gene_qvar` and `three_gene_multiL` on 2026-07-29 (`67a155d`) was never
+> harvested into the canonical store — the §6a failure — so only the manifest survived, and
+> the dataset could not be loaded in any checkout. Re-running the command above reproduces
+> the dataset's **structure** exactly (3 samples, frame shape `[3, 96, 96]`) but **not its
+> bytes**: the recorded checksum was `693715c7d7a82b19`, the regenerated payload is
+> `b881e667b8b9275b`. The cause is generator drift, not a broken seed — `scripts/gen_tg3.py`
+> has five commits between `67a155d` and `48441e4`, including a domain-size refactor and its
+> revert (`948281d`, `ac11847`). The manifest and `datasets.jsonl` now record the new
+> checksum, so the tracked record describes the bytes that actually exist. The leak-audit row
+> below was re-measured on the regenerated data and is unchanged at 50.0 %. Anything else
+> ever computed from the 2026-07-29 payload is **not** comparable to this one and should be
+> re-run. Recorded as D-DATA-1 in `docs/DECISIONS.md`.
+
 ## 3. Is the leak dead? — the headline number
 
 `k̂ = 6·2π/L`, median relative error against the stored `k_star`, computed by

@@ -2537,3 +2537,68 @@ it can be fixed deliberately. See `docs/FUTURE_WORK.md`.
 
 **Not established.** Whether the reference frames are recoverable at a smaller `dt`, and hence
 what a calibrated k\* tolerance for Milestone 1 would actually be. Both remain open.
+
+---
+
+### D-DATA-1 — `three_gene_qvar_smoke` regenerated 2026-08-11; NOT byte-identical to the original, and the tracked checksum now describes the new bytes
+
+**Date:** 2026-08-11. **Status:** DECIDED (regenerated, harvested, verified).
+**Decided by:** the implementing agent under §10 delegated authority, while making `main` green.
+No pre-registered pass condition is touched — this dataset is documented as *"for fast pipeline
+smoke tests. Not for science."* (`docs/DATASETS_L.md:88-90`) and nothing in `configs/`, `tests/`,
+`scripts/` or `experiments/` references it.
+
+**The gap.** The dataset was generated on 2026-07-29 alongside `three_gene_qvar` and
+`three_gene_multiL` (`67a155d`). `manifest.json` and the `datasets.jsonl` row were committed;
+the payload never reached the canonical store. That is the §6a failure exactly — manifests are
+tracked, `payload.h5` is not — so every checkout listed the dataset and no checkout could load
+it. `scripts/link_payloads.sh` reported `NO CANONICAL PAYLOAD` and correctly refused to create a
+dangling symlink. §6a's third requirement was also unmet: `docs/DATASETS_L.md:90` recorded the
+seed in prose but never the invocation, so the recipe had to be reconstructed from
+`scripts/gen_tg3.py:520,527,548`.
+
+**Regenerated, and it does not reproduce the original bytes.**
+
+```
+python scripts/gen_tg3.py --mode smoke --dataset-id three_gene_qvar_smoke --seed 3 --procs 4
+```
+
+| | recorded 2026-07-29 | regenerated 2026-08-11 |
+|---|---|---|
+| checksum | `693715c7d7a82b19` | `b881e667b8b9275b` |
+| n_samples | 3 | 3 |
+| frame_shape | `[3, 96, 96]` | `[3, 96, 96]` |
+
+**The cause is generator drift, not a broken seed.** `scripts/gen_tg3.py` has five commits
+between `67a155d` and `48441e4`, including a domain-size refactor and its revert (`948281d`,
+`ac11847`). The SHA-256 seeding introduced by unit 11 is what makes a *given* generator version
+reproducible; it cannot make two different versions agree. `--procs` is not the cause — seeding
+is not process-salted.
+
+**What was verified.** The leak-audit row in `docs/DATASETS_L.md:102` was re-measured on the
+regenerated payload with `--mode audit` and is unchanged on every column: n = 3, median rel. err
+of `6·2π/L` = 50.0 %, within 1 % = 0.0 %, oracle best fixed `p` = 3 → 25.0 %. So the dataset
+differs in bytes while being statistically identical on every published metric. All 13 other
+datasets were checked with `registry._checksum` against their manifests and every one matches —
+this was the only mismatch, so no other drift is being masked. The payload was copied to the
+canonical store and its checksum re-verified there.
+
+**What changed meaning (§10.4).** The tracked checksum for this dataset. `manifest.json` and a
+new `datasets.jsonl` row now record `b881e667b8b9275b`. Any number ever computed from the
+2026-07-29 payload is **not** comparable to one computed from this payload and must be re-run.
+Nothing in the repository is known to be in that position — no run record references this
+dataset — but the claim is "none found", not "none exists".
+
+**Rejected.** (a) *Leaving it broken.* It is a documented, deliberate artifact and the fix is
+three samples and 54 s of wall time. (b) *Retiring it — deleting the manifest and index row.*
+Defensible, since nothing depends on it, but it destroys a documented smoke-test capability to
+avoid a bookkeeping update. (c) *Keeping the old checksum in the manifest.* Rejected outright:
+the checksum is never verified at load time (`grep` finds no comparison site), so a stale value
+is not a loud failure but a silent lie about what is on disk — precisely what §8 forbids.
+(d) *`rngrn scan-datasets --refresh`.* It rebuilds all 14 manifests and appends 14 index rows,
+which would have masked any other dataset's drift inside an unreadable diff.
+
+**Not established.** Whether the 2026-07-29 payload can be reproduced at all — that would need
+`gen_tg3.py` checked out at `67a155d` and re-run, which was not attempted. Whether any other
+generated dataset has silently drifted from its generator version; only checksum-vs-manifest was
+audited, and all 13 pass that check, which is a weaker statement.

@@ -27,6 +27,15 @@
       "Read(./data/datasets/**/payload.h5)"
     ]
   },
+  "sandbox": {
+    "filesystem": {
+      "allowWrite": [
+        "~/projects/personal/rngrn/worktrees",
+        "~/projects/personal/rngrn/rngrn-pipeline/.git/worktrees",
+        "~/projects/personal/rngrn/rngrn-pipeline/.git/refs"
+      ]
+    }
+  },
   "hooks": {
     "PreToolUse": [
       {

@@ -22,6 +22,14 @@ RECOVERY_SIDE = [
     "losses/terms.py", "losses/total.py", "losses/weighting.py",
     "eval/rollout.py", "eval/numerics.py", "eval/dynamical.py",
     "eval/analysis.py", "eval/topology.py",
+    # eval/lifted.py classified 2026-08-11. It undoes the QSS reduction and integrates the
+    # full (x, GA, GR) system, so it is a pure function of the RECOVERED model's own
+    # parameters — it imports model.py, losses/terms.py, eval/numerics.py and observables.py,
+    # all recovery-side, and nothing from scoring/, data.* or AnswerKey. It is the
+    # state-space promotion of eval/dynamical.py::lift_check, which is already on this list.
+    # Recovery-side is also the STRICTER choice: it subjects the module to the import audit,
+    # whereas scoring-side would exempt it from a check it does not need exempting from.
+    "eval/lifted.py",
 ]
 
 # SCORING-side modules under losses/ and eval/. These MAY read the answer key; they are

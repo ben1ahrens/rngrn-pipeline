@@ -12,7 +12,7 @@ The harness for both experiments is built and wired. **Corrected 2026-08-04: it 
 dry-runs for all four arms.** `expA_hidden_channel` and `expB_overparam` are both `N=3, m=2`,
 and `recover.py:376` now raises `ValueError` when `m < N` and the stationarity residual has
 weight 0 — which is the default (`configs/base.yaml:33`, `resid: 0.0`). Only the two control
-arms run as written; see the corrected recipe below. (551 passed, 1 skipped, re-measured
+arms run as written; see the corrected recipe below. (557 passed, 1 skipped, re-measured
 2026-08-11; was 420 when this was written.) **Nothing is tuned and no scientific
 result has been produced** — the dry run uses 6 Adam steps and recovers nothing meaningful.
 That is expected and correct for this stage; do not present dry-run numbers as findings.
@@ -171,7 +171,7 @@ more than the code does — a prior audit caught overstated provenance in this r
 ```bash
 pip install -e ".[dev]"
 export KMP_AFFINITY=disabled OMP_NUM_THREADS=1   # only if torch aborts with OMP Error #179
-pytest -q     # expect 551 passed, 1 skipped (2026-08-11). Run with the SANDBOX DISABLED:
+pytest -q     # expect 557 passed, 1 skipped (2026-08-11). Run with the SANDBOX DISABLED:
               # payload.h5 is on its read-deny list and a sandboxed run fakes ~15 failures.
 
 # datasets are local and gitignored — see docs/LOCAL_DATA_SETUP.md

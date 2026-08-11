@@ -128,8 +128,16 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
 
 ## Stage 4 — validation / milestones (validate.py, train.fit)
 
-- **[TUNE] Milestone 1 (N=m=2)** — `configs/milestone1_{gm,schnak}.yaml`. Get recovery to land
-  in-regime and match k* within ~15% on both reference frames. This is where you tune §2–3 knobs.
+- **[TUNE/UNCALIBRATED] Milestone 1 (N=m=2)** — `configs/milestone1_{gm,schnak}.yaml`. Get
+  recovery to land in-regime and match k* within ~15% on both reference frames. This is where
+  you tune §2–3 knobs.
+  **The `~15%` is UNCALIBRATED and currently unreachable (D-EVID-17, 2026-08-11).** It dates
+  from the initial template commit and nothing has ever measured it. Worse, neither reference
+  frame can be generated at the shipped defaults: `simulate_to_attractor` at
+  `resolution=128, T_max=4000, dt=0.1` raises `FloatingPointError: solver diverged` at step
+  **133** for `gierer_meinhardt` and step **29** for `schnakenberg`. Fix the solver (or lower
+  `dt`) before treating this milestone as a bar — and calibrate the tolerance once frames
+  actually exist.
 - **[TUNE/IMPL] Milestone 2 (N=2, m=1)** — `configs/milestone2_gm_partial.yaml`. Latent-field
   inference is wired (`recover.py`, the `m<N` branch: latent fields init from the smoothed observed
   mean, co-optimised). Tune the latent init/regularisation and measure identifiability degradation

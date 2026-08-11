@@ -467,8 +467,13 @@ drift, **this file wins and the other gets fixed**.
 - **Agents** (`.claude/agents/`) — four read-only reviewers for invariants the suite cannot
   check: `firewall-auditor` (§5), `evidence-auditor` (§8, §10), `numerics-reviewer` (§7, §7c),
   `merge-damage-hunter` (§11).
-- **Skills** (`.claude/skills/`) — `run-training` (§7a, §7b), `new-worktree` (§2, §11),
-  `record-decision` (§10), `harvest-dataset` (§6, §6a).
+- **Skills** (`.claude/skills/`) — house skills `run-training` (§7a, §7b), `new-worktree`
+  (§2, §11), `record-decision` (§10), `harvest-dataset` (§6, §6a); plus **vendored** skills
+  copied verbatim from upstream and pinned to a commit — `optimize-for-gpu` (§7's batching
+  direction) and `statistical-analysis` (calibrating the §8 UNCALIBRATED thresholds). Vendored
+  skills are **never edited in place** — an edit forks them silently and the next update
+  overwrites it. Provenance, per-repo caveats, the update procedure, and what was considered
+  and rejected are in `.claude/skills/VENDORED.md`.
 - **Rules** (`.claude/rules/`) — `pre-merge-checklist.md` and `reporting-numbers.md`, the
   checklist forms of §3/§5/§8/§11 and §8 respectively.
 - **Hook** (`.claude/hooks/guard_trainer.py`) — refuses any Bash command that launches

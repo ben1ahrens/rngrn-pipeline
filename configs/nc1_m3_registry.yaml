@@ -4,7 +4,10 @@
 _base_: [base.yaml]
 data:
   source: registry
-  dataset_id: three_gene_val
+  # was `three_gene_val` until 2026-08-10; repointed to the canonical training source with
+  # m3_registry.yaml (D-CANON-4). The legacy set may not support a k* claim. Callers such as
+  # scripts/c2_cell.sh override this with --dataset-id anyway.
+  dataset_id: turing_spots
   sample_key: sample_0000
   # no L here: the sample's own L attr is authoritative (this dataset spans many
   # domain sizes). Set data.L_override only to cross-check one specific sample.

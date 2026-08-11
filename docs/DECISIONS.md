@@ -2012,3 +2012,411 @@ The axis is not in C1's original eight and had never been tried by this unit. C2
 the serial and the batched path before any cell using it is believed, per the standing rule
 that five silent no-ops have already been found in this codebase. Reordering a queue changes
 no threshold and drops no cell.
+
+### D-TDPLOT-1 — "patterned" and "periodic" are scored as two separate verdicts, and the periodicity threshold is calibrated on the corpus
+*2026-08-10. Unit: training-data visual inspection (`feature/training-data-plots`).*
+*Evidence: `notebooks/training_data_simulations.ipynb` §2/§2b, run over all 413 registered*
+*samples; code in `scripts/td_figures.py::patterning_verdict`; tests in*
+*`tests/test_td_figures.py`.*
+
+**The decision.** The inspection notebook reports two independent booleans per sample rather
+than one:
+
+- `has_contrast` — `cv >= 0.05`, the spatial coefficient of variation of species 0. This is
+  **not** a new threshold: it is the generator's own accept/reject rule
+  (`scripts/gen_tg3.py:240-241` discards a simulation with `cv0 < 0.05` as "collapsed to
+  homogeneous"). Reusing the identical number means the verdict carries the meaning it had
+  at generation time.
+- `periodic` — the RAPS peak sits at bin index `>= PEAK_BIN_MIN = 3`.
+
+**`has_contrast` is NEARLY A TAUTOLOGY on this corpus and is recorded as such.** Every
+generator here applies the same `cv < 0.05` reject rule, so "413/413 clear `cv >= 0.05`,
+corpus minimum 0.0633" is what the filter does, not evidence about the data. An earlier
+draft of this branch reported it under "Established"; that was wrong and is corrected. What
+the check *does* establish is payload integrity — the recomputed cv matches the stored
+`cv0` attribute to <= 2.2e-07 across all 413 samples. The informative screen is `periodic`.
+
+**Naming collision, avoided deliberately.** The key is `has_contrast`, **not** `patterned`,
+because `src/rngrn/eval/rollout.py:272` already owns `patterned` for a different quantity —
+rollout amplitude against `max(1e-3, 0.02*|x*_0|)` — and *that* one is pre-registered
+(`docs/PREREGISTRATION.md` §3.5a). The two are never comparable, and no number from this
+notebook may be read against a rollout `patterned` rate.
+`tests/test_td_figures.py::test_the_contrast_key_does_not_collide_with_the_prereg_patterned_name`
+holds the separation.
+
+**Why two and not one.** `cv` asks "is there spatial contrast?" and never "is the contrast
+**periodic**?" A field made of a handful of isolated blobs clears `cv` comfortably while its
+power spectrum decays monotonically from the lowest resolvable bin — there is no interior
+peak, hence no characteristic wavelength, hence no Turing pattern. Merging the two into one
+boolean would have hidden exactly the case the corpus turned out to contain.
+
+**How the threshold was set.** The RAPS peak-bin distribution over all 413 registered
+samples, measured 2026-08-10 — the FULL distribution, summing to 413:
+
+```
+bin:    1   2    3    4    5    6    7    8    9   10   11   12   13   14
+count:  1   0   14   44   78  155   49   12   15   14    8    9   11    3
+                                                  min=1  1st pct=3  median=6  max=14
+```
+
+> **Correction, same day.** The first version of this entry printed the table capped at
+> bin 9 with the residue mislabelled `9+`. That silently dropped the 45 samples at bins
+> 10–14 and summed to 368, not 413. The cap came from the notebook's own generating
+> expression (`range(pb.min(), min(pb.max(), 9) + 1)`), now removed and replaced by an
+> assertion that the histogram accounts for every sample. The gap-at-bin-2 conclusion is
+> unaffected — everything omitted lay further *above* the threshold — but a table in this
+> register that drops 11 % of the corpus is a defect regardless.
+
+Exactly one sample sits at bin 1; **bin 2 is empty**; every other sample is at bin 3 or
+above. `PEAK_BIN_MIN = 3` therefore falls inside a genuine gap in the data rather than
+cutting through a populated region. Had the distribution been continuous across bins 1–3 the
+screen would have been reported as unusable instead of adopted.
+
+**"Calibrated" would be too strong a word, so the limits are recorded here rather than left
+implicit** (CLAUDE.md §8):
+
+- The threshold is set **descriptively**, from the corpus distribution. On real data its
+  decision boundary has been exercised **n = 1** times: one sample is separated, 412 sit on
+  the other side. That makes it a corpus-specific outlier detector, not a transferable
+  periodicity criterion.
+- **`PEAK_BIN_MIN = 2` gives an identical partition** on this corpus, and `4` would flag 15
+  samples. The threshold is insensitive downward and brittle upward.
+- `peak_bin >= 1` is **structural, not a property of the data**: `observables.raps` forces
+  `power[0] = 0`, so bin 0 can never win. "min = 1" is a floor of the estimator.
+- **The known-answer controls are synthetic and live in the tests, not in the corpus.**
+  `tests/test_td_figures.py` passes a synthetic periodic field (must clear the screen) and a
+  synthetic isolated-blob field (must fail it) through this exact code path. No *real*
+  sample of independently-known periodicity was available to read it against.
+
+**What it found.** `three_gene_qvar/sample_0032` in a domain of L = 177.8 — ~95 % of pixels
+within 1 % of the field's *dynamic range* above its minimum (90.4 % within 1 % of the
+minimum *value*; the earlier wording of this sentence conflated the two), species 1 and 2
+flat to `cv = 0.002`, and a
+monotonically decaying spectrum. The generator labelled it `morphology = 'spots'` because
+`gen_tg3.classify` assigns `spots` on `area_fraction < 0.34` alone, with **no lower bound on
+area fraction or component count** — a condition an almost-empty field satisfies trivially.
+It is 1/413 (0.24 %) of the corpus and 1/34 (2.9 %) of `three_gene_qvar`.
+
+**What was rejected.** (a) A "fraction of pixels pinned at the minimum > 0.6" screen: it
+flags 8 samples, of which only one is the real defect. Six are legitimate dense spot
+patterns — e.g. `three_gene_qvar/sample_0023`, 83 connected components with a clean spectral
+peak at bin 9. The seventh is `three_gene_classical_val/sample_0007`, the marginal 4-spot
+case discussed in `docs/HANDOFF_training_data_plots.md` §5: it clears the periodicity screen
+at bin 4 but is *sparse*, not dense, so it is neither a defect nor a dense-spot exemplar.
+The eighth is `sample_0032` itself. So the screen over-flags 7:1 and was rejected.
+(b) Folding periodicity into the cv verdict — that would silently redefine a
+number the generator already owns. (c) Tightening `gen_tg3.classify`'s `spots` rule: that
+would change what every existing dataset's stored `morphology` attribute means, and is a
+generator change, not an inspection change.
+
+**Explicitly NOT decided here.** Whether `sample_0032` should be excluded from training. It
+is reported, not acted on — dropping a sample changes what every `three_gene_qvar` number
+means and is the owner's call, not this unit's.
+
+**Scope.** This decision governs an inspection/reporting notebook only. It introduces no
+recovery criterion and touches nothing on the recovery side of the firewall.
+
+### D-CANON-2 — `stripes` is not a stable pattern class in this generator; it is largely a small-box artefact
+*2026-08-10. Unit: canonical datasets (`feature/canonical-datasets`).*
+*Evidence: `scripts/canon_select.py::compute_stability` over all 57 re-simulatable systems;*
+*probe simulations recorded in `data/canonical_stability_cache.json`.*
+*Status: **DECIDED** (the measurement); the remedy is **OPEN**.*
+
+**This changes how existing `stripes` results should be read, so it is announced rather than
+filed quietly** (CLAUDE.md §10).
+
+**The measurement.** A system's morphology label was re-tested by re-simulating it at a
+different periods-per-box and asking whether the class survives. For `three_gene_multiL` the
+probe is free — those systems were already simulated at p ∈ {4,7,10,13}. For
+`three_gene_qvar` it costs one extra 96×96 run per system.
+
+- **9 of 23 multiL systems (39 %) change class when *only* the box size changes.** Every
+  single flip is `labyrinth ↔ stripes`. No other pair ever flips.
+- **All 5 gated `qvar` stripes candidates flip to `labyrinth`.** Zero stripes survive gates
+  plus stability anywhere in the re-simulatable corpus.
+- **Instability is graded by class**, over the full probed pool of 47 gated systems:
+
+  | class | stable | flips | flip rate |
+  |---|---|---|---|
+  | `spots` | 27 | 1 | **3.6 %** |
+  | `labyrinth` | 10 | 4 | **29 %** |
+  | `stripes` | 0 | 5 | **100 %** |
+
+  The single `spots` flip is `three_gene_qvar:24`. (An earlier draft of this entry said
+  "spots never flips" — that was wrong, read off a truncated log, and is corrected here.
+  The graded gradient is the stronger result anyway: it is exactly what a box-size artefact
+  predicts, since `spots` is the class furthest from the anisotropy cut and `stripes` sits
+  on it.)
+
+**The mechanism, and why it is not a bug.** Anisotropy `A` is a nematic order parameter over
+the dominant Fourier ring. A small box admits few orientations, so the pattern is forced onto
+a near-single axis, `A` rises above 0.55, and `classify` says `stripes`. Give the same system
+room and the pattern relaxes into a labyrinth. The corpus bears this out:
+
+```
+periods/box:   3-4    5-6    7-8   9-10  11-14
+n:              31      5     31     26     33
+median A:    0.122  0.394  0.087  0.072  0.048
+% stripes:     26%    20%    16%     8%     0%
+```
+
+`corr(periods_per_box, anisotropy) = -0.312`. Stripes samples sit at **median p = 4.5**
+(range 3–10) against **9.5** (range 3–14) for everything else, and **no sample at p ≥ 11 is
+ever labelled `stripes`**.
+
+**Consequences.**
+1. `stripes` is **not** shipped as a canonical dataset. The canonical range p = 16..32 lies
+   entirely above the regime where the class has ever occurred, so a "stripes" set generated
+   there would ship the artefact, not the pattern.
+2. The stored `morphology` attribute on the 49 `stripes` samples in the corpus is **partly a
+   statement about their box size**. Any result stratified on `stripes` inherits that.
+3. This is a second, independent reason for the already-documented weakness of the class:
+   49/413 of the corpus, only 7 among the 127 samples every scorer calibration rests on, and
+   33.3 % held-out accuracy. It was never a robust class, and now there is a mechanism.
+
+**What was rejected.** (a) Lowering a gate to reach 5 stripes — the gates are what make the
+strata mean anything. (b) Shipping stripes at low p anyway — it would sit at a 6–12 % k\*
+precision floor against 1.6–3.1 % for the other sets, non-comparable, and would still be the
+artefact. (c) Redefining `classify` to make stripes L-invariant — that would change the
+meaning of the `morphology` attribute on all 413 existing samples, which D-TDPLOT-1 already
+considered and rejected as a generator change rather than an inspection change.
+
+**Left OPEN, deliberately.** Whether genuine, box-independent stripes are reachable at all in
+this generator. There is a principled lever: spots-vs-stripes selection is governed by the
+quadratic coefficient of the amplitude equation, and Hill kinetics are generically asymmetric
+— which is the likely reason `spots` dominates at 54 % of the corpus. Screening for
+near-symmetric systems is the obvious experiment and has not been run. **Nothing here claims
+that real Turing stripes are unreachable**, only that *this* generator's `stripes` label, in
+*this* corpus, does not survive a change of box.
+
+---
+
+### D-CANON-1 — two canonical datasets at 512×512, selected by margin and label stability
+*2026-08-10. Same unit. Evidence: `data/canonical_selection.json`, `scripts/canon_select.py`,*
+*`scripts/canon_generate.py`, tests in `tests/test_canon_{select,generate}.py`.*
+
+**The decision.** Ship `turing_spots` and `turing_labyrinth`, 5 distinct 3-gene systems each,
+at 512×512, generated once and reused for all simulated-data experiments. `stripes` is
+excluded per D-CANON-2; `holes` is not shipped as its own class because only 3 gated, stable
+hole systems exist, below the 5 required.
+
+> **Corrected 2026-08-10 by D-CANON-5.** This paragraph originally said `holes` was
+> "structurally unreachable… the observed channel is positively skewed by construction".
+> That is **wrong**. Hole patterns are common — 7 of 57 systems produce them, several with
+> negative skew, and 3 of the 5 shipped `turing_labyrinth` samples are hole patterns. What is
+> unreachable is the *label*: `classify` needs `phi > 0.66` to say `holes`, which a connected
+> bright matrix cannot reach because much of the matrix falls below the `z > 0.4` line. The
+> corpus containing zero samples *labelled* `holes` is a fact about the classifier, not about
+> the physics, and this entry read it the wrong way round.
+
+**The eligible pool is 57 systems, not 413.** Re-simulating at a new resolution needs the
+generating kinetics *and* the simulation seed. Only `three_gene_qvar` (34 systems) and
+`three_gene_multiL` (23) carry both. The 127 legacy `three_gene_*` samples carry neither —
+their generator lived in a gitignored tree — and the 160 `*_classical_*` samples carry
+kinetics but no seed and are not 3-gene GRNs.
+
+**Selection rule**, deterministic and seeded: admission gates (`peak_bin ≥ 3`, `cv ≥ 0.30`,
+positive class margin) → rank by distance from the class boundary → require the label to
+survive a probe at a different box size → prefer already-burned systems for tuning slots.
+
+`peak_bin ≥ 3` is **load-bearing, not cosmetic**: ranking by margin alone puts
+`three_gene_qvar/sample_0032` *first* among spots, because its area fraction of 0.032 gives
+it the largest possible distance below the 0.34 cut — and that sample is the one confirmed
+non-Turing frame in the corpus (D-TDPLOT-1). Without the gate, the worst sample available
+would have become a canonical exemplar.
+
+**Why 512 and not 1024.** Recovery is nearly pixel-count-free — every loss term lives on
+N×N objects, not on the image — so a large frame is cheap to *fit*. The cost is the post-hoc
+ETDRK4 morphology rollout, whose step count is reaction-rate limited and therefore scales
+purely with pixel count: ~45 s typical / ~17 min worst at 512, against ~3 min / ~70+ min at
+1024 with `eval/numerics._phi_contour` peaking at 4–6 GB, on a host with five recorded OOM
+kills. `eval/lgen_eval.grid_for_L` also refuses grids above 512 by design.
+
+**Why periods-per-box is drawn, never fixed.** With a single p, `k* = p·2π/L` inverts exactly
+and the domain size becomes the label again — the leak that made `kstar_rel_err` a gate
+rather than evidence on the legacy data (D6). Each dataset draws 5 *distinct* p from
+{16..32}, seeded with SHA-256 so the draw is process-independent.
+
+**Measured properties of the shipped sets.** px/wavelength 17.1–30.1, all far above the 6.0
+floor of D15, giving a k\* half-bin precision of 1.6–3.1 % against 8.3 % on the legacy data —
+the first time the pre-registered `kstar_phys_cv ≤ 0.10` bar sits meaningfully above the
+estimator's own noise floor rather than on it. Domain sizes run 245.8–794.0.
+
+**A 96²-era bound was relaxed, deliberately and narrowly.** `simulate_and_classify` asserted
+`18 ≤ L ≤ 220`; all ten canonical samples exceed it. Those bounds encode *resolution* at a
+96×96 grid, and `L` enters the physics only as a unit (CLAUDE.md §7c) — the real constraint
+is pixels-per-wavelength, which `canon_generate` now enforces directly at
+`PPW_MIN/PPW_MAX = 16/32`. The bound is now a parameter defaulting to the old values, so
+every existing caller is bit-for-bit unaffected.
+
+**Stored, and not stored.** Final frame at full resolution, all three channels, plus a cv
+time-trace for the saturation gate. **No trajectory** — nothing under `src/rngrn/` reads it,
+so at 512² it would cost 6× the storage for data no consumer touches. All three channels are
+kept even though a real photograph gives one, so `m=1` vs `m=3` stays a controlled comparison
+on identical data rather than two different datasets.
+
+**Split declared before generation**, per `docs/PREREGISTRATION.md`: 2 tuning / 3 held-out per
+class, with tuning slots seeded from systems recovery experiments have already burned and
+held-out slots restricted to systems never run.
+
+**NOT established here.** No recovery result; nothing is fitted. "Patterned" is not
+"Turing-unstable" — σ(k) is evaluated nowhere in this unit. The `m<N` objective remains an
+open problem (exp06 measured the residual as harmful, 9/9 cells collapsed), and `raps` still
+assumes a periodic tile with no windowing, so a cropped real image will bias k\* silently.
+The saturation tolerance (1 % over the last 20 % of the run) is a convergence tolerance, not
+a calibrated threshold, and is enforced as a fail-loud gate rather than used to judge
+anything.
+
+### D-CANON-3 — periods-per-box is a geometric ladder over {8..40}, checked against a leak bar
+*2026-08-10. Same unit. Evidence: `scripts/canon_select.py::draw_periods` /*
+*`oracle_leak_error`; tests in `tests/test_canon_select.py`; the measurement below.*
+
+**The decision.** Each canonical dataset's five periods-per-box are laid out as a geometric
+ladder across {8..40} with a seeded sub-rung offset, and the result is **checked** against
+`LEAK_MIN_ORACLE_ERR = 0.25` and rejected if it fails, rather than assumed adequate.
+
+**Why this needed a decision at all.** The obvious reading of "vary p so L does not encode
+k\*" is *draw distinct integers*. That is not sufficient, and the shortfall was measured on
+generated data rather than reasoned about in advance. A first attempt drew five distinct p
+i.i.d. from {16..32} and produced `{17, 22, 23, 24, 28}` for `turing_labyrinth`. An oracle
+blind predictor `k = q·2π/L` — one fixed integer q chosen *after* seeing the answers — fits
+that to **4.5 %** median error. The legacy leak scores 0.0 % and `three_gene_qvar` 45.5 %, so
+4.5 % sits far closer to the defect this project exists to have fixed than to the fix.
+
+The cause: the predictor's relative error is exactly `|q − p| / p`, so protection comes from
+spread in **log** space. Measured over 4000 random 5-sample draws:
+
+| p range | spread | median oracle error | draws below 15 % | px/wavelength at 512 | k\* floor |
+|---|---|---|---|---|---|
+| 16–32 | 2.0× | 9.1 % | **95 %** | 16.0–32.0 | 1.6–3.1 % |
+| 8–40 | 5.0× | 15.0 % | 48 % | 12.8–64.0 | 1.2–6.2 % |
+| 3–14 (legacy qvar) | 4.7× | 20.0 % | 27 % | 36.6–170.7 | 3.6–16.7 % |
+
+{8..40} gives a wider relative spread than the legacy `qvar` range while keeping every sample
+better than the legacy data on **both** resolution and k\* precision. Replacing the i.i.d.
+draw with a geometric ladder then lifts the realised figures well above the random median:
+
+| dataset | periods | spread | oracle error |
+|---|---|---|---|
+| `turing_spots` | 8, 11, 16, 24, 36 | 4.5× | **37.5 %** |
+| `turing_labyrinth` | 8, 10, 15, 23, 35 | 4.4× | **33.3 %** |
+
+**The limit, recorded because it does not go away.** At n=5 no range decouples strongly — an
+oracle single q can always sit near the middle of five values, and even the legacy {3..14}
+range only reaches 20 % at n=5 against 45.5 % at n=34. **Corpus-level `kstar_rel_err`
+medians are therefore not meaningful on a five-sample dataset at any period range.** These
+sets support per-sample k\* claims; they do not support a corpus median.
+
+**What was rejected: fixing L outright.** A constant L, chosen without reference to any
+system's k\*, would make the leak *structurally absent* rather than small, and would make the
+periods emergent from the physics. It was implemented and measured — L = 300 puts all 37
+gated candidates at 9.1–30.7 emergent periods and 16.7–56.0 px/wavelength — and then
+reverted on owner instruction. The reasoning: `λ = 2π/k*` is set by the network's Jacobian
+and diffusivities either way, so the *periodicity of the pattern* is always the physics.
+Choosing `L = p·λ` only sets how much of it is in view — a field-of-view choice of the kind a
+microscope makes. Commit `948281d` and its revert `ac11847` hold the implementation if the
+question is reopened.
+
+---
+
+### D-CANON-4 — the canonical sets become the training data source
+*2026-08-10. Owner instruction. Status: **DECIDED**.*
+
+**The decision.** From 2026-08-10, `turing_spots` and `turing_labyrinth` are the training
+data source for simulated-data work. `docs/PREREGISTRATION.md` §1 is amended to match.
+
+**What this does not do.** `three_gene_qvar` is not deprecated and none of its numbers are
+withdrawn. It is the provenance of every canonical system — each canonical sample is a
+re-simulation of a qvar or multiL system at 512² — and existing results against it stand. It
+stops being where *new* headline claims are drawn from. `three_gene_multiL` keeps its
+cross-L role under §3.5a. The legacy and classical families are unaffected: still barred from
+k\* claims, still dormant respectively.
+
+**Two consequences that must be stated rather than discovered.**
+
+1. **The primary evidence base is now 10 samples, 6 of them held out**, against 26 held-out
+   in the `three_gene_qvar` split. This follows from the owner's requirement of the smallest
+   number of datasets, one per pattern type, and is not a defect. But it means **a per-sample
+   result is the unit of evidence**, and a median over five samples is not a corpus
+   statistic. Combined with D-CANON-3, `kstar_rel_err` medians must not be quoted from these
+   sets at all.
+2. **No config points here yet.** `configs/m3_registry.yaml`, `nc1_m3_registry.yaml`,
+   `expA_control_full.yaml` and `expA_hidden_channel.yaml` still name `three_gene_val`;
+   `expB_*.yaml` still name `two_gene_classical_val`. Repointing them is a separate change,
+   deliberately not made while generating the data, and it will change what those configs
+   measure — so it is announced here rather than done quietly.
+
+### D-CANON-5 — canonical morphology is MEASURED from the field; `turing_labyrinth` is a mixed class
+*2026-08-10. Same unit. Evidence: `scripts/phase_topology.py`, `tests/test_phase_topology.py`,*
+*`scripts/canon_annotate.py`; the cross-tabulation below over all 57 re-simulatable systems.*
+
+**Two decisions, one measurement.**
+
+**(a) The canonical classes are defined by measured phase topology, not by the generator's
+stored label.** `phase_topology.measure` splits the field at its Otsu threshold and asks two
+questions: which phase fragments into domains, and are those domains round or worm-like.
+Round bright islands in a connected dark matrix → `spots`; round dark voids in a connected
+bright matrix → `holes`; neither → `labyrinth`.
+
+**The corpus is NOT relabelled.** All 413 registered samples keep their stored `morphology`
+attribute, so no existing number changes meaning. The measured value is written *alongside*
+it, on the canonical payloads only, as `morphology_measured` plus the statistics behind it.
+
+**Why.** The generator's rule assigns morphology from the area fraction above a fixed
+contrast threshold. Cross-tabulated against measured topology over the 57 distinct
+re-simulatable systems:
+
+| stored label | → spots | → holes | → labyrinth |
+|---|---|---|---|
+| `spots` (29) | **28** | 0 | 1 |
+| `labyrinth` (17) | 3 | **7** | **7** |
+| `stripes` (11) | 2 | 1 | 8 |
+
+The `spots` label is reliable — 28 of 29. `labyrinth` is not: only 41 % of it is a labyrinth,
+and most of the rest is a **hole** pattern, a genuinely distinct morphology.
+
+**A correction to D-CANON-1, which was wrong.** That entry said `holes` is "structurally
+unreachable, because species 0 is the self-activator in all six topologies, so the observed
+channel is positively skewed by construction". **The patterns are not unreachable — 7 of 57
+systems produce them, several with negative skew.** What is unreachable is the *label*:
+detecting holes requires `phi > 0.66`, i.e. two thirds of all pixels more than 0.4 SD above
+the mean, but a connected bright matrix has its own spread and much of it falls below that
+line. The test can essentially never fire regardless of the field. The corpus contains zero
+samples *labelled* `holes` — which is a fact about the classifier, not about the physics, and
+D-CANON-1 read it the wrong way round.
+
+**(b) `turing_labyrinth` ships as generated, and it is a MIXED class.** Measured composition:
+
+| sample | stored | measured | bright domains / circularity | dark domains / circularity |
+|---|---|---|---|---|
+| `sample_0000` | labyrinth | **labyrinth** | 35 / 0.77 | 3 / 0.29 |
+| `sample_0001` | labyrinth | **holes** | 1 / 0.02 | 64 / 1.22 |
+| `sample_0002` | labyrinth | **holes** | 1 / 0.01 | 95 / 0.94 |
+| `sample_0003` | labyrinth | **holes** | 1 / 0.00 | 297 / 1.29 |
+| `sample_0004` | labyrinth | **labyrinth** | 41 / 0.74 | 189 / 0.42 |
+
+So the dataset is **3 hole patterns + 2 labyrinths**, and its name is to that extent
+misleading. Owner's call, taken with the measurement in hand: keep the data as generated and
+document the mix rather than spend another generation run. Every sample carries its measured
+morphology, and the figures print `stored → MEASURED` wherever the two disagree, so the mix
+is visible at the point of use rather than buried here.
+
+`turing_spots` is unaffected: 5 of 5 measured `spots`, in agreement with the stored label.
+
+**What was rejected.** (a) Re-selecting `turing_labyrinth` as 5 true labyrinths — exactly 5
+qualify, so it was feasible but with zero slack, and the owner chose not to spend the run.
+(b) A `turing_holes` third class — only 3 gated, stable hole systems exist, below the 5
+required. (c) Changing `gen_tg3.classify` — that would alter the meaning of the `morphology`
+attribute on all 413 existing samples, which D-TDPLOT-1 already considered and rejected.
+
+**A bug this surfaced, recorded because the class of error recurs.** The first version of the
+speckle floor discarded domains smaller than a fixed fraction of the FRAME. At 512² with 36
+periods a spot is ~7 px across (area ~38 px) while the floor was 52 px, so every domain was
+deleted and a clean spot lattice measured as `labyrinth` with **zero** domains. The floor is
+now a fraction of the pattern's own wavelength squared, read from the field's spectrum.
+`tests/test_phase_topology.py` pins the regression at the exact resolution that failed.
+
+**Not established.** The circularity cut of 0.55 is read off the separation measured on the
+canonical frames (round domains 0.94–1.57, worms 0.29–0.77) and is **not calibrated against a
+control**. It is used for labelling only, never as a pass condition, and no threshold in
+`docs/PREREGISTRATION.md` depends on it.

@@ -45,8 +45,25 @@ SIDE_NEUTRAL = ["utils.py"]
 # truth in two lines while passing every previous version of this audit. NOTE these names
 # must stay DOTTED — a bare "registry" would false-positive on `rngrn/registry.py`, the
 # component registry, which model.py and losses/weighting.py legitimately import.
+# `td_figures` and `gen_tg3` added 2026-08-10 (unit training-data-plots). Both live in
+# `scripts/`, so the completeness test below — which globs `src/rngrn` — is structurally
+# blind to them, and both are importable by BARE TOP-LEVEL NAME because the inspection
+# notebook and tests/test_td_figures.py put `scripts/` on sys.path for the whole pytest
+# session. `td_figures.load_samples` reaches params_json, x_star, D and the generator's
+# k_star in two lines. Nothing imports them from the recovery side today; these entries
+# make sure that stays true instead of relying on it.
+# `canon_select`, `canon_generate` and `canon_annotate` added 2026-08-10 alongside
+# `td_figures`/`gen_tg3`, and for the same reason: all five live in `scripts/`, are therefore
+# invisible to the completeness glob below, are importable by BARE TOP-LEVEL NAME because the
+# test suite puts `scripts/` on sys.path, and all five read `payload.h5` — generating
+# kinetics, `x_star`, and the generator's own `k_star`. A recovery-side import of any of them
+# would reach ground truth in two lines.
+#
+# `phase_topology` is deliberately NOT here: it takes a bare 2-D array and reads no payload,
+# so a recovery-side module could legitimately measure the OBSERVED frame with it.
 FORBIDDEN = ["rd_models", "data.solver", "data.cache", "data.gate", "data.registry",
-             "AnswerKey", "answer_key"]
+             "AnswerKey", "answer_key", "td_figures", "gen_tg3",
+             "canon_select", "canon_generate", "canon_annotate"]
 
 
 def _imports(path):

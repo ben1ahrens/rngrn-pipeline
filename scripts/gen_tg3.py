@@ -179,13 +179,33 @@ def screen_model(topo, form, n_samples, seed, want, periods_choices=PERIODS_CHOI
 
 
 # ---------------- simulation (spectral IMEX) + classification ----------------
-def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1):
+def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1, cv_every=None,
+                          l_bounds=None):
     """Nonlinear spectral IMEX simulation + morphology classification.
 
     Verbatim from the staging generator except that the domain size comes from
     ``p["periods_per_box"]`` instead of the hard-coded 6, and is NOT clipped (the
     caller guarantees feasibility via ``feasible_periods``).
+
+    ``cv_every`` (added 2026-08-10 for the canonical datasets): if set, record the
+    species-0 spatial coefficient of variation every ``cv_every`` steps into
+    ``cv_trace``/``cv_times``. This is a READ-ONLY observation — it never touches ``X`` —
+    so results are bit-identical with and without it. It exists so a saturation gate can
+    ask whether the pattern had actually stopped changing by ``Tmax``. That question
+    matters more at large grids: ``Tmax = 260`` was chosen for 96x96 boxes, and a bigger
+    box holds more pattern to organise, while recovery solves ``f(x*) = 0`` and never
+    integrates time — so a transient frame is silently outside the model's assumptions.
+
+    ``l_bounds`` (added 2026-08-10): the acceptance window for the domain size, defaulting
+    to the module-level ``(L_MIN, L_MAX) = (18, 220)``. Those numbers are tied to the 96x96
+    grid: they exist so a pattern is neither under- nor over-resolved, and at 96 pixels an
+    L of 800 would leave ~3 px per wavelength. At 512 the same L gives ~18 px/wavelength,
+    which is fine — ``L`` enters the physics only as a UNIT (CLAUDE.md section 7c), so the
+    real constraint is pixels-per-wavelength, not L itself. A caller generating at another
+    resolution therefore passes its own bounds AND enforces its own px/wavelength gate;
+    ``scripts/canon_generate.py`` does exactly that. Existing callers are unaffected.
     """
+    L_lo, L_hi = l_bounds if l_bounds is not None else (L_MIN, L_MAX)
     M = np.array(p["_M"], float)
     b = np.array(p["b"]); V = np.array(p["V"]); mu = np.array(p["mu"])
     K = np.array(p["K"]); n = p["n"]; D = np.array(p["D"])
@@ -194,8 +214,8 @@ def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1):
     ppb = int(p["periods_per_box"])
     lam = 2 * np.pi / p["k_star"]
     L = float(ppb * lam)
-    if not (L_MIN <= L <= L_MAX):
-        raise ValueError(f"periods_per_box={ppb} gives L={L:.2f} outside [{L_MIN}, {L_MAX}]; "
+    if not (L_lo <= L <= L_hi):
+        raise ValueError(f"periods_per_box={ppb} gives L={L:.2f} outside [{L_lo}, {L_hi}]; "
                          "screen_model should have rejected this candidate")
     dx = L / grid
     dt = 0.02 / max(mu.max(), 1.0)
@@ -226,11 +246,16 @@ def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1):
     save_at = set(np.linspace(int(nsteps * 0.5), nsteps - 1, n_traj).astype(int))
     frames = []
     times = []
+    cv_trace = []
+    cv_times = []
     for s in range(nsteps):
         Xr = X + dt * react(X)
         for i in range(3):
             X[i] = np.real(np.fft.ifft2(np.fft.fft2(Xr[i]) * denom[i]))
         np.clip(X, 0, None, out=X)
+        if cv_every and (s % cv_every == 0 or s == nsteps - 1):
+            cv_trace.append(float(X[0].std() / max(X[0].mean(), 1e-9)))
+            cv_times.append(s * dt)
         if s in save_at:
             frames.append(X.astype(np.float32).copy())
             times.append(s * dt)
@@ -241,8 +266,12 @@ def simulate_and_classify(p, grid=96, n_traj=6, Tmax=260.0, seed=1):
     if cv0 < 0.05:
         return None                     # collapsed to homogeneous
     cls = classify(final[0], L)
-    return {"final": final, "traj": np.array(frames), "times": np.array(times),
-            "L": L, "dx": dx, "dt_sim": dt, "grid": grid, "cv0": cv0, **cls, "params": p}
+    out = {"final": final, "traj": np.array(frames), "times": np.array(times),
+           "L": L, "dx": dx, "dt_sim": dt, "grid": grid, "cv0": cv0, **cls, "params": p}
+    if cv_every:
+        out["cv_trace"] = np.array(cv_trace, dtype=np.float64)
+        out["cv_times"] = np.array(cv_times, dtype=np.float64)
+    return out
 
 
 def raps_dominant_k(field, L):
@@ -299,8 +328,16 @@ def classify(field, L):
         morph = "holes"
     else:
         morph = "stripes" if A > 0.55 else "labyrinth"
+    # k_star_fft is stored at FULL precision, not rounded to 3 dp as it was until
+    # 2026-08-10. `raps_dominant_k` returns a bin centre, so `k_star_fft * L / 2*pi` lands
+    # exactly on the half-integer grid — a property `tests/test_gate_contract.py` asserts and
+    # `PREREGISTRATION` leans on, because it is why the FFT-vs-linear disagreement is a grid
+    # offset rather than a bias. Rounding to 3 dp perturbs that by ~2*0.0005*L/(2*pi), which
+    # is invisible at the legacy L <= 220 and breaks the property outright at L ~ 990: the
+    # canonical turing_labyrinth set drifted 0.087 bins off the grid and failed the test.
+    # The other fields stay rounded; they are descriptive, not load-bearing.
     return {"morphology": morph, "wavelength": round(float(wav), 2),
-            "k_star_fft": round(k, 3), "area_frac": round(phi, 3),
+            "k_star_fft": float(k), "area_frac": round(phi, 3),
             "n_components": ncomp, "anisotropy": round(A, 3)}
 
 

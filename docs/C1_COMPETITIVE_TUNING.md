@@ -1,6 +1,11 @@
 # C1 — tuning the COMPETITIVE form against the pre-registered criteria
 
-**Form:** `competitive`. **Dataset:** `three_gene_qvar` (PRIMARY).
+**Form:** `competitive`. **Dataset:** `three_gene_qvar` — **PRIMARY when this unit ran
+(pre-2026-08-10); superseded as primary** by `turing_spots`/`turing_labyrinth` in the
+`PREREGISTRATION.md` §1 amendment (D-CANON-4). Every "PRIMARY dataset" phrase below means
+`three_gene_qvar` and should be read that way. The amendment weakened no threshold, and no
+recovery has yet been run against the canonical sets, so **the results here remain the
+current recovery evidence base** — they are relabelled, not superseded in substance.
 **Tuning targets (burned, per `PREREGISTRATION.md` §1a):** `sample_0000` … `sample_0004`.
 **Held out and untouched by this unit:** `sample_0008` … `sample_0033`.
 **Seeds:** K = 8 independent `train.seed` values (0…7), post-`f78ae74`, per §2.

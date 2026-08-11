@@ -18,8 +18,20 @@ inputs are `(frame, L, observed_idx)`. Everything else lives in `gate.AnswerKey`
 consumed only by `validate.score_recovery`.
 
 **What the guard actually enforces** (audited; `docs/DATA_INTO_MODEL.md` §5.1):
-`tests/test_firewall.py` is a *substring match over import lines* against five names —
-`rd_models`, `data.solver`, `data.cache`, `AnswerKey`, `answer_key`. Empirically:
+**Corrected 2026-08-11 — the list has grown from 5 names to 12 and the escape routes below
+are mostly closed.** `FORBIDDEN` now also carries `data.gate` and `data.registry` (added
+2026-08-04, precisely because `gate.from_registry` returns the full `(RecoveryInput,
+AnswerKey)` pair) plus the payload-reading scripts `td_figures`, `gen_tg3`, `canon_select`,
+`canon_generate`, `canon_annotate` (2026-08-10). So of the bypasses listed below, the three
+via `gate`/`registry` are **now caught**; reading `payload.h5` directly through `h5py`
+remains uncaught, and that is the live hole. `RECOVERY_SIDE` also gained `history.py`, and
+`test_every_loss_and_eval_module_is_classified` now fails on any unclassified module under
+`losses/`/`eval/` — but it globs `src/rngrn` only, so `scripts/` stays a manual allowlist.
+**Read `tests/test_firewall.py` for the current lists, not this paragraph.**
+
+*Historical, as of 2026-08-04:* `tests/test_firewall.py` is a *substring match over import
+lines* against five names — `rd_models`, `data.solver`, `data.cache`, `AnswerKey`,
+`answer_key`. Empirically:
 `from .data.gate import AnswerKey` is caught; `from .data import gate` then
 `gate.from_registry(...)` is **not**; `from .data.gate import from_registry` is **not**;
 `from .data import registry` is **not**; `import h5py` and reading `payload.h5`
@@ -365,7 +377,7 @@ motivation for a 200k-iteration budget.
 | `model.py`, `observables.py` | VALIDATED (autodiff J vs finite-diff to 1e-11; general-eig vs 2×2 closed form; KA+KR≡s to 1e-6) |
 | `_sigma_max_cubic` (N=3 dispersion) | VALIDATED against `eigvals` on all 127 real answer-key Jacobians |
 | `losses/terms.py`, `eval/*`, `validate.py`, `data/*` | repackaged from scaffold; wiring correct, **recovery science unproven** |
-| `eval/analysis.turing_ok`, `robustness_cloud` | repackaged, **never validated**; `robustness_cloud` never run on a recovery |
+| `eval/analysis.turing_ok`, `robustness_cloud` | **Corrected 2026-08-11 — both claims are now false.** `turing_ok` is VALIDATED: D-EVID-11 re-measured the strict criterion on 400 seeds against `_perturb_cloud`'s independent implementation, and `BIO_VIABILITY.md` §1.3 re-checks it 19/19. `robustness_cloud` HAS been run on recoveries and reaches every run row via `robustness_volumes` (`validate.py:64,386` → `turing_volume_*`); see `C1_COMPETITIVE_TUNING.md` §9.2 (`robustness_n_used = 8`) |
 | `eval/numerics.integrate_bdf1_newton_krylov` | **stub** — delegates to ETDRK4 |
 | `losses/weighting.{GradNorm,NTK}Weighting` | **Corrected 2026-08-04:** both `raise NotImplementedError` in `__init__` (`weighting.py:69`, `:87`), naming the missing estimator — they do **not** fall back to fixed weights, and neither defines a `combine`. `RatioWeighting` (`:94`) is implemented |
 | `losses/terms.morphology_consistency` | non-differentiable numpy diagnostic, **not in `compute_terms`**; the `morphology` weight is inert |
@@ -512,9 +524,22 @@ Every generator — 2-gene and 3-gene, character-for-character the same line —
 k\*_true** and each pattern holds exactly 6 wavelengths. See §1 for why this defeats the
 firewall in spirit.
 
+> **RESOLVED — corrected 2026-08-11. This section said the decision was "still open"; it was
+> already closed when that was written.** Option **(b)** was adopted: `three_gene_qvar`
+> (committed 2026-07-29, a week before this section's last edit) draws periods-per-box
+> ~U{3..14} to decouple L from k\*, per `PREREGISTRATION.md` §1a. It was extended again on
+> 2026-08-10 by `turing_spots`/`turing_labyrinth`, which use a geometric periods-per-box
+> ladder {8..40} and are now PRIMARY (D-CANON-4, `CANONICAL_DATASETS.md`).
+>
+> **§7's dataset inventory above is therefore stale by omission** — it lists only the three
+> legacy families and none of `three_gene_qvar`, `three_gene_multiL`, `turing_spots`,
+> `turing_labyrinth`. For the current inventory read `docs/CANONICAL_DATASETS.md` and
+> `PREREGISTRATION.md` §1, not this section. The analysis below is kept because the reasoning
+> is what justified option (b).
+
 The user stated they "wanted all of the patterns for my training data to have the same
-domain size", which the current data violates. Three options were measured and put to
-the user, **still open**:
+domain size", which the legacy data violates. Three options were measured and put to
+the user — *(b) was chosen; see the box above)*:
 
 - **(a) fixed L** — matches the stated intent, makes L carry zero information, but caps
   k\* to a 5.3× span at grid=96 (L=100 gives k\* ∈ [0.19, 1.01]) versus the generators'

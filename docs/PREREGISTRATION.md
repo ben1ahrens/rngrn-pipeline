@@ -497,6 +497,13 @@ shortfall is reported against the bar as written.
   (observed steps 26–49, 4/4 restarts) where competitive with identical seeds completes.
   If that is not fixed, "`nc1` cannot be trained with this objective because X" is a
   legitimate reported outcome.
+  **Status note added 2026-08-11 (no bar changed).** "At the time of writing" above is
+  2026-08-03. That training-stability failure was subsequently diagnosed and fixed — a
+  Newton globalisation failure, not the veto (`ac05d94`) — and `nc1` now runs to completion
+  at 400 Adam steps across multiple measured cells in `docs/C2_NC1_TUNING.md`. The live
+  `nc1` problem is a different one: convergence *quality*, 9/16 seeds landing on a
+  Turing-incapable J. This note records currency only; the pre-registered commitment above
+  is unchanged and still binds.
 - Negative and superseded results stay in the record with the reason they were superseded.
 
 ## 5. Stopping rule

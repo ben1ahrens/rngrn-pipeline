@@ -37,11 +37,14 @@ Two consequences a reader should not have to work out for themselves:
    number of datasets, one per pattern type — but it means a per-sample result is the unit
    of evidence here, and corpus-level medians over five samples are not meaningful. The
    pre-registered `three_gene_qvar` split had 26 held-out samples by comparison.
-2. **The configs have not caught up.** `configs/m3_registry.yaml`, `nc1_m3_registry.yaml`,
-   `expA_control_full.yaml` and `expA_hidden_channel.yaml` still name `three_gene_val`;
-   `expB_*.yaml` still name `two_gene_classical_val`. No config names a `turing_*` set.
-   Pointing them here is a separate change and has deliberately not been made as part of
-   generating the data.
+2. **The configs have PARTLY caught up — corrected 2026-08-11.** This point used to say no
+   config named a `turing_*` set. That stopped being true in `3ecdcca`, the commit right
+   after the one that added this text. Today `configs/m3_registry.yaml` and
+   `configs/nc1_m3_registry.yaml` both name `turing_spots` (D-CANON-4). What has *not* moved,
+   deliberately: `expA_control_full.yaml` and `expA_hidden_channel.yaml` still name
+   `three_gene_val`, and `expB_*.yaml` still name `two_gene_classical_val` — they are
+   pre-registered arms, and expB requires a 2-species ground truth this 3-gene corpus cannot
+   supply at all.
 
 ## 1. What they are, in one paragraph
 

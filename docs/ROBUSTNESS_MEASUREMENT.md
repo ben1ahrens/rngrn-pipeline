@@ -38,6 +38,24 @@ Two properties of their number to carry forward:
 
 `src/rngrn/eval/analysis.py::robustness_cloud(model, n_samples=200, sigma_log=0.1, seed=0)`
 
+> **CORRECTED 2026-08-11 — §2 and §3 below describe code that no longer exists.** They are
+> kept because the before/after is the record, but read this box first. Every defect §3
+> catalogues was fixed in `8321133` (2026-07-29), and the current
+> `eval/analysis.py::robustness_cloud` docstring names §3 by number as its changelog.
+> Concretely, today: it perturbs the **physical (J, D)** at the model's own steady state,
+> not raw θ (so a lognormal factor cannot flip a sign and a given `sigma_log` means the
+> same thing everywhere); there is no per-draw model rebuild, so `dispersion_backend`
+> cannot be dropped and the ~59 ms/draw Newton loop is gone, replaced by batched numpy;
+> and it reports the **strict** criterion as `frac_turing`, with `frac_loose` /
+> `frac_loose_only` alongside. It **is** validated and it **does** reach the run index:
+> `validate.py:64,386` calls `robustness_volumes(...)`, writing
+> `turing_volume_{1pct,4p8pct,10pct,20pct}` onto **every run row**. It has been run on real
+> recoveries — see `C1_COMPETITIVE_TUNING.md` §9.2 (`robustness_n_used = 8`).
+> §1 (the Tica reference numbers), §4 (the 127-sample generator baseline) and §5's
+> still-open items remain current.
+
+*Historical, as of 2026-07-29 — superseded, see the box above:*
+
 It draws `n_samples` log-normal multiplicative perturbations of the model's **raw θ**
 parameters, rebuilds an `RNGRN`, re-solves the steady state, re-tests the Turing
 conditions, and returns `frac_turing`, `n_turing`, `kstar_mean`, `kstar_std`.
@@ -267,9 +285,13 @@ cd <worktree>
 # ~60 s, writes experiments/exp11_{robustness_baseline,immobile_node}.csv
 ```
 
-Deterministic across processes (verified identical under `PYTHONHASHSEED=99`). The
-`experiments/` tree is gitignored, so the CSVs are working data, not a tracked record —
-the script is the record.
+Deterministic across processes (verified identical under `PYTHONHASHSEED=99`).
+
+**Corrected 2026-08-11.** This paragraph used to say the `experiments/` tree is gitignored,
+so the CSVs are "working data, not a tracked record — the script is the record." That was
+reversed by D-PLOT-1: run records are now **tracked**, and both
+`experiments/exp11_robustness_baseline.csv` and `experiments/exp11_immobile_node.csv` are in
+git (verified). The script and its output are *both* the record.
 
 The script reads `AnswerKey` quantities directly and deliberately: it is a
 characterisation tool on the scoring side of the firewall. It must never be imported by

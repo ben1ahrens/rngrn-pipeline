@@ -145,6 +145,11 @@ were regenerated after the fix, so their seeds are honest.
 
 - `three_gene_qvar` — the set to quote `kstar_rel_err` on. On the old sets that metric
   is unfalsifiable; here it is not.
+  *(Role updated 2026-08-10, noted here 2026-08-11: `three_gene_qvar` was superseded as
+  PRIMARY by `turing_spots`/`turing_labyrinth` — D-CANON-4, `PREREGISTRATION.md` §1 — and is
+  retained as the provenance of the canonical systems. Its existing numbers stand. This
+  document is a generation record, not a status page: for current dataset roles read
+  `docs/CANONICAL_DATASETS.md`.)*
 - `three_gene_multiL` — the L-generalisation test the user asked for. The measurement it
   supports: run recovery on each of a group's four L and ask whether the **same topology**
   comes back. That is a robustness/reproducibility question along the L axis, exactly the

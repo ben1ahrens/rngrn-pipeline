@@ -5,6 +5,22 @@ gitignored, while manifests and the dataset index ARE tracked — so the repo re
 *which* dataset (by id and checksum) an experiment used, without carrying the bytes.
 A fresh clone has no data; do this once per machine.
 
+> **Read this before following the table below (added 2026-08-11).** This document dates
+> from 2026-07-26 and covers only the three legacy families. Two things have changed:
+>
+> - **The primary training data is now `turing_spots` / `turing_labyrinth`** (5 samples each,
+>   512×512), generated in-repo rather than downloaded — see
+>   **[CANONICAL_DATASETS.md](CANONICAL_DATASETS.md)** for what they are and
+>   **[data/datasets/README.md](../data/datasets/README.md)** for the current dataset table.
+>   They are PRIMARY per `PREREGISTRATION.md` §1 (D-CANON-4).
+> - **`three_gene_{train,val,test}` are LEGACY and may not support any k\* claim.** Every
+>   legacy generator sets `L = clip(6·2π/k*, 18, 220)`, so the domain size encodes the answer
+>   and `kstar_rel_err` on those sets is close to unfalsifiable (D6, D-CANON-4). They are
+>   still fine for the identifiability experiments, which do not rest on k\*.
+>
+> The download-and-unpack procedure below is still correct for the legacy sets. To provision
+> payloads *between checkouts* rather than download them, use `scripts/link_payloads.sh`.
+
 ## 1. Download from the Claude Science project
 
 Grab the artifacts you want (the ones below are the useful ones for the milestones).

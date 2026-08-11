@@ -93,12 +93,17 @@ disabled** — `payload.h5` is on the read-deny list, and a sandboxed run shows 
 
 ## 7. Known follow-ups, none blocking
 
-- **No config points at these datasets.** `m3_registry.yaml`, `nc1_m3_registry.yaml` and
-  `expA_*.yaml` still name `three_gene_val`; `expB_*.yaml` names `two_gene_classical_val`.
-  Repointing changes what those configs measure, so it was left as a deliberate separate step.
-- **`docs/PREREGISTRATION.md` §1b and the §1 role amendment want owner sign-off.** Both are
-  additive — a split declaration and a dataset-role table — and no §3 threshold is touched,
-  but that file is binding.
+- ~~**No config points at these datasets.**~~ **DONE — corrected 2026-08-11.** This landed in
+  `3ecdcca`, 30 minutes after this handoff was written. `configs/m3_registry.yaml` and
+  `configs/nc1_m3_registry.yaml` both name `turing_spots` today (verified). `expA_*.yaml`
+  still names `three_gene_val` and `expB_*.yaml` still names `two_gene_classical_val`, and
+  that part is **deliberate**: both are pre-registered experiment arms, and expB needs a
+  2-species ground truth the 3-gene canonical corpus structurally cannot supply.
+- ~~**`docs/PREREGISTRATION.md` §1b and the §1 role amendment want owner sign-off.**~~
+  **DONE — corrected 2026-08-11.** The sign-off was already given when this line was written:
+  `PREREGISTRATION.md:14-15` records *"Amended 2026-08-10, on owner instruction, before any
+  run against the new sets"*, and `DECISIONS.md` D-CANON-4 is marked DECIDED, both landed in
+  `4060461` — 75 minutes *before* this handoff was committed. No §3 threshold was touched.
 - **A `turing_holes` class is not currently possible**: only 3 gated, stable hole systems
   exist against the 5 required. Screening fresh systems with `gen_tg3` would be the route.
 - **Whether genuine box-independent stripes are reachable at all** is open (D-CANON-2). The

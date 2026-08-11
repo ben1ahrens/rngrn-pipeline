@@ -179,7 +179,7 @@ when the hardcoded `L=100.0` bug was fixed).
 | `robustness_cloud` draw | ~**59 ms**, serial |
 | `eval.rollout.simulate` at 96×96 | ~4.2 ms/step × ~128k steps = ~**9 minutes** per field (14 min at the 200k clip) |
 | exp11 robustness baseline, 127 samples × 4 σ × 400 draws | ~60 s (vectorised numpy) |
-| test suite | 420 passed + 1 skipped, ~3 min via the pre-push hook (measured 2026-08-04) |
+| test suite | 551 passed + 1 skipped, ~3 min 50 s via the pre-push hook (re-measured 2026-08-11, sandbox disabled). Was 420 on 2026-08-04 — re-measure rather than trusting this cell |
 
 The rollout figure is the one that bites: an earlier brief assumed ~1.9 s, off by three
 orders of magnitude. Never roll out inside a per-run scoring path.
@@ -215,20 +215,31 @@ orders of magnitude. Never roll out inside a per-run scoring path.
 
 ## 9. Branch state
 
-| branch | worktree | contents |
-|---|---|---|
-| `main` @ `4509632` | `rngrn-pipeline` | template + dataset manifests + local pre-push hook |
-| `feature/turing-training` @ `b4376a1` | `worktrees/turing-training` | **the science branch** — exp01–exp11, cubic dispersion, CUDA portability, `DATA_INTO_MODEL.md`, the phase-A/B unit waves, Stage-0 bio-viability, the OOM guard; contains everything below it |
-| `feature/spatial-mode-recovery` @ `d76378a` | `worktrees/spatial-mode` | morphology scoring, real k\*, the gate `L` fix |
-| `feature/identifiability-experiments` @ `cae5cf2` | `worktrees/identifiability-experiments` | permutation + overparam scoring, the 4 experiment configs |
-| `docs/agent-conventions` @ `ed8dd28` | `worktrees/agent-conventions` | where **`CLAUDE.md`** originated; it now lives at the repo root on this branch (see below) |
-| `docs/hooks-config` @ `273a646` | `worktrees/hooks-config-docs` | hooksPath guidance fix |
+**Rewritten 2026-08-11. The table that stood here was wholly obsolete** — it described `main`
+as a bare template at `4509632` and routed the reader to five worktrees, *all five of which
+have since been deleted*. Following it today produces `No such file or directory` on every
+row. It is replaced by the one fact that now matters:
 
-**Corrected 2026-08-04.** `CLAUDE.md` originated on `docs/agent-conventions` but is now
-tracked at the repo root **on this branch** (brought over in `c53ebf6`, then extended). A
-reader who checks out `feature/turing-training` *will* see it, and it — not the
-`docs/agent-conventions` copy — is the authoritative source for conventions: environment,
-git, testing, house style, firewall, datasets, compute reality, evidence discipline, run
+> **`main` is the trunk and contains everything.** It was fast-forwarded 137 commits to
+> `e5d222a` on 2026-08-11. All the science that used to live on `feature/turing-training`,
+> `feature/spatial-mode-recovery`, `feature/identifiability-experiments` and the rest is on
+> `main`. **There are no worktrees** — `git worktree list` shows the single checkout.
+
+Of 41 branches, **35 are fully merged into `main`** and are kept only as history; every one is
+pushed to `origin` as an off-machine backup. Six carry commits `main` does not have, and all
+six are deliberate:
+
+| branch | why it is not on `main` |
+|---|---|
+| `feature/rngrn-c-mu` | PARKED — finite-mu machinery, explicitly incomplete and unvalidated |
+| `chore/legacy-experiments` | stale run artefacts (a plumbing check + a noise-robustness **mockup**) parked off `main` on purpose |
+| `chore/claude-md-reflow` | a WIP `CLAUDE.md` reflow based on a superseded version; merging it would revert real corrections |
+| `chore/claude-harness` | holds the redundant commit dropped when `main` was fast-forwarded |
+| `docs/agent-conventions`, `docs/hooks-config` | the original `CLAUDE.md` lineage; its content reached `main` by another path |
+
+`CLAUDE.md` originated on `docs/agent-conventions` and now lives at the repo root on `main`.
+That root copy — not the `docs/agent-conventions` one — is authoritative for environment, git,
+testing, house style, the firewall, datasets, compute reality, evidence discipline, run
 locations, the autonomy rule, and the subagent/workflow rules.
 
 ---

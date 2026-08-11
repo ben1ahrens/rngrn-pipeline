@@ -12,7 +12,8 @@ The harness for both experiments is built and wired. **Corrected 2026-08-04: it 
 dry-runs for all four arms.** `expA_hidden_channel` and `expB_overparam` are both `N=3, m=2`,
 and `recover.py:376` now raises `ValueError` when `m < N` and the stationarity residual has
 weight 0 — which is the default (`configs/base.yaml:33`, `resid: 0.0`). Only the two control
-arms run as written; see the corrected recipe below. (420 tests pass, 1 skipped.) **Nothing is tuned and no scientific
+arms run as written; see the corrected recipe below. (551 passed, 1 skipped, re-measured
+2026-08-11; was 420 when this was written.) **Nothing is tuned and no scientific
 result has been produced** — the dry run uses 6 Adam steps and recovers nothing meaningful.
 That is expected and correct for this stage; do not present dry-run numbers as findings.
 
@@ -37,14 +38,25 @@ Three things were verified or fixed:
 - **`n_permutations_searched == 1` for Experiment A, as caveat 1 predicts.** Confirmed on
   real data, not just in the unit test.
 
-**Open defect — `kstar_rel_err` is NaN in every arm.** It is scoring priority #1 and it is
-currently never computed. `AnswerKey.kstar` is `None` because no payload carries a `kstar`
-attribute: `gate.from_registry` reads `g.attrs["kstar"]`, and these HDF5 samples store
-`jacobian`, `x_star`, `D` (+ `interaction_matrix`) as datasets with no such attr. The
-`answer_key_keys` list in each manifest advertises `kstar`, which is misleading — it is the
-registry's default tuple, not an observed fact about the file.
+**~~Open defect — `kstar_rel_err` is NaN in every arm.~~ RESOLVED 2026-08-04 (D-EVID-7,
+D-EVID-11..15). Corrected here 2026-08-11.**
 
-The fix is a science decision, not a mechanical one, because there are three distinct k*:
+The defect was real and is fixed. The attribute name was the bug: payloads store `k_star`,
+not `kstar`, and `gate.from_registry` now reads `_require_attr(attrs, "k_star", where)` —
+`gate.py:226-229` carries a comment specifically warning not to "simplify" the name back.
+Both quantities are now read verbatim from the sample and both are scored:
+`kstar_fft_rel_err` against the FFT-measured k\* is the **headline** (owner decision), and
+`kstar_rel_err` against the linear answer-key k\* is **secondary** — see `validate.py:15-39`.
+Neither is NaN.
+
+The science decision the rest of this section says must be made **has been made**: the
+headline is the FFT-measured reference, with the linear one retained as a control, plus
+`trivial_kstar_err` as an explicit image-blind leak instrument (because every generator sets
+`L = clip(6·2π/k*, 18, 220)`, so `kstar` is partly recoverable from `L` alone). Do not
+re-litigate it from this document; read `validate.py`'s module docstring and D-EVID-7.
+
+The three-way distinction below remains an accurate and useful explanation of *why* it
+mattered — kept for that reason, with the "status" column now historical:
 
 | quantity | source | status |
 |---|---|---|
@@ -54,10 +66,13 @@ The fix is a science decision, not a mechanical one, because there are three dis
 
 `kstar_true` is computable from the answer key with the machinery already in
 `eval/analysis.turing_ok`, and that is the like-for-like comparison against `kstar_model`.
-Scoring against `kstar_obs` instead would compare a dispersion-relation prediction to a
-Fourier measurement of a finite noisy frame — a different and weaker claim. **Decide which
-before tuning anything**, since every recovery knob will be tuned against whichever
-number this ends up being.
+Scoring against `kstar_obs` instead compares a dispersion-relation prediction to a Fourier
+measurement of a finite noisy frame — a different claim.
+
+**How it was settled:** both are computed and reported, with the FFT-measured comparison as
+the headline precisely because the linear reference is contaminated by the `L` leak above.
+The weaker-claim concern was answered by shipping `trivial_kstar_err` alongside, so a reader
+can see at a glance whether a headline number beats the image-blind baseline.
 
 ## What the two experiments are
 
@@ -156,7 +171,8 @@ more than the code does — a prior audit caught overstated provenance in this r
 ```bash
 pip install -e ".[dev]"
 export KMP_AFFINITY=disabled OMP_NUM_THREADS=1   # only if torch aborts with OMP Error #179
-pytest -q                                        # expect 420 passed, 1 skipped
+pytest -q     # expect 551 passed, 1 skipped (2026-08-11). Run with the SANDBOX DISABLED:
+              # payload.h5 is on its read-deny list and a sandboxed run fakes ~15 failures.
 
 # datasets are local and gitignored — see docs/LOCAL_DATA_SETUP.md
 rngrn scan-datasets

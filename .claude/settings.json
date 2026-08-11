@@ -16,7 +16,9 @@
       "Bash(rngrn export:*)",
       "Bash(free -h)",
       "Bash(nvidia-smi)",
-      "Bash(df -h:*)"
+      "Bash(df -h:*)",
+      "WebSearch",
+      "WebFetch"
     ],
     "ask": [
       "Bash(git push --no-verify:*)",

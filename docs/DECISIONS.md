@@ -3003,3 +3003,75 @@ parity case and the two new refusal tests).
 `test_spectral_terms.py`, `test_spectral_utils.py`, `test_ignition_gating.py`, plus the
 enumeration-contract test in `test_losses.py`. CLAUDE.md §7c amended in the same change
 (training MAY now simulate — ignition-gated, off by default).
+
+### D-FFT-12 — three M2 sweep-design additions harvested from the legacy feasibility notebook (rules pre-registered; every number deliberately unchosen)
+
+**Date:** 2026-08-12 (comparison session: `RNGRN_Diffusion_notebook_vf.ipynb` — the
+pre-pipeline toy in the project root — read against this branch's SPEC/PLAN/METHODS).
+**Status:** OPEN — proposed for the M2 calibration design, for owner review alongside the
+M2 validation of M0+M1. Nothing here is live in code, and no item may gate anything. The
+three D-FFT-11 owner flags remain the M2 blockers; this entry adds none.
+**Decided by:** drafted by the implementing agent under §10 delegated authority.
+
+**Provenance and its limits:** the legacy notebook "solved" the inverse problem only with
+ground truth in the objective — the true Jacobian, homogeneous steady state, dispersion
+curve and D as loss anchors (λ = 5/5/15+25/50), sign topology initialised from the true
+Jacobian, θ_D initialised at the exact truth — i.e. item for item what the firewall now
+forbids; and its data was the full trajectory plus exact du/dt, not one frame. Its results
+are therefore PRECEDENT, never evidence, on this data: every number below is born
+UNCALIBRATED and each idea enters only as a sweep axis or reported metric with the current
+behaviour as its control arm. All three items are firewall-neutral (model-side quantities
+only) and none touches a pre-registered pass condition in `docs/PREREGISTRATION.md`.
+
+**Item 1 — spectral-weight ramp-in after ignition (sweep axis).** Today ignition is a
+step: the first ignited step contributes the five spectral terms at full calibrated weight
+(D-FFT-11, omitted-never-zeroed). Proposed axis `spectral_ramp_steps`: after ignition the
+spectral weights scale by min(1, n/ramp), n counted per contiguous ignited stretch.
+Pre-spec detail to fix before the sweep: whether n resets or resumes on re-ignition —
+reset is proposed, since a de-ignited model has left the patterned branch. ramp = 0
+(today's step) is the control. Precedent: the notebook warmed its five physics terms over
+the first three epochs (`ramp = min(1, (epoch+1)/3)`) so the data term shaped the basin
+first. Calibration rule: judged by the same Stage-0 criteria as the weight sweep itself
+(held-out-band error, seed reproducibility) — never by smoother-looking loss curves.
+
+**Item 2 — robustness-under-jitter as a REPORTED-ONLY basin-sharpness metric.** After a
+recovery converges, draw M log-normal perturbations of the positive-domain parameters,
+θ → θ·exp(s·N(0,1)) in log space, and report two fractions: still strictly Turing-unstable
+(`turing_ok`), and dispersion-argmax k* within one radial bin (2π/L) of the unperturbed
+model's. Model-side dispersion evaluations only — firewall-legal, no rollout, cheap.
+Purpose: contextualise R1/R2 — 5/5 sign agreement on a flat basin and 5/5 on a knife edge
+are different findings, and the D-FFT-9 R2 calibration needs that context recorded next to
+the clustering it measures. Precedent: the notebook's 1000-draw sweep at s = 0.1 (57.7 %
+remained Turing-unstable there); those numbers do not transfer. s is UNCALIBRATED — report
+a small ladder of s values rather than one, and no threshold on the output exists or may
+be created without a control. Never gates.
+
+**Item 3 — per-parameter-group learning rate for θ_D (sweep axis).** Proposed axis: an LR
+multiplier on the θ_D param group, with multiplier 1.0 (today's single LR) as the control.
+Precedent: the notebook trained θ_D at 100× lower LR than every other group, on the stated
+ground that D-ratios of order 100 are otherwise unlearnable. Consistent with — not
+evidenced by — D5's invariant-combination spreads (KR up to 10.9 decades,
+`experiments/diag_fft/d5/analysis.json`) pointing at conditioning as well as data
+starvation. An optimizer detail, firewall-neutral.
+
+**What was rejected and why:** (a) adopting any notebook number as a default (the 3-epoch
+ramp, s = 0.1, the 100× LR split) — inherited numbers calcify (the two D-FFT-9
+precedents); each idea enters as an axis against the current behaviour as control, or not
+at all. (b) Porting the notebook's other machinery here: its soft-argmax k* duplicates the
+existing power-weighted-centroid and lse-gap machinery; its Sobol study linearises a
+DIFFERENT (non-competitive) model than the one it trained — a defect, so nothing of it is
+ported; its dispersion-curve MSE against the true σ(k) is firewall-illegal by
+construction. (c) Making item 2 a gate — no control exists behind any threshold on it.
+(d) Folding the notebook's gate-hardening projector into this entry — it is deliberately
+deferred to the frozen-gate null-refit machinery M2 already requires (SPEC's
+beat-all-nulls gates), where it will be specified with that machinery, not as a sweep axis.
+
+**Not independently validated:** nothing here has run on this data. The notebook's numbers
+were measured on 2-species GM/Schnakenberg targets at 15×15 with truth anchors, and are
+cited only as the reason these axes are worth sweeping at all.
+
+**Where it lives:** nowhere in code yet — this entry pre-registers the rules. On adoption:
+items 1 and 3 join the M2 sweep grid (`guarded_run.sh` sweeps on
+`turing_labyrinth/sample_0000`), item 2 lands as a side-neutral model-side reporter with
+reported-only columns; settled values append as D-FFT-12 closures, per the D-FFT-9
+pattern.

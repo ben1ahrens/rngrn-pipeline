@@ -65,9 +65,15 @@ SIDE_NEUTRAL = ["utils.py"]
 #
 # `phase_topology` is deliberately NOT here: it takes a bare 2-D array and reads no payload,
 # so a recovery-side module could legitimately measure the OBSERVED frame with it.
+# `diag_fft_d3` and `diag_fft_d6` added 2026-08-12 (Fourier-training diagnostics, PLAN §3):
+# both open `payload.h5` via data.gate.from_registry (the AnswerKey is discarded unread —
+# but the import alone is enough to reach it in two lines), and scripts/ is on sys.path for
+# the whole pytest session, so they are importable by bare top-level name like the five
+# above. Added at birth per CLAUDE.md §5.
 FORBIDDEN = ["rd_models", "data.solver", "data.cache", "data.gate", "data.registry",
              "AnswerKey", "answer_key", "td_figures", "gen_tg3",
-             "canon_select", "canon_generate", "canon_annotate"]
+             "canon_select", "canon_generate", "canon_annotate",
+             "diag_fft_d3", "diag_fft_d6"]
 
 
 def _imports(path):

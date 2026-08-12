@@ -1,0 +1,160 @@
+{
+  "diagnostic": "D6",
+  "ckpt": "experiments/tune_comp/runs/m3_registry_20260803_190250_seed3/checkpoints/model.pt",
+  "check_a": {
+    "fields": {
+      "turing_labyrinth/sample_0000 ch0": {
+        "nbins": 363,
+        "peak_power": 59756725.31093802,
+        "max_abs_dpower": 7.450580596923828e-09,
+        "max_rel_dpower_to_peak": 1.2468187569107062e-16,
+        "kstar_numpy": 0.28387817575592444,
+        "kstar_torch": 0.2838781757559245,
+        "abs_dkstar": 5.551115123125783e-17,
+        "rel_dkstar": 1.9554568111282267e-16,
+        "passed": true
+      },
+      "synthetic_0": {
+        "nbins": 182,
+        "peak_power": 120756.27653331868,
+        "max_abs_dpower": 4.3655745685100555e-11,
+        "max_rel_dpower_to_peak": 3.61519474915701e-16,
+        "kstar_numpy": 11.203493987404107,
+        "kstar_torch": 11.203493987404105,
+        "abs_dkstar": 1.7763568394002505e-15,
+        "rel_dkstar": 1.5855382627931763e-16,
+        "passed": true
+      },
+      "synthetic_1": {
+        "nbins": 182,
+        "peak_power": 95624.86788923126,
+        "max_abs_dpower": 5.820766091346741e-11,
+        "max_rel_dpower_to_peak": 6.087084060695725e-16,
+        "kstar_numpy": 0.23158620721204617,
+        "kstar_torch": 0.23158620721204612,
+        "abs_dkstar": 5.551115123125783e-17,
+        "rel_dkstar": 2.3969972952849653e-16,
+        "passed": true
+      },
+      "synthetic_2": {
+        "nbins": 182,
+        "peak_power": 91846.71828919729,
+        "max_abs_dpower": 4.3655745685100555e-11,
+        "max_rel_dpower_to_peak": 4.75310892955826e-16,
+        "kstar_numpy": 0.46093415402270904,
+        "kstar_torch": 0.46093415402270904,
+        "abs_dkstar": 0.0,
+        "rel_dkstar": 0.0,
+        "passed": true
+      }
+    },
+    "passed": true,
+    "tol": {
+      "rel_dpower_to_peak": 1e-12,
+      "abs_dkstar": 1e-12
+    }
+  },
+  "check_b": {
+    "analytic": {
+      "kstar_base": 0.17502481066802167,
+      "sigma_max_base": 0.3566697470484158,
+      "per_c": {
+        "0.1": {
+          "max_rel_dev_sigma": 1.6487836807653617e-12,
+          "argmax_index_base": 334,
+          "argmax_index_scaled": 334,
+          "abs_dkstar": 0.0,
+          "passed": true
+        },
+        "3.0": {
+          "max_rel_dev_sigma": 1.7424125452015084e-12,
+          "argmax_index_base": 334,
+          "argmax_index_scaled": 334,
+          "abs_dkstar": 0.0,
+          "passed": true
+        },
+        "10.0": {
+          "max_rel_dev_sigma": 1.6889770386941082e-12,
+          "argmax_index_base": 334,
+          "argmax_index_scaled": 334,
+          "abs_dkstar": 0.0,
+          "passed": true
+        }
+      },
+      "theta_D_route_rel_dev": 3.213095746932056e-12,
+      "theta_D_route_passed": true,
+      "torch_vs_numpy_dispersion_rel_dev": 1.0678281848949757e-12,
+      "passed": true,
+      "note": "scaling f by c is NOT expressible exactly in RNGRN's parameterisation (softplus'd rates); verified at the ODE level by building c*J - k^2*(c*D) = c*(J - k^2*D) directly in numpy"
+    },
+    "dynamic": {
+      "n": 64,
+      "L": 287.1906118086181,
+      "dt": 0.18499806271475613,
+      "nsteps": 606,
+      "patterned": true,
+      "kstar_base_field": 0.10704489665707492,
+      "sim_vs_direct_rel": 4.460061011617283e-14,
+      "per_c": {
+        "0.1": {
+          "max_rel_dfield": 1.3008511283883743e-13,
+          "per_channel_rel_dfield": [
+            1.3008511283883743e-13,
+            1.2486415972852786e-13,
+            4.0535546928360787e-14
+          ],
+          "kstar_scaled": 0.10704489665707492,
+          "abs_dkstar": 0.0,
+          "passed": true
+        },
+        "3.0": {
+          "max_rel_dfield": 2.527367906583127e-13,
+          "per_channel_rel_dfield": [
+            2.527367906583127e-13,
+            2.415255644383933e-13,
+            7.296398447104942e-14
+          ],
+          "kstar_scaled": 0.10704489665707492,
+          "abs_dkstar": 0.0,
+          "passed": true
+        },
+        "10.0": {
+          "max_rel_dfield": 7.929329851373667e-14,
+          "per_channel_rel_dfield": [
+            6.752036809253943e-14,
+            7.929329851373667e-14,
+            4.0535546928360787e-14
+          ],
+          "kstar_scaled": 0.10704489665707491,
+          "abs_dkstar": 1.3877787807814457e-17,
+          "passed": true
+        }
+      },
+      "passed": true,
+      "tol": {
+        "rel_dfield": 1e-06,
+        "abs_dkstar": 1e-09
+      }
+    },
+    "invariants": {
+      "c": 3.0,
+      "invariant_rel_devs": {
+        "D_ratios": 2.0319972889870758e-16,
+        "alpha_over_delta": 1.19649691774859e-16,
+        "beta_over_delta": 0.0,
+        "K_A": 0.0,
+        "K_R": 0.0,
+        "D_kstar2_over_delta": 0.0
+      },
+      "not_pinned_scale_factors": {
+        "alpha_scale_factor": 3.0,
+        "beta_scale_factor": 3.0,
+        "delta_scale_factor": 3.0,
+        "D_scale_factor": 3.0
+      },
+      "passed": true
+    },
+    "passed": true
+  },
+  "passed": true
+}

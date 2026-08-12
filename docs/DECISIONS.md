@@ -2999,6 +2999,80 @@ modules (`canon_stripes_evidence`, `exp02`–`exp12`) were added to
 618 passed / 1 skipped, unsandboxed (the +3 over the pre-review 615 are the 512² RAPS
 parity case and the two new refusal tests).
 
+### D-FFT-12 — training warm starts are ETDRK4 re-relax + Newton (warm_mode="relax"); Newton-only stays the FD-instrumentation contract; the forward solve gains a CUDA path with a torch-LSMR minimal-norm solver
+
+**Date:** 2026-08-12. **Status:** DECIDED (§10, from the cost measurements and the owner's
+GPU direction).
+
+**The decision, three parts:** (1) TRAINING warm solves (recover.py) run
+warm_mode="relax": a short ETDRK4 re-relax from the previous u* (budget
+warm_max_chunks=40, UNCALIBRATED) then Newton polish, falling back to fresh on failure.
+D1's Newton-ONLY warm rule was an FD-instrumentation constraint — phase pinning for
+finite differences (F-D1-1); training's losses are translation-invariant, so warm-relax
+phase drift is harmless there. (2) `PatternSolver`'s own default stays
+warm_mode="newton" — the D1/FD contract, pinned byte-unmodified by the existing tests.
+(3) The solver derives its device from the model; on CUDA the relax runs the D2-verified
+torch integrator (`rngrn/etdrk4_torch.py`) and Newton/adjoint run a faithful torch port
+of scipy's LSMR (conlim=1e8 stop included) inside the unchanged minimal-norm +
+true-residual refinement wrapper — D-FFT-10 semantics constant-for-constant.
+
+**Evidence:** warm-Newton at Adam-scale θ displacement 5030 s vs fresh 938 s at 96² CPU
+(`experiments/diag_fft/cost/run_attempt1.log`); CUDA integrator 3.25 ms/step at 512²
+fp64 (`experiments/diag_fft/gpu_probe/results.json`); torch-vs-scipy LSMR parity 7.8e-15
+and bit-matching stall residuals near-singular (tests); CUDA-path FD regression 4.75e-8
+vs the 5e-3 tripwire (tests, printed); CUDA 512² fresh solve attempt: the relax exhausts
+its 200k-step budget without satisfying the flat_tol=1e-4 saturation detector (683.9 s,
+solve_failed) — the 512² relax criterion is UNCALIBRATED and is the blocking knob for
+512²-native training (measurement in flight; see the sat512 sweep when it lands).
+
+**What was rejected and why:** (a) warm_mode="relax" as the PatternSolver-wide default —
+it would silently change the FD instrumentation contract the suite pins; (b) any
+projection/deflation in the torch solver (D-FFT-10 forbids); (c) dropping scipy's conlim
+stop from the port — part of the verified stopping behaviour; (d) loosening flat_tol to
+make the 512² one-shot pass — that is a calibration measurement, not an implementation
+call.
+
+**Where it lives:** `src/rngrn/forward.py`, `src/rngrn/etdrk4_torch.py`, `recover.py`
+(warm_mode threading), `losses/spectral.py` (device joins), `tests/test_etdrk4_torch.py`,
+`tests/test_forward_solve.py`.
+
+### D-FFT-13 — PROPOSED ablation arm: parameter-noise ("weight noise") during training as an annealer and robustness prior
+
+**Date:** 2026-08-12. **Status:** PROPOSED by the owner (not designed into any stage, not
+run; recorded so the idea survives the session). Adopting it is a Stage-0/1 ablation
+decision that must go through the A/B protocol below — never a silent default, because it
+changes what every recorded number means.
+
+**The proposal:** inject annealed noise into the raw parameters θ (or the gradient,
+SGLD-style) during training. Two distinct payoffs, to be evaluated separately:
+(1) *optimization annealing* — D5 measured ten seeds falling into ten distinct
+sign-structure basins; if good mechanisms occupy wider basins, noise concentrates seeds
+into them, which is what the R1 gate (5/5 identical sign structures) needs — an empirical
+claim about THIS landscape, not a given; (2) *mechanism-robustness prior* — noise
+penalises sharp minima, i.e. selects θ whose Turing instability and pattern survive
+parameter perturbation; biologically motivated (network-atlas work ranks topologies by
+Turing-viable parameter volume), and the hinge margins are already a cheap cousin. A
+SAM-flavoured variant on the LINEAR-THEORY terms only (dispersion evaluated at perturbed
+θ) costs milliseconds and no extra forward solves.
+
+**Placement constraints (from the 2026-08-12 cost measurements):** noise must NOT touch
+the θ the forward solve sees — warm-start cost is sharply sensitive to per-step θ
+displacement (warm-Newton 5030 s pathology), and noise near the ignition margin would
+toggle the Turing gate (ignition chatter, wasted solves). Inject in the gradient or the
+cheap linear-theory evaluations; the solve runs at the clean current θ.
+
+**Gate integrity:** noise that merely smooths the landscape could raise seed agreement
+(R1) without raising truthfulness — the held-out-band gates and channel co-gates are the
+defence (D4 measured them non-vacuous), and this arm must be judged on those alongside
+R1, never on R1 alone.
+
+**Not to be conflated with:** the PLAN's existing "noise arms", which are OBSERVATION
+noise on the data (estimator robustness) — a different axis.
+
+**A/B protocol when run:** the 10-seed Stage-0 protocol, arm vs matched no-noise control;
+metrics: R1 agreement count, Turing fraction, held-out-band distances vs the D4 null
+spread; noise schedule and magnitude pre-registered in this ledger before the run.
+
 **Where it lives:** the files above; tests `test_forward_solve.py`,
 `test_spectral_terms.py`, `test_spectral_utils.py`, `test_ignition_gating.py`, plus the
 enumeration-contract test in `test_losses.py`. CLAUDE.md §7c amended in the same change

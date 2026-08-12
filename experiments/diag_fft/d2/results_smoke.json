@@ -1,0 +1,44 @@
+{
+  "mode": "smoke",
+  "ckpt": "experiments/tune_comp/runs/m3_registry_20260803_190250_seed3/checkpoints/model.pt",
+  "kstar_lin": 0.1748694673668417,
+  "sig_max_lin": 0.3566697633330575,
+  "L": 287.44573432015784,
+  "periods_per_box": 8,
+  "xstar": [
+    0.48497081491640465,
+    0.4923394865485351,
+    0.47618653730994825
+  ],
+  "check_every": 200,
+  "torch_version": "2.13.0+cu130",
+  "cuda_available": true,
+  "omp_num_threads": "1",
+  "rss_baseline_kib": 586372,
+  "rollout_96_seed0": {
+    "n": 96,
+    "seed": 0,
+    "seconds": 0.8785000850002689,
+    "nsteps_run": 606,
+    "nsteps_planned": 606,
+    "dt": 0.18499806271475613,
+    "stopped_reason": "horizon",
+    "patterned": true,
+    "amplitude": 0.1698483733511656,
+    "kstar": 0.1821188497810319,
+    "sig_max": 0.35666972753383347,
+    "morphology": "spots",
+    "rss_before_kib": 586372,
+    "rss_after_kib": 622620,
+    "rss_delta_kib": 36248
+  },
+  "torch_equivalence": {
+    "n": 96,
+    "nsteps": 100,
+    "max_abs_delta": 1.0791367799356522e-13,
+    "tol": 1e-12,
+    "passed": true
+  },
+  "nonturing_sig_max": -0.43271822905406665,
+  "passed": true
+}

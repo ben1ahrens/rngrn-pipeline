@@ -2793,3 +2793,29 @@ failure §8 exists to prevent. The two live precedents (the ~15 % k\* tolerance,
 
 **Where it lives:** `docs/SPEC_fourier_training.md` §9.3–9.8; `docs/PLAN_fourier_training.md`
 §3 (D2, D3, D5). Each closure appends its number and evidence to this entry.
+
+#### D-FFT-9 closure 1 — band edges: b_lo = 0.60, b_hi = 1.55 (× k*_obs)
+
+**Date:** 2026-08-12. **Status:** CLOSED (this item; the ledger stays open for the rest).
+**Decided by:** the implementing agent under §10 delegated authority, from diagnostic D3.
+
+**The decision:** `B_train = [0.60, 1.55]·k*_obs` — the measured ≥1 %-of-peak contiguous
+support of the RAPS spectrum of `turing_labyrinth/sample_0000` channel 0 (8 radial bins at
+512²/p=8). `B_low = (0, 0.60)·k*_obs` excluding DC; `B_harm = [1.55, 3.0]·k*_obs`.
+
+**Evidence** (`experiments/diag_fft/d3/results.json`; script `scripts/diag_fft_d3.py`):
+support at ≥50 %/≥10 %/≥1 % of peak = [0.84, 1.08] (2 bins) / [0.84, 1.20] (3 bins) /
+[0.60, 1.55] (8 bins). B_harm above these edges carries 1.5–3.2 % of B_train power across
+12 bins, ~15 orders above the float floor (the sample is noise-free; there is no
+observation-noise floor), so the held-out-band gate does NOT need to lean on B_low —
+answering the question this ledger item pre-registered. The 1 % edges essentially
+reproduce the provisional (0.5, 1.5), which is therefore adopted as measured rather than
+inherited.
+
+**What was rejected and why:** the ≥10 %-of-peak edges [0.84, 1.20] — only 3 bins, i.e.
+2 free shape ratios, which re-starves the very data channel this design exists to widen
+(SPEC §2); and keeping the provisional 0.5/1.5 unmeasured — same numbers, but a
+placeholder is not a measurement. Caveat recorded: these edges are measured on ONE
+tuning-role sample; Stage 2 re-measures per sample class before any cross-sample claim.
+
+**Where it lives:** `loss.spectral` config when M1 lands; `docs/DIAGNOSTICS_fft.md` §D3.

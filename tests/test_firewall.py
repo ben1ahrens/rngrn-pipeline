@@ -73,7 +73,8 @@ SIDE_NEUTRAL = ["utils.py"]
 FORBIDDEN = ["rd_models", "data.solver", "data.cache", "data.gate", "data.registry",
              "AnswerKey", "answer_key", "td_figures", "gen_tg3",
              "canon_select", "canon_generate", "canon_annotate",
-             "diag_fft_d3", "diag_fft_d6"]
+             "diag_fft_d3", "diag_fft_d6",
+             "diag_fft_d4"]   # opens payload.h5 (observed frame; AnswerKey discarded)
 
 
 def _imports(path):

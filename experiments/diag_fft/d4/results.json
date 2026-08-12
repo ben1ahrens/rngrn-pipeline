@@ -1,0 +1,92 @@
+{
+  "kstar_obs": 0.28387817575592444,
+  "L": 185.00615234487148,
+  "n": 256,
+  "b_lo": 0.6,
+  "b_hi": 1.55,
+  "n_models": 10,
+  "n_patterned": 4,
+  "rows": [
+    {
+      "run": "m3_registry_20260812_092043_seed0",
+      "turing": false,
+      "sign": "[-1, 1, 0, 0, -1, 1, 0, 1, -1]"
+    },
+    {
+      "run": "m3_registry_20260812_092043_seed1",
+      "turing": true,
+      "sign": "[-1, 1, 0, 0, 1, -1, 0, 1, -1]",
+      "patterned": true,
+      "stopped_reason": "saturated",
+      "kstar_sim": 0.2863544703649125,
+      "seconds": 34.00055099800011,
+      "d_train": 41.37765819862862,
+      "d_low": 41.06477095254245,
+      "d_harm": 107.77376592342533
+    },
+    {
+      "run": "m3_registry_20260812_092043_seed2",
+      "turing": false,
+      "sign": "[-1, 1, 1, 0, -1, 1, 1, 0, -1]"
+    },
+    {
+      "run": "m3_registry_20260812_092043_seed3",
+      "turing": true,
+      "sign": "[-1, 0, 1, 0, 0, 0, -1, 0, 1]",
+      "patterned": true,
+      "stopped_reason": "saturated",
+      "kstar_sim": 0.2726600093226329,
+      "seconds": 20.33173439699931,
+      "d_train": 7.963015989227962,
+      "d_low": 15.865399457204486,
+      "d_harm": 85.0878080372253
+    },
+    {
+      "run": "m3_registry_20260812_092043_seed4",
+      "turing": false,
+      "sign": "[-1, 1, 1, 0, -1, 1, 0, 0, 0]"
+    },
+    {
+      "run": "m3_registry_20260812_092043_seed5",
+      "turing": true,
+      "sign": "[-1, -1, 1, 0, -1, 1, 1, -1, -1]",
+      "patterned": true,
+      "stopped_reason": "saturated",
+      "kstar_sim": 0.2836394109501598,
+      "seconds": 42.88081668999985,
+      "d_train": 8.005780364341653,
+      "d_low": 27.376843418458044,
+      "d_harm": 19.586528891950497
+    },
+    {
+      "run": "m3_registry_20260812_092043_seed6",
+      "turing": true,
+      "sign": "[-1, 1, 0, -1, 1, 0, 0, 0, 0]",
+      "patterned": true,
+      "stopped_reason": "saturated",
+      "kstar_sim": 0.27426792493257884,
+      "seconds": 22.786765548000403,
+      "d_train": 6.432072058352733,
+      "d_low": 21.2225694906488,
+      "d_harm": 98.91019944641472
+    },
+    {
+      "run": "m3_registry_20260812_092043_seed7",
+      "turing": false,
+      "sign": "[-1, 1, 0, 1, -1, 0, 0, 0, -1]"
+    },
+    {
+      "run": "m3_registry_20260812_092043_seed8",
+      "turing": false,
+      "sign": "[-1, 0, 1, 1, -1, 0, 0, 0, 0]"
+    },
+    {
+      "run": "m3_registry_20260812_092043_seed9",
+      "turing": false,
+      "sign": "[-1, 0, 1, 0, -1, 0, 1, 0, -1]"
+    }
+  ],
+  "train_spread": 34.94558614027589,
+  "held_spread": 101.87516456555923,
+  "harm_spread": 88.18723703147484
+}

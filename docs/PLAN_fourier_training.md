@@ -56,7 +56,8 @@ coarsest k* resolution in the set (one bin = 12.5% of k*), near-flat channels 1�
 
 **Split** (all masks are loss-level config; the gate/`RecoveryInput` is untouched):
 - FIT: species 0 only, spectral terms restricted to the training annulus
-  `B_train = [b_lo, b_hi]·k*_obs` (provisional 0.5–1.5, fixed by D3).
+  `B_train = [b_lo, b_hi]·k*_obs` (provisional 0.5–1.5, fixed by D3 —
+  *closed 2026-08-12 at 0.60/1.55*, DECISIONS.md D-FFT-9 closure 1).
   Normalisation pinned to `B_train` of channel 0 (SPEC §7).
 - HELD OUT: (a) k-bands `B_low ∪ B_harm` on channel 0; (b) channels 1–2 entirely.
 - Existing non-spectral terms run unchanged (they consume only `k*_obs` and

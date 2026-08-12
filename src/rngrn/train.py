@@ -243,6 +243,18 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        dratio_centre=cfg.loss.dratio_centre,
                        dratio_spread=cfg.loss.dratio_spread,
                        bio_box_path=cfg.loss.bio_box_path,
+                       # unit U4 follow-up (firewall-auditor, 2026-08-12): the five
+                       # spectral_* knobs existed in LossConfig AND as recover() kwargs but
+                       # were never threaded here -- the unit-C1 silent-NO-OP class: an
+                       # override would land in frozen_config.yaml while recover() used its
+                       # own defaults. Byte-identical today only because the defaults
+                       # coincide; threading them keeps frozen config and effective config
+                       # the same object.
+                       spectral_b_lo=cfg.loss.spectral_b_lo,
+                       spectral_b_hi=cfg.loss.spectral_b_hi,
+                       spectral_channels=tuple(cfg.loss.spectral_channels),
+                       spectral_nblk=cfg.loss.spectral_nblk,
+                       spectral_ignition_margin=cfg.loss.spectral_ignition_margin,
                        history=hist)                                     # unit P1
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
@@ -417,6 +429,13 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
         w_anticollapse=float(cfg.loss.weights.get("anticollapse", 0.0)),
         w_morphology=float(cfg.loss.weights.get("morphology", 0.0)),
         w_param_prior=float(cfg.loss.weights.get("param_prior", 0.0)),
+        # unit U4 (M1 spectral terms): these are hard-coded rows, not a loop over
+        # cfg.loss.weights, so a new weight key does not appear on the run index for free.
+        w_spec_shape=float(cfg.loss.weights.get("spec_shape", 0.0)),
+        w_spec_aniso=float(cfg.loss.weights.get("spec_aniso", 0.0)),
+        w_spec_amp_mean=float(cfg.loss.weights.get("spec_amp_mean", 0.0)),
+        w_spec_amp_fluct=float(cfg.loss.weights.get("spec_amp_fluct", 0.0)),
+        w_real_moments=float(cfg.loss.weights.get("real_moments", 0.0)),
         n_grid=int(cfg.solver.n_grid), morphology_rollout=bool(cfg.solver.morphology_rollout),
         history_every=int(cfg.train.history_every),
         git_sha=provenance()["git_revision"],

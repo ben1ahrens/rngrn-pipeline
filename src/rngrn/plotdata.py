@@ -38,7 +38,10 @@ from . import observables as OBS
 from .scoring.morphology import FEATURE_ORDER
 
 # Bumped when the KEY SET changes, so a stray npz can say which contract it satisfies.
-ARRAY_SCHEMA_VERSION = 1
+# 1 -> 2 (unit U4, M1 2026-08-12): history_tidy/hist_scalars column set changed
+# (spec_ignited plus, on any run with a spectral term ignited, the five spec_*/real_moments
+# "L_<key>" columns — see history.py::DIAG_KEYS and losses/total.py::_apply_spectral).
+ARRAY_SCHEMA_VERSION = 2
 
 FIELD_DTYPE = np.float32     # fields + spectra: plotted, never differentiated
 AXIS_DTYPE = np.float64      # k axes + sigma(k): read as numbers

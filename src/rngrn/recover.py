@@ -294,6 +294,9 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             batched=False,             # unit b2
             dratio_centre=7.5, dratio_spread=1.0,          # unit 5, biological prior
             bio_box_path="configs/bio_box.yaml",           # unit 5
+            spectral_b_lo=0.60, spectral_b_hi=1.55,        # unit U4, D-FFT-9 closure 1
+            spectral_channels=(0,), spectral_nblk=24,      # unit U4
+            spectral_ignition_margin=1e-3,                 # unit U4, UNCALIBRATED
             history=None):             # plottable training trajectory
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
@@ -336,6 +339,21 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         the serial path is ~1e-12 for one step, not bit-exact over a whole run (see
         _batched_restarts). Requires lbfgs_steps=0, m==N, and a static weighting strategy
         with resid weight 0; each of those raises rather than quietly degrading.
+
+    spectral_b_lo / spectral_b_hi / spectral_channels / spectral_nblk /
+    spectral_ignition_margin: unit U4 (M1 spectral terms, losses/spectral.py) knobs for
+        `SpectralConfig`. Only consulted when `strategy.base` carries a non-zero weight for
+        at least one of the five spectral terms (spec_shape/spec_aniso/spec_amp_mean/
+        spec_amp_fluct/real_moments) -- the same implicit gate `resid`/`param_prior` already
+        use, not a separate enabled flag. When active: `build_frame_targets` runs ONCE (the
+        observed frame does not change across restarts), a `forward.PatternSolver` is built
+        PER RESTART (it owns per-restart warm-start state) seeded like the model init
+        (`_restart_seed`), and both are threaded into `losses.total.total_loss` as a
+        `losses.spectral.SpectralContext`. RAISES if a non-zero spectral weight is combined
+        with `batched=True` (no batched forward solve) or `split_hinges=False` (no
+        `sig_max_pos` -- no ignition signal). The forward solve is expensive (3-9 s/solve
+        at 64^2 -- unrecorded test timing; forward.py module docstring); every default
+        here keeps it OFF.
 
     history: an optional `history.TrainingHistory`. When given, the per-step loss terms, the
         live weights, and the CONSTRAINED physical parameters of EVERY member are recorded at
@@ -402,6 +420,48 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             f"(got {type(strategy).__name__}). An adaptive strategy reads a term's VALUE "
             "to set its weight, and the prior would then be re-weighted by its own "
             "magnitude rather than by the recorded bio_box prior strength.")
+
+    # unit U4 (M1 spectral terms). Gated on the strategy's BASE weights, exactly like
+    # resid/param_prior above -- not a separate enabled flag. MISCONFIGURATION RAISES:
+    # both conditions below would otherwise make the spectral terms silently unavailable
+    # rather than loudly refused.
+    from .losses.spectral import SPECTRAL_TERM_KEYS  # unit U4
+    use_spectral = any(float(strategy.base.get(k, 0.0)) != 0.0 for k in SPECTRAL_TERM_KEYS)
+    if use_spectral and batched:
+        raise ValueError(
+            "a spectral weight is non-zero but batched=True (unit U4): forward.PatternSolver "
+            "owns per-restart warm-start state, which has no batched form, and the batched "
+            "reaction does not broadcast to the per-pixel fields the forward solve needs. "
+            "Run the serial path (batched=False) for spectral runs.")
+    if use_spectral and not split_hinges:
+        raise ValueError(
+            "a spectral weight is non-zero but split_hinges=False (unit U4): spectral "
+            "ignition (losses.spectral.is_ignited) reads parts['sig_max_pos'], which only "
+            "losses.terms.turing_hinges_split (split_hinges=True) produces. Set "
+            "split_hinges=True, or zero every spec_*/real_moments weight.")
+    # Numerics review, 2026-08-12: the spectral terms compare u_star[c] (solver SPECIES c)
+    # against targets from frame[c] (frame CHANNEL c) with no observed_idx routing, so
+    # they are correct ONLY when channel c observes species c on every fitted channel.
+    # Anything else (partial observation, permuted observed_idx) would silently fit the
+    # WRONG species -- refuse loudly instead. Routing u_star[observed_idx[c]] is deferred
+    # until a non-identity spectral run actually exists (Stage 2+); building it now would
+    # be untestable speculation.
+    if use_spectral and any(observed_idx[c] != c for c in spectral_channels):
+        raise ValueError(
+            f"a spectral weight is non-zero but observed_idx={observed_idx} is not the "
+            f"identity on the fitted spectral channels {tuple(spectral_channels)}: the "
+            "spectral terms compare u_star[c] against frame[c] directly and would fit the "
+            "wrong species. Identity mapping only, until observed_idx routing lands.")
+    # Same wrinkle class as param_prior above: an adaptive strategy refreshes its weights
+    # only every update_every steps, so a term that IGNITES mid-run would contribute 0
+    # until the next refresh and then jump. Require static weights for spectral runs.
+    if use_spectral and not getattr(strategy, "static_weights", False):
+        raise ValueError(
+            "a spectral weight is non-zero but the strategy is adaptive "
+            f"({type(strategy).__name__}): adaptive weights refresh on a cadence, so a "
+            "term igniting between refreshes would silently contribute 0 and then jump. "
+            "Spectral runs require a static-weight strategy (same rule as param_prior).")
+
     term_kw = dict(split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
                    detach_xstar=detach_xstar, compute_resid=compute_resid,
                    param_prior_kw=(dict(dratio_centre=dratio_centre,
@@ -416,6 +476,18 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     L_model = 1.0 if nondim else L
     kstar_obs = obs.kstar_of(frame[0].detach().cpu().numpy(), L=L_model)  # firewall: FFT of the observed image
     kgrid = _kgrid_for(kstar_obs, device=dev)
+
+    # unit U4: the observed-frame spectral targets are FIXED across every restart (the
+    # frame does not change), so build them ONCE here. `spec_cfg`/`spec_targets` stay None
+    # when `use_spectral` is False, which is the whole default config.
+    spec_cfg = spec_targets = None
+    if use_spectral:
+        from .losses.spectral import SpectralConfig, build_frame_targets
+        spec_cfg = SpectralConfig(b_lo=spectral_b_lo, b_hi=spectral_b_hi,
+                                  channels=tuple(spectral_channels), nblk=spectral_nblk,
+                                  ignition_margin=spectral_ignition_margin)
+        spec_targets = build_frame_targets(frame.detach().cpu().numpy(), L_model, kstar_obs,
+                                           spec_cfg)
 
     best = None; restart_log = []
     if batched:
@@ -460,6 +532,16 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         model = RNGRN(N=N, form=form, seed=_restart_seed(model_seed, r), init=init,
                       dispersion_backend=dispersion_backend,
                       kstar_obs=kstar_obs if d_init_from_kstar else None).to(dev)
+        # unit U4: a fresh PatternSolver per restart (it owns per-restart warm-start state,
+        # so restart r's Newton warm start must never leak into restart r+1's). Seeded like
+        # the model init so a spectral run is reproducible the same way the init is.
+        spectral_ctx = None
+        if use_spectral:
+            from .forward import PatternSolver
+            from .losses.spectral import SpectralContext
+            solver = PatternSolver(model, n=frame.shape[-1], L=L_model,
+                                   seed=_restart_seed(model_seed, r))
+            spectral_ctx = SpectralContext(solver=solver, targets=spec_targets, cfg=spec_cfg)
         latent_module = None
         latent = None
         if m < N:
@@ -478,7 +560,7 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                 loss, parts = LT.total_loss(model, frame, L_model, observed_idx, kgrid, kstar_obs,
                                             strategy, step=step, latent_fields=latent,
                                             tau=tau, jac_floor=jac_floor, strict=True,
-                                            **term_kw)
+                                            spectral=spectral_ctx, **term_kw)
             except SteadyStateError:
                 # fail-loud honoured: this init cannot form a valid steady state — abandon
                 # the restart rather than optimise against a meaningless x*.
@@ -515,7 +597,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                 latent = latent_module() if latent_module is not None else None
                 loss, _ = LT.total_loss(model, frame, L_model, observed_idx, kgrid, kstar_obs,
                                         strategy, step=adam_steps, latent_fields=latent,
-                                        tau=tau, jac_floor=jac_floor, **term_kw)
+                                        tau=tau, jac_floor=jac_floor,
+                                        spectral=spectral_ctx, **term_kw)
                 loss.backward(); return loss
             try:
                 lopt.step(closure)
@@ -527,7 +610,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                 latent = latent_module() if latent_module is not None else None
                 loss, parts = LT.total_loss(model, frame, L_model, observed_idx, kgrid, kstar_obs,
                                             strategy, step=adam_steps, latent_fields=latent,
-                                            tau=tau, jac_floor=jac_floor, **term_kw)
+                                            tau=tau, jac_floor=jac_floor,
+                                            spectral=spectral_ctx, **term_kw)
         except SteadyStateError:
             # Same condition as a mid-training failure, so handle it the same way. Without
             # this the FINAL scoring pass was unguarded: a single restart that ended on

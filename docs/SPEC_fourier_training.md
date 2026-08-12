@@ -133,6 +133,19 @@ spectrum), so:
    diagnostic D1 of the plan compares the IFT gradient against finite differences
    before any training code is accepted.
 
+   > **Superseded in part, 2026-08-12 (D1 measured; D-FFT-10 binds).** The solver
+   > description in items 2–3 — projected Krylov (GMRES/CG on the normal equations,
+   > space projected off the zero modes) — is exactly the scheme D1 measured to be
+   > BIASED: on the grid the translations are only near-null, so the projected
+   > residual converges (1e-13) while the TRUE residual stalls (5.5e-4–5.7e-3) and
+   > every gradient inherits that error. The adjoint is instead the MINIMAL-NORM
+   > least-squares solution — right-preconditioned LSMR, `M = (γ + Dk²)⁻¹`, with
+   > true-residual refinement — and the Newton polish carries a 2×2
+   > translation-subspace correction. The orthogonality verification of item 3
+   > (measured ≤1e-18) is precisely what makes the minimal-norm solution the correct
+   > adjoint. See `docs/DECISIONS.md` D-FFT-10 and `docs/DIAGNOSTICS_fft.md`
+   > F-D1-2/F-D1-3; implemented in `src/rngrn/forward.py`.
+
 **Ignition, and when the forward map exists at all.** A randomly initialised RNGRN
 is almost never Turing-unstable; its forward solve relaxes to homogeneous and no
 spectral loss exists. Therefore (owner decision):
@@ -181,6 +194,9 @@ For a field `v` (one channel, H×W, periodic):
     `[b_lo·k*_obs, b_hi·k*_obs]`, provisionally `b_lo = 0.5, b_hi = 1.5`
     (UNCALIBRATED until diagnostic D3 fixes the edges from the measured spectrum's
     support; recorded in DECISIONS.md when set).
+    *Closed 2026-08-12:* D3 measured the edges at `b_lo = 0.60, b_hi = 1.55`
+    (the ≥1%-of-peak contiguous RAPS support, 8 bins) — see DECISIONS.md
+    D-FFT-9 closure 1. The provisional values above are kept for the record.
   - `B_low` — the low-k shoulder `(0, b_lo·k*_obs)`, excluding the DC bin.
   - `B_harm` — the harmonic band `[b_hi·k*_obs, 3·k*_obs]`.
   `B_low ∪ B_harm` are the HELD-OUT bands of the Stage-0 gate; at later stages all

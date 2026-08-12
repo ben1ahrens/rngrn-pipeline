@@ -61,7 +61,10 @@ PARAM_SPEC = (("KA", 2), ("KR", 2), ("alpha", 2), ("delta", 1), ("beta", 1), ("D
 
 # Per-step diagnostics `losses.total` already puts in `parts`. Absent keys are recorded NaN
 # only if they are absent on the FIRST recorded step too — see TrainingHistory._names.
-DIAG_KEYS = ("total", "sig_max", "sig_max_pos", "kstar_model", "rel_err")
+# `spec_ignited` (unit U4, M1 spectral terms): 1.0/0.0, present on every step once
+# `losses.total.compute_terms(spectral=...)` is not None; NaN on any run that never passes
+# a spectral context (the ordinary case, since the five spectral weights default 0.0).
+DIAG_KEYS = ("total", "sig_max", "sig_max_pos", "kstar_model", "rel_err", "spec_ignited")
 
 HIST_DTYPE = np.float32   # a trajectory is plotted, not differentiated; see plotdata.py
 

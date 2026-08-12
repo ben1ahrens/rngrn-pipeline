@@ -52,6 +52,8 @@ RUN_ID_COLS = (
     "staging_off_frac", "staging_ramp_frac", "staging_keys", "detach_xstar",
     "w_kstar", "w_turing", "w_anticollapse", "w_anchor", "w_resid", "w_morphology",
     "w_param_prior", "dratio_centre", "dratio_spread", "ratio_update_every",
+    # unit U4 (M1 spectral terms) — mirrors train.py's hard-coded w_<key> rows.
+    "w_spec_shape", "w_spec_aniso", "w_spec_amp_mean", "w_spec_amp_fluct", "w_real_moments",
     "batched", "device", "dispersion_backend", "model_init", "nondim",
     "d_init_from_kstar", "deterministic", "n_grid", "history_every", "morphology_rollout",
 )

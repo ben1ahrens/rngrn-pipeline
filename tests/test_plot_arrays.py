@@ -193,8 +193,13 @@ class _FakeModel:
 
 
 def _parts(total=1.0):
+    # spec_ignited (unit U4, M1 spectral terms): included here so this fixture's "every
+    # diagnostic is finite for a live member" property (test_serial_history_renders_dense_
+    # arrays_with_nan_for_a_dead_member) still holds. A REAL non-spectral run never sets
+    # this key, so history.py::DIAG_KEYS reads it back as NaN there -- see history.py's own
+    # docstring and tests/test_ignition_gating.py for that (by-design) case.
     return dict(total=total, sig_max=0.2, sig_max_pos=0.2, kstar_model=0.4, rel_err=0.1,
-                ss_converged=True, L_kstar=0.5, L_turing=0.25, L_anchor=0.1,
+                ss_converged=True, spec_ignited=1.0, L_kstar=0.5, L_turing=0.25, L_anchor=0.1,
                 L_anticollapse=0.0, weights_used=dict(kstar=1.0, turing=0.5, anchor=2.0))
 
 

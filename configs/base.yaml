@@ -30,8 +30,13 @@ loss:
   # own. It is present because `apply_overrides` fails loud on a key this dict does not
   # already carry, so without the row `-o loss.weights.param_prior=...` was unreachable
   # from the CLI and the biological prior could not be switched on for any run.
+  # spec_shape/spec_aniso/spec_amp_mean/spec_amp_fluct/real_moments: unit U4, M1 spectral
+  # terms (losses/spectral.py). 0.0 is OFF, same reason as param_prior above: apply_overrides
+  # fails loud on a key this dict does not already carry, so without this row
+  # `-o loss.weights.spec_shape=...` would be unreachable from the CLI.
   weights: {kstar: 1.0, turing: 1.0, resid: 0.0, anticollapse: 0.5, anchor: 2.0, morphology: 0.1,
-            param_prior: 0.0}
+            param_prior: 0.0, spec_shape: 0.0, spec_aniso: 0.0, spec_amp_mean: 0.0,
+            spec_amp_fluct: 0.0, real_moments: 0.0}
   tau: 0.12
   jac_floor: 1.0
 

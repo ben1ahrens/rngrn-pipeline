@@ -12,16 +12,54 @@ from __future__ import annotations
 import torch
 
 from . import terms as T
+from .spectral import is_ignited, spectral_terms, SPECTRAL_TERM_KEYS
 
 
 class SteadyStateError(RuntimeError):
     """Raised when the model-derived steady state fails to converge (fail-loud)."""
 
 
+def _apply_spectral(term_vals: dict, parts: dict, spectral) -> None:
+    """Ignite-or-omit the five spectral terms (unit U4). `spectral` is a
+    `losses.spectral.SpectralContext` or None (checked by the caller).
+
+    HISTORY-STABILITY (history.py:141-150, `TrainingHistory._names`): the recorder freezes
+    its scalar column set on the FIRST recorded step and RAISES if a later step's key set
+    differs. Ignition is a training-time EVENT — a run may cross the margin mid-training —
+    so, unlike `compute_resid`/`param_prior_kw` (fixed for a whole run), the five "L_<key>"
+    entries below must exist in `parts` on EVERY step this function runs, real when
+    computed and `float("nan")` when skipped (never faked as 0.0 — CLAUDE.md §4). They are
+    written directly into `parts`, not derived from `term_vals`, so a skipped step still
+    carries them; `total_loss`'s `for k, v in term_vals.items(): parts[f"L_{k}"] = ...` loop
+    overwrites these placeholders with the real values on an ignited-and-solved step, since
+    `term_vals` then contains the five keys and this function does not.
+    """
+    for k in SPECTRAL_TERM_KEYS:
+        parts.setdefault(f"L_{k}", float("nan"))
+    if not is_ignited(parts, spectral.cfg.ignition_margin):
+        # Not ignited: no solve attempted — the forward solve is expensive (3-9 s/solve
+        # at 64^2, unrecorded test timing; forward.py module docstring) and nothing gates
+        # it but detected Turing instability.
+        parts["spectral_skipped"] = "not_ignited"
+        parts["spec_ignited"] = 0.0
+        return
+    parts["spec_ignited"] = 1.0
+    u_star, reason = spectral.solver.solve()
+    if reason != "ok":
+        # Ignited (Turing-unstable beyond margin) but the forward solve did not produce a
+        # usable pattern this step (relax/Newton failure, or converged homogeneous). Same
+        # "omitted, not zeroed" contract as a not-ignited step.
+        parts["spectral_skipped"] = reason
+        return
+    spec_vals, spec_parts = spectral_terms(u_star, spectral.targets, spectral.cfg)
+    term_vals.update(spec_vals)
+    parts.update(spec_parts)
+
+
 def compute_terms(model, frame, L, observed_idx, kgrid, kstar_obs,
                   latent_fields=None, tau=0.12, jac_floor=1.0, strict=True,
                   split_hinges=True, hinge_k_min_frac=0.1, detach_xstar=False,
-                  compute_resid=True, param_prior_kw=None) -> tuple:
+                  compute_resid=True, param_prior_kw=None, spectral=None) -> tuple:
     """Return (terms_dict, parts_dict) of UNWEIGHTED loss terms + diagnostics.
 
     strict=True (default): raise SteadyStateError if the steady state did not converge,
@@ -59,6 +97,14 @@ def compute_terms(model, frame, L, observed_idx, kgrid, kstar_obs,
     losses/terms.py::param_prior had no caller outside terms.composite_loss (the standalone
     reference form, which recover.py does not use), so a run configured with the prior on
     trained without it and said nothing.
+
+    spectral: a `losses.spectral.SpectralContext`, or None (default) to OMIT the M1
+    spectral terms entirely -- with spectral=None every existing number is bit-identical
+    (unit U4, milestone M1). Not None: AFTER the hinge terms produce `parts` (so
+    `sig_max_pos` exists), the five terms IGNITE on `losses.spectral.is_ignited` (detected
+    patterning, not a config flag) -- see `_apply_spectral` above for the omitted-not-zeroed
+    contract and the history-stability reason all five "L_<key>" placeholders are written
+    every step this argument is not None.
     """
     xstar, conv = T.steady_state(model)
     if not conv and strict:
@@ -89,13 +135,15 @@ def compute_terms(model, frame, L, observed_idx, kgrid, kstar_obs,
         L_p, p_p = T.param_prior(model, **param_prior_kw)
         term_vals["param_prior"] = L_p
         parts.update(p_p)
+    if spectral is not None:
+        _apply_spectral(term_vals, parts, spectral)
     return term_vals, parts
 
 
 def total_loss(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
                step=0, latent_fields=None, tau=0.12, jac_floor=1.0, strict=True,
                split_hinges=True, hinge_k_min_frac=0.1, detach_xstar=False,
-               compute_resid=True, param_prior_kw=None) -> tuple:
+               compute_resid=True, param_prior_kw=None, spectral=None) -> tuple:
     """Composite loss via a weighting strategy. Returns (scalar loss, parts).
 
     Raises SteadyStateError (from compute_terms) when strict and x* did not converge."""
@@ -104,7 +152,7 @@ def total_loss(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
         latent_fields=latent_fields, tau=tau, jac_floor=jac_floor, strict=strict,
         split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
         detach_xstar=detach_xstar, compute_resid=compute_resid,
-        param_prior_kw=param_prior_kw)
+        param_prior_kw=param_prior_kw, spectral=spectral)
     loss, weights_used = strategy.combine(term_vals, step, model=model)
     parts["total"] = float(loss.detach())
     parts["weights_used"] = weights_used
@@ -119,7 +167,8 @@ def total_loss(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
 def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
                           tau=0.12, jac_floor=1.0, split_hinges=True,
                           hinge_k_min_frac=0.1, detach_xstar=False,
-                          compute_resid=False, param_prior_kw=None) -> tuple:
+                          compute_resid=False, param_prior_kw=None,
+                          spectral=None) -> tuple:
     """Batched twin of `compute_terms`. Returns (term_vals, parts, converged).
 
     `model` is a model.BatchedRNGRN of B members; every term_vals entry is a (B,) tensor and
@@ -144,6 +193,11 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
     the batched reaction does not broadcast to (model.BatchedRNGRN.reaction), so there is no
     batched residual to compute. Its default weight is 0 (exp06, settled off), so this costs
     the default path nothing -- but it is refused loudly rather than silently skipped.
+
+    `spectral` must be None (unit U4). `forward.PatternSolver` owns per-restart warm-start
+    state and cannot be shared across a batched member axis, and (same reason as the
+    residual) the batched reaction does not broadcast to the per-pixel fields the forward
+    solve needs. Refused loudly rather than silently skipped, mirroring `compute_resid`.
     """
     if compute_resid:
         raise ValueError(
@@ -151,6 +205,12 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
             "reaction takes one state vector per member, not per-pixel states. Its default "
             "weight is 0 (exp06 settled it off), so batched recovery is available only for "
             "loss.weights.resid == 0. Use the serial path for residual runs.")
+    if spectral is not None:
+        raise ValueError(
+            "compute_terms_batched cannot compute the spectral terms (unit U4): "
+            "forward.PatternSolver owns per-restart warm-start state, which has no batched "
+            "form, and the batched reaction does not broadcast to per-pixel fields. Use the "
+            "serial path for spectral runs.")
     xstar, conv = T.steady_state_batched(model)
     # ones for the failed members: a poison guard for the SHARED graph, not a scored value.
     x_ok = torch.where(conv.unsqueeze(-1), xstar, torch.ones_like(xstar))
@@ -180,7 +240,7 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
 def total_loss_batched(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
                        step=0, tau=0.12, jac_floor=1.0, split_hinges=True,
                        hinge_k_min_frac=0.1, detach_xstar=False,
-                       compute_resid=False, param_prior_kw=None) -> tuple:
+                       compute_resid=False, param_prior_kw=None, spectral=None) -> tuple:
     """Batched twin of `total_loss`. Returns (loss_vec (B,), parts, converged (B,)).
 
     The weighting strategy is applied UNCHANGED: `combine` only ever does
@@ -197,7 +257,7 @@ def total_loss_batched(model, frame, L, observed_idx, kgrid, kstar_obs, strategy
         model, frame, L, observed_idx, kgrid, kstar_obs, tau=tau, jac_floor=jac_floor,
         split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
         detach_xstar=detach_xstar, compute_resid=compute_resid,
-        param_prior_kw=param_prior_kw)
+        param_prior_kw=param_prior_kw, spectral=spectral)
     loss, weights_used = strategy.combine(term_vals, step, model=model)
     parts["total"] = loss.detach().cpu().numpy()
     parts["weights_used"] = weights_used

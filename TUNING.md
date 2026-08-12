@@ -34,6 +34,19 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
 - **[TUNE] loss weights** — `loss.weights = {kstar, turing, resid, anticollapse, morphology}`
   (`config.py::LossConfig`, starting values from design-doc §5). These are the primary tuning
   axis. k* and turing lead; resid is normalised to O(1); anticollapse floors ‖J‖.
+- **[TUNE] spectral term weights — all 0.0 (OFF), UNCALIBRATED at birth** —
+  `loss.weights = {spec_shape, spec_aniso, spec_amp_mean, spec_amp_fluct, real_moments}`
+  (added M1, 2026-08-12; docs/DECISIONS.md D-FFT-11). Swept at Stage 0 per
+  `docs/SPEC_fourier_training.md` §5; settled values go to the D-FFT-9 ledger. Any nonzero
+  weight ignites the forward pattern solve (`src/rngrn/forward.py`) on detected Turing
+  instability — cost at training grids is UNMEASURED (~3–9 s/solve at 64², an unrecorded
+  test timing), so weight
+  sweeps need `scripts/guarded_run.sh` and a measured budget first. Serial path only;
+  the batched path refuses loudly.
+- **[TUNE] `loss.spectral_ignition_margin` (1e-3) — UNCALIBRATED**, mirrors the
+  `turing_hinges_split` margin default (`losses/terms.py:186`). The band edges
+  `loss.spectral_b_lo/b_hi = 0.60/1.55` are MEASURED (D-FFT-9 closure 1), not free
+  knobs — re-measure per sample class (Stage 2) rather than sweeping them.
 - **[IMPL] k\* tolerance band `tau` — INERT. Reads nothing; sweeping it is a no-op.**
   `loss.tau` (0.12) is threaded `train.py:211` → `recover.py:224` → `total.py` →
   `terms.kstar_anchor` (`losses/terms.py:291`, and `kstar_anchor_batched` at `:732`) and is

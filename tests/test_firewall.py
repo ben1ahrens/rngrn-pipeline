@@ -26,6 +26,14 @@ RECOVERY_SIDE = [
     # reads only the model's own parameters (same character as eval/dynamical.py); classified
     # 2026-08-12 after arriving unclassified in the feature/turing-training merge — the
     # completeness test caught it, which is that test doing its job.
+    "losses/spectral.py",                          # 2026-08-12, M1 spectral terms: torch
+    # spectral statistics of the RECOVERY's own predicted pattern (u_star) + observed-frame
+    # statistics only (frame, L, kstar_obs) — no ground-truth quantity is read or imported.
+    "forward.py",                                   # 2026-08-12, unit U4/M1: the IFT/adjoint
+    # forward-solve module (ported from scripts/diag_fft_d1.py, D1-verified). Consumes only
+    # the model's own parameters and grid geometry; reads no observed frame and no
+    # ground-truth quantity (module docstring). Imported by recover.py (also recovery-side)
+    # and losses/total.py only indirectly via the SpectralContext duck-typed `.solve()`.
 ]
 
 # SCORING-side modules under losses/ and eval/. These MAY read the answer key; they are
@@ -70,11 +78,28 @@ SIDE_NEUTRAL = ["utils.py"]
 # but the import alone is enough to reach it in two lines), and scripts/ is on sys.path for
 # the whole pytest session, so they are importable by bare top-level name like the five
 # above. Added at birth per CLAUDE.md §5.
+# `canon_stripes_evidence` and `exp02`..`exp12` added 2026-08-12 (M1 firewall audit):
+# pre-existing DRIFT, not new code — all twelve open `payload.h5` (several read outright
+# truth: exp08 the generator's k_star, exp10 the ground-truth jacobian and D, exp12
+# x_star/sigma_max/k_star), all live in `scripts/` (invisible to the completeness glob),
+# and all are importable by bare top-level name because the suite puts `scripts/` on
+# sys.path. `canon_stripes_evidence` was written 2026-08-10 alongside the five canon
+# scripts that WERE listed and was simply missed — exactly the failure mode the comment
+# block above documents. No recovery-side module imported any of them at audit time;
+# these entries keep it that way. (`exp01_turing_reachability`, `diag_fft_d1`,
+# `diag_fft_d2` and `diag_fft_d5_analysis` are deliberately absent: verified to open no
+# payload — d1/d2 use a tracked recovered checkpoint, d5_analysis reads recovery outputs.)
 FORBIDDEN = ["rd_models", "data.solver", "data.cache", "data.gate", "data.registry",
              "AnswerKey", "answer_key", "td_figures", "gen_tg3",
              "canon_select", "canon_generate", "canon_annotate",
              "diag_fft_d3", "diag_fft_d6",
-             "diag_fft_d4"]   # opens payload.h5 (observed frame; AnswerKey discarded)
+             "diag_fft_d4",   # opens payload.h5 (observed frame; AnswerKey discarded)
+             "canon_stripes_evidence",
+             "exp02_objective_fix", "exp03_turing_first", "exp04_endres_staging",
+             "exp05_pixel_minibatch", "exp06_residual_sweep", "exp07_long_training",
+             "exp08_trivial_baseline", "exp09_anchor_and_ensemble",
+             "exp10_cubic_dispersion", "exp11_robustness_baseline",
+             "exp12_spectral_amplitude"]
 
 
 def _imports(path):
@@ -127,7 +152,10 @@ def test_every_loss_and_eval_module_is_classified():
     neither list fails, which forces the classification decision at the moment a module is
     added rather than at the moment someone notices.
     """
-    discovered = {"history.py"}
+    # forward.py added alongside history.py (unit U4): both are package-root modules the
+    # losses/eval glob below cannot see, so both must be listed explicitly or a package-root
+    # addition goes unaudited exactly the way history.py itself once did.
+    discovered = {"history.py", "forward.py"}
     for pkg in ("losses", "eval"):
         for path in sorted((SRC / pkg).glob("*.py")):
             if path.name == "__init__.py":

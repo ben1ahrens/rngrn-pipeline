@@ -317,6 +317,26 @@ indistinguishable from evidence of absence.** So:
 
 ### 7c. There is NO discretised Laplacian in training. It is analytic, in Fourier space.
 
+**Corrected 2026-08-12 (unit U4, Milestone M1).** The heading and the next paragraph are no
+longer unconditionally true. When the M1 spectral loss terms are enabled AND ignited
+(`losses/spectral.py`, `loss.weights.spec_shape`/`spec_aniso`/`spec_amp_mean`/
+`spec_amp_fluct`/`real_moments` non-zero AND `losses.spectral.is_ignited` detects Turing
+instability beyond the margin mid-training — the solve itself then decides patterned-ness
+against the D-FFT-9 closure-2 amplitude floor; the two are different claims, per this very
+section), training now runs a REAL forward solve — `src/rngrn/forward.py`'s
+`PatternSolver`, a spectral (rfft2) ETDRK4 relax to the patterned steady state followed by a
+Newton polish, with gradients through it via a minimal-norm LSMR adjoint (D-FFT-10,
+`docs/DIAGNOSTICS_fft.md`), not backprop through the integrator. This is still spectral, not
+finite-difference (§7c's "never simulates" claim is about avoiding a DISCRETISED Laplacian,
+and the forward solve does not add one — see `forward.py::make_spatial_F`), but it IS a
+simulation, run inside the training loop, which the paragraph below said never happened.
+**OFF by default** (every spec_*/real_moments weight defaults 0.0 — `losses/terms.py::
+DEFAULT_WEIGHTS`, `config.py::LossConfig.weights`), so the linear-theory-only path described
+below remains exactly what every run before this unit, and every run at the default config
+today, actually executes. The k-grid consequences in the numbered list are UNCHANGED by this
+— they describe the dispersion-only terms, which stay analytic regardless of whether the
+spectral terms are also active.
+
 Repeatedly re-derived from scratch, so it is written down once here.
 
 **Training never simulates.** `losses/terms.py` constrains the reaction *pointwise*; the

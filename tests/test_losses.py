@@ -328,6 +328,74 @@ def test_skipping_the_residual_leaves_the_total_unchanged_at_weight_zero():
     assert totals[False] == pytest.approx(totals[True])
 
 
+class _StubSpectralSolver:
+    """Records how many times `.solve()` was called (the cost guard: it must be zero when
+    spectral did not ignite) and returns a preset (u_star | None, reason)."""
+    def __init__(self, result):
+        self._result = result
+        self.n_calls = 0
+
+    def solve(self):
+        self.n_calls += 1
+        return self._result
+
+
+_SPEC_KEYS = ("spec_shape", "spec_aniso", "spec_amp_mean", "spec_amp_fluct", "real_moments")
+
+
+def test_spectral_enumeration_contract_ignited_vs_skipped():
+    """unit U4 (M1 wiring). `spectral=None` (every other test in this file) reproduces the
+    line-279 enumeration bit for bit -- untouched by this test. With a `SpectralContext`,
+    the five spectral keys are PRESENT-IFF-COMPUTED: absence must never be mistaken for "the
+    term was satisfied" (the same contract `test_skipping_the_residual_omits_it_rather_than_
+    faking_a_zero` pins for `resid`). Ignition itself is forced via `ignition_margin`
+    (+-1e9) rather than hunting for a genuinely Turing-unstable/stable model -- `is_ignited`
+    is a pure function of `parts['sig_max_pos']` and the margin, so this is an equivalent,
+    much cheaper control than picking fixture seeds."""
+    from rngrn import observables as OBS
+    from rngrn.losses.spectral import SpectralConfig, SpectralContext, build_frame_targets
+
+    frame, L, obs_idx = _tiny_recovery_inputs()
+    m, _ = _model_at_steady_state(seed=2)
+    # the frame's OWN measured k* (firewall-legal, same call recover.py makes), not an
+    # arbitrary constant -- build_frame_targets needs the B_train band to actually contain
+    # this tiny fixture's one real spectral peak.
+    kstar_obs = float(OBS.kstar_of(frame[0].numpy(), L=L))
+    BASE = {"kstar", "turing", "resid", "anticollapse", "anchor"}
+
+    # ---- ignited: margin forced below any possible sig_max_pos -----------------------
+    ignite_cfg = SpectralConfig(ignition_margin=-1e9)
+    targets = build_frame_targets(frame.numpy(), L, kstar_obs, ignite_cfg)
+    solver = _StubSpectralSolver((frame, "ok"))
+    ctx = SpectralContext(solver=solver, targets=targets, cfg=ignite_cfg)
+    vals, parts = LT.compute_terms(m, frame, L, obs_idx, KGRID, kstar_obs, spectral=ctx)
+    assert set(vals) == BASE | set(_SPEC_KEYS)
+    assert solver.n_calls == 1
+    assert "spectral_skipped" not in parts
+    assert parts["spec_ignited"] == 1.0
+    # compute_terms() alone does NOT write the real "L_<key>" values -- that loop lives in
+    # total_loss (`for k, v in term_vals.items(): parts[f"L_{k}"] = ...`), so parts still
+    # carries the NaN placeholders here; the real numbers are in `vals` (term_vals).
+    for k in _SPEC_KEYS:
+        assert torch.isfinite(vals[k])
+        assert parts[f"L_{k}"] != parts[f"L_{k}"], (
+            f"L_{k} is only overwritten by total_loss's term_vals loop, not by "
+            "compute_terms alone")
+
+    # ---- skipped: margin forced above any possible sig_max_pos -- solver NOT called --
+    skip_cfg = SpectralConfig(ignition_margin=1e9)
+    targets2 = build_frame_targets(frame.numpy(), L, kstar_obs, skip_cfg)
+    solver2 = _StubSpectralSolver((frame, "ok"))
+    ctx2 = SpectralContext(solver=solver2, targets=targets2, cfg=skip_cfg)
+    vals2, parts2 = LT.compute_terms(m, frame, L, obs_idx, KGRID, kstar_obs, spectral=ctx2)
+    assert set(vals2) == BASE
+    assert solver2.n_calls == 0, "the forward solve is expensive; must not run when not ignited"
+    assert parts2["spectral_skipped"] == "not_ignited"
+    assert parts2["spec_ignited"] == 0.0
+    for k in _SPEC_KEYS:
+        assert parts2[f"L_{k}"] != parts2[f"L_{k}"], f"L_{k} must be NaN, not absent or 0.0"
+
+
 def test_adaptive_strategies_never_qualify_for_the_residual_skip():
     """An adaptive strategy may move a weight off 0 later, so a base weight of 0 licenses
     nothing. This uses `ratio`: unit 13 made gradnorm/ntk raise at CONSTRUCTION rather than

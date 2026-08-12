@@ -98,7 +98,11 @@ class LossConfig:
     # `anchor` (2.0) is the frame-scale anchor promoted from exp05; see TUNING.md [TUNE].
     weights: dict = field(default_factory=lambda: dict(
         kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5, anchor=2.0, morphology=0.1,
-        param_prior=0.0))                   # param_prior default 0.0: opt-in (unit 5)
+        param_prior=0.0,                    # param_prior default 0.0: opt-in (unit 5)
+        # unit U4 (M1 spectral terms, losses/spectral.py): 0.0 by default, gated on DETECTED
+        # patterning (losses.spectral.is_ignited) — see losses/terms.py::DEFAULT_WEIGHTS.
+        spec_shape=0.0, spec_aniso=0.0, spec_amp_mean=0.0, spec_amp_fluct=0.0,
+        real_moments=0.0))
     strategy: str = "fixed"                 # 'fixed' | 'scheduled' | 'ratio' | 'gradnorm' | 'ntk'
     tau: float = 0.12                        # k* tolerance band
     jac_floor: float = 1.0                   # anti-collapse ||J|| floor
@@ -115,6 +119,19 @@ class LossConfig:
                                              # [TUNE], see configs/bio_box.yaml # unit 5
     bio_box_path: str = "configs/bio_box.yaml"  # source of every plausibility number # unit 5
     ratio_update_every: int = 50            # 'ratio' strategy: recompute cadence, in steps  # unit 13
+
+    # ---- unit U4: M1 spectral terms (losses/spectral.py::SpectralConfig knobs) ---------
+    # No separate "enabled" flag: recover.py derives whether to run the forward solve from
+    # `weights` alone (any spec_shape/spec_aniso/spec_amp_mean/spec_amp_fluct/real_moments
+    # non-zero), mirroring how `resid`/`param_prior` already gate off the strategy's base
+    # weight rather than a redundant bool. Every default below matches
+    # `losses.spectral.SpectralConfig`'s own default and provenance; see that class's
+    # docstring for the full reasoning, not repeated here.
+    spectral_b_lo: float = 0.60             # D-FFT-9 closure 1 (docs/DECISIONS.md)
+    spectral_b_hi: float = 1.55             # D-FFT-9 closure 1
+    spectral_channels: tuple = (0,)         # Stage 0 fits channel 0 only (SPEC §5)
+    spectral_nblk: int = 24                 # central log-power block size
+    spectral_ignition_margin: float = 1e-3  # UNCALIBRATED — see SpectralConfig docstring
 
 
 @dataclass

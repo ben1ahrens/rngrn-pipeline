@@ -2837,7 +2837,10 @@ not null (‖At‖/‖Av‖ 3.6e-4 at 96²). The projected-GMRES adjoint reporte
 while its true residual stalled at 5.5e-4–5.7e-3, biasing gradients by 1e-5–5.5e-2
 relative — flat in ε (systematic), with a tangent-mode cross-check localising the error to
 the solve. With the minimal-norm scheme, true residuals reach ≤3.6e-12 and all five loss
-terms pass FD verification at ≤2.8e-5 (tolerance 1e-4). The theory: for translation-
+terms pass FD verification at ≤2.8e-5 (tolerance 1e-4). *(Correction 2026-08-12, evidence
+audit: those two figures are the 64² PROBE's; the committed 96² acceptance record —
+`experiments/diag_fft/d1/results.json` — measured residuals ≤6.1e-12 and worst FD rel err
+6.4e-8. Both regimes pass; the probe numbers were conflated with the record here.)* The theory: for translation-
 invariant losses (∂L/∂u ⊥ t at ≤1e-18) the pinning response cancels in dL/dθ, leaving
 exactly the minimal-norm adjoint as the correct object.
 
@@ -2908,3 +2911,95 @@ licence to pick a cut. The calibration re-runs on the Stage-0 SPECTRAL seed set,
 stable structures are the success condition; the inherited 5 %-of-max rule stays marked
 UNCALIBRATED in the meantime. The same run set fixes the R2 baseline inputs: log10
 max-pairwise spreads d_ratio 0.44 (Turing subset) to KR 10.9 decades.
+
+### D-FFT-11 — M1 spectral machinery lands INERT; the aniso normaliser follows the comparator, not the D1 prototype
+
+**Date:** 2026-08-12. **Status:** DECIDED (implementation record for milestone M1).
+**Decided by:** the implementing agents under §10 delegated authority (units U1–U4 of the
+approved M1 plan).
+
+**What landed:** `src/rngrn/forward.py` (the D-FFT-10 forward/adjoint machinery, ported
+from `scripts/diag_fft_d1.py` with constants verbatim, wrapped in a
+`torch.autograd.Function` whose backward runs exactly ONE minimal-norm adjoint solve on
+the accumulated cotangent), `src/rngrn/losses/spectral.py` (torch RAPS with
+integer-arange×dk bin edges per F-D6-1, band masks at the D-FFT-9 closure-1 edges
+0.60/1.55, the five terms, ignition helpers), the side-neutral `utils.spectral_block`
+port (drift-tested against `scoring.morphology._spectral_block`), and wiring through
+`losses/total.py`, `config.py`, `configs/base.yaml`, `recover.py`, `history.py`,
+`plotdata.py` (ARRAY_SCHEMA_VERSION 1→2), `train.py`/`export.py`. Suite: 615 passed /
+1 skipped, unsandboxed.
+
+**Decisions bundled here:**
+
+1. **All five weights land at 0.0 — UNCALIBRATED at birth** (SPEC §5's rule). The
+   default path is bit-identical to pre-M1 behaviour; the existing term-key enumeration
+   assertion (`tests/test_losses.py:279`) passes byte-unmodified and pins that branch.
+   Ignition gating derives from a nonzero spectral weight (the `resid`/`param_prior`
+   precedent) — no separate enable flag was added.
+2. **`spec_aniso` normalises the central block by the BLOCK's own power, following
+   `scoring.morphology._spectral_block` — NOT by whole-spectrum power as the D1
+   prototype (`scripts/diag_fft_d1.py::spectral_block_torch`) does.** The prototype's
+   normaliser was never parity-checked against the comparator it claims to prototype;
+   ported verbatim it fails parity at 0.3–0.6 % relative (reproduced at audit
+   2026-08-12: max relative deviation 2.8e-3–5.3e-3 over 5 seeds at 96²/nblk 24). SPEC §5
+   mandates the *ported comparator arithmetic*, so the comparator wins. Parity is now exact (1e-12), bound
+   three ways: torch vs morphology, `utils` numpy port vs morphology (drift test), torch
+   vs utils. D1's gradient verification is unaffected — it verified the IFT chain, which
+   holds under either normaliser, and the suite's FD regression re-verified the ported
+   chain at rel err 1.9e-10.
+3. **The suite carries an IFT-vs-FD regression TRIPWIRE, tolerance 5e-3**
+   (`tests/test_forward_solve.py`: 64², tracked fixture checkpoint, 1 direction × 2 term
+   forms, ~42 s). This is a port-breakage detector (a wrong adjoint, sign error, or
+   dropped correction produces O(1) errors), NOT a re-acceptance and NOT a weakening:
+   D1's acceptance (tol 1e-4, measured 6.4e-8 at 96² × 10 directions) stands and is
+   re-runnable via `scripts/diag_fft_d1.py`. Measured at port time: 1.9e-10.
+4. **`ignition_margin` defaults to 1e-3**, mirroring `turing_hinges_split`'s `margin`
+   default (`losses/terms.py:186`) — UNCALIBRATED, tagged in `SpectralConfig` and
+   TUNING.md. Distinct from the real-space `pattern_floor` (D-FFT-9 closure 2), which
+   gates patterned-ness of the completed solve, not ignition.
+5. **History stability across intermittent ignition is by NaN back-fill**: skipped steps
+   write `L_spec_* = NaN` (honest "not computed") plus numeric `spec_ignited` 0/1, so
+   `TrainingHistory`'s frozen column set never changes mid-run; `term_vals` itself omits
+   skipped keys (omitted-never-zeroed, SPEC §3). ARRAY_SCHEMA_VERSION bumped 1→2 for the
+   changed column set.
+
+**What was rejected and why:** (a) zeroing skipped spectral terms instead of omitting
+them — a log could then not distinguish "no pattern yet" from "spectral loss = 0"
+(SPEC §3 forbids it); (b) keeping the D1 prototype's whole-spectrum normaliser — fails
+parity with the comparator the SPEC names (point 2); (c) a separate `spectral_enabled`
+config flag — redundant with the weight-derived gating precedent and one more knob to
+drift.
+
+**Owner flags carried forward (not blockers, weight-0 defaults shield all three):** the
+forward-solve cost at training grids is UNMEASURED (per-solve ~3–9 s at 64², an
+unrecorded test timing; a relax step-budget cap is an owner call before calibration);
+`real_moments`' gradient carries the F-D1-1 finite-grid translation leakage into the
+combined adjoint cotangent once its weight is nonzero; and (numerics review) the
+warm-started Newton chain is BRANCH CONTINUATION with no dynamical-stability check — over
+a long drifting θ trajectory it can track a patterned F=0 branch that has become
+dynamically unstable, and residual + amplitude floor both still pass. D1's warm-Newton
+evidence covers ±ε FD pairs about a fixed base, not a long chain; a periodic fresh
+re-relax cadence or a linear-stability spot check on u* is an owner decision before any
+calibration run.
+
+**Post-review hardening (same day, from the three audits — all refusals/guards, no
+behaviour change on any default or spectral-identity path):** `train.fit` now threads the
+five `spectral_*` knobs into `recover()` (they existed at both ends but were never
+passed — the unit-C1 silent-NO-OP class, caught by the firewall audit before any run
+existed); `recover()` refuses a non-identity `observed_idx` on the fitted spectral
+channels (the terms compare `u_star[c]` to `frame[c]` directly — routing
+`u_star[observed_idx[c]]` is deferred until a non-identity spectral run exists) and
+refuses adaptive-weight strategies for spectral runs (ignition between weight refreshes
+would contribute 0 then jump — the param_prior rule); `spec_shape`/`spec_amp_mean`/
+`spec_amp_fluct` fail loud on zero/non-finite model-side power, mean, or std;
+`raps_torch` refuses non-square fields; twelve pre-existing payload-opening `scripts/`
+modules (`canon_stripes_evidence`, `exp02`–`exp12`) were added to
+`tests/test_firewall.py::FORBIDDEN` (drift closure, not new code); `forward.py` imports
+`THETA_NAMES` from `model.py` instead of redefining it. Final suite after hardening:
+618 passed / 1 skipped, unsandboxed (the +3 over the pre-review 615 are the 512² RAPS
+parity case and the two new refusal tests).
+
+**Where it lives:** the files above; tests `test_forward_solve.py`,
+`test_spectral_terms.py`, `test_spectral_utils.py`, `test_ignition_gating.py`, plus the
+enumeration-contract test in `test_losses.py`. CLAUDE.md §7c amended in the same change
+(training MAY now simulate — ignition-gated, off by default).

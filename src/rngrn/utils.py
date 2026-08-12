@@ -117,3 +117,64 @@ def provenance(extra: dict | None = None) -> dict:
     if extra:
         prov.update(extra)
     return prov
+
+
+def spectral_block(field, n: int = 24):
+    """Central low-frequency block of the normalised 2-D log power spectrum, flattened.
+
+    SIDE-NEUTRAL PORT of scoring.morphology._spectral_block (which cannot be imported
+    recovery-side — firewall constraint). Arithmetic is identical; tests/test_spectral_utils.py
+    binds the two against drift. Ported 2026-08-12.
+
+    Normalise-THEN-log ordering, deliberately: power is normalised to sum 1 BEFORE log1p
+    (then renormalised), not after. Taking log1p of raw power first makes the descriptor
+    depend on absolute intensity, which would be a bug in a morphology diagnostic since
+    brightness is not morphology.
+
+    Returns (n*n,) float array: central n×n block of the normalised 2-D log power spectrum,
+    flattened. Raises ValueError on invalid input (non-2-D, non-square, non-finite fields,
+    or n out of range) or on constant fields (no power in the central block).
+    """
+    import numpy as np
+    f = np.asarray(field, dtype=float)
+    if f.ndim != 2:
+        raise ValueError(
+            f"field must be a single 2-D field (H, W); got shape {f.shape}. Pass one "
+            f"channel, e.g. frame[0], not the whole (m, H, W) stack.")
+    if f.shape[0] != f.shape[1]:
+        raise ValueError(
+            f"field must be square; got shape {f.shape}. observables.morphology "
+            f"builds its Fourier grid from shape[0] for BOTH axes, so a non-square field "
+            f"would be silently mis-binned.")
+    if f.shape[0] < 4:
+        raise ValueError(f"field is too small to have a spectrum: shape {f.shape}")
+    if not np.all(np.isfinite(f)):
+        raise ValueError(f"field contains non-finite values ({np.sum(~np.isfinite(f))} "
+                         f"of {f.size}); refusing to score a corrupt field")
+
+    # Center, FFT, power
+    f = f - f.mean()
+    P = np.abs(np.fft.fftshift(np.fft.fft2(f))) ** 2
+    H, W = P.shape
+
+    # Validate block size
+    if n < 4 or n > min(H, W):
+        raise ValueError(
+            f"n={n} is not a usable block size for a {H}x{W} field: need 4 <= n <= "
+            f"{min(H, W)}")
+
+    # Extract central block
+    top, left = H // 2 - n // 2, W // 2 - n // 2
+    block = P[top:top + n, left:left + n]
+
+    # Normalize, log, renormalize
+    total = block.sum()
+    if not np.isfinite(total) or total <= 0:
+        raise ValueError(
+            "the central spectral block carries no power — the field is (near-)constant, "
+            "so it has no spatial mode to compare")
+    block = np.log1p(block / total)          # scale-free FIRST, then compress
+    total_log = block.sum()
+    if total_log <= 0:
+        raise ValueError("log-power block sums to zero; cannot normalise")
+    return (block / total_log).ravel()

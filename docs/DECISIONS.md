@@ -2892,3 +2892,19 @@ band powers) did agree at 256², which is why D4's pilot rollouts at 256² remai
 their band-distance purpose — but no class call below 512² may be reported.
 
 **Where it lives:** SPEC §8 step 1 (the licence stays unexercised); `docs/DIAGNOSTICS_fft.md` §D2.
+
+#### D-FFT-9 ledger note — zero-call threshold REMAINS OPEN; the baseline cannot calibrate it
+
+**Date:** 2026-08-12. **Status:** OPEN (evidence recorded, no number chosen — deliberately).
+**Decided by:** the implementing agent under §10, from diagnostic D5.
+
+The pre-registered rule places the cut at the separation point of consistently-present vs
+consistently-absent edge magnitudes. On the 10-seed baseline
+(`experiments/diag_fft/d5/analysis.json`) that precondition does not exist: 10 seeds
+produce 10 distinct sign structures and every one of the 9 edges is "mixed" at an 80 %
+consensus bar — there are no consistent edges to build the two distributions from. Per the
+rule's own text this is a finding (the baseline's sign structure is unstable), not a
+licence to pick a cut. The calibration re-runs on the Stage-0 SPECTRAL seed set, where
+stable structures are the success condition; the inherited 5 %-of-max rule stays marked
+UNCALIBRATED in the meantime. The same run set fixes the R2 baseline inputs: log10
+max-pairwise spreads d_ratio 0.44 (Turing subset) to KR 10.9 decades.

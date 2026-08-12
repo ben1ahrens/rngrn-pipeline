@@ -11,7 +11,7 @@ None of these numbers is a recovery result. M0 licenses exactly one sentence cla
 
 ---
 
-## D1 — IFT feasibility (GO/NO-GO)                      [status: PASS at 64² probe; full 96²×10-direction record in results.json]
+## D1 — IFT feasibility (GO/NO-GO)                      [status: **PASS** — 96², 10 directions × 5 terms, worst rel err 6.4e-8 (tol 1e-4)]
 
 `scripts/diag_fft_d1.py`, `experiments/diag_fft/d1/results.json`.
 
@@ -36,7 +36,13 @@ Acceptance, stated before the run: per-direction relative error of the direction
 derivative ≤ 1e-4 at the best ε of a {1e-3, 1e-4, 1e-5} sweep, for the four spectral
 terms; `real_moments` reported separately (see finding F-D1-1).
 
-Measured at 96² (final verdict pending the FD loop):
+**VERDICT: PASS.** Full record (`experiments/diag_fft/d1/results.json`, run.log): all
+10 random θ-directions × all 5 term forms agree with central finite differences to
+worst-case 6.4e-8 relative (spectral terms) and 8.1e-8 (`real_moments`), against the
+pre-stated 1e-4 tolerance — after two solver defects that D1 itself caught were fixed
+(F-D1-2, F-D1-3 below). The IFT forward map is GO; M0's gate condition holds.
+
+Measured at 96²:
 
 - Translational zero modes: ‖A t‖/‖A v_rand‖ = 3.6e-4 (both directions), halved from
   8.3e-4 at 64² — consistent with spectral-truncation origin, i.e. the modes are exact

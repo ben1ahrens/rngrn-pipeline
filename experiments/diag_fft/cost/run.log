@@ -1,0 +1,9 @@
+guarded_run: START MemAvailable=15567MB oom_score_adj=500 -- .venv/bin/python -u scripts/diag_fft_cost.py --grids 96,128,192,256 --warm-count 0 --out experiments/diag_fft/cost
+fixture: sig_max=0.3567 k*_lin=0.1761 L=285.49
+=== grid n=96 ===
+  fresh: 1374.20s amp=0.1701 k*=0.183 maxrss=0.678 GiB
+/home/benja/projects/personal/rngrn/worktrees/fft-training/scripts/../src/rngrn/losses/spectral.py:234: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:822.)
+  if not torch.isfinite(norm) or float(norm) <= 0.0:
+  adjoint: 0.839s maxrss=0.678 GiB
+=== grid n=128 ===

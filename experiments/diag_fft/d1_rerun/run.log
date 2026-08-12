@@ -1,0 +1,16 @@
+guarded_run: START MemAvailable=14922MB oom_score_adj=500 -- .venv/bin/python -u scripts/diag_fft_d1.py --seed 1 --out experiments/diag_fft/d1_rerun
+fixture: sig_max=0.3567 at k*=0.176, max Re eig(J)=-0.4367
+relaxing to patterned state on 96x96, L=285.49, dt=0.1850 ...
+patterned: amp=0.1720, k*=0.149, ||F||/||u|| = 3.47e-13
+zero modes: ||A t||/||A v_rand|| = tx 3.57e-04, ty 3.50e-04
+Traceback (most recent call last):
+  File "/home/benja/projects/personal/rngrn/worktrees/fft-training/scripts/diag_fft_d1.py", line 679, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/benja/projects/personal/rngrn/worktrees/fft-training/scripts/diag_fft_d1.py", line 496, in main
+    u_t, _ = solve_pattern_for(model_t, n, L, dt, a.seed, k2_full, gamma)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/benja/projects/personal/rngrn/worktrees/fft-training/scripts/diag_fft_d1.py", line 418, in solve_pattern_for
+    raise RuntimeError(f"pattern solve did not converge (||F||/||u|| = {res:.2e})")
+RuntimeError: pattern solve did not converge (||F||/||u|| = 1.29e-07)
+guarded_run: END rc=1 MemAvailable=16181MB

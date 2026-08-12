@@ -15,10 +15,13 @@ Two D1 findings are load-bearing and bind this module:
   carries an explicit 2x2 translation-subspace correction per step; without it the solve
   stalls at ~2.4e-8 instead of reaching <=1e-11.
 
-Cost caveat, stated honestly: `PatternSolver`'s per-step cost at training grid sizes is
-UNMEASURED — D1/D2 measured single solves at diagnostic sizes (64^2-96^2 relax + Newton;
-0.9-1.7 s/field rollouts at eval sizes), not amortised per-Adam-step cost under warm
-starting. A relax step-budget cap is an owner decision before any calibration run.
+Cost, measured 2026-08-12 (`experiments/diag_fft/cost/`, `gpu_probe/results.json`):
+on CPU a FRESH solve is 938-1374 s at 96^2 and a Newton-only warm solve at Adam-scale
+theta displacement is WORSE (5030 s) — the CPU path is not viable at training grids.
+The CUDA integrator measures 3.25 ms/ETDRK4-step at 512^2 fp64 (~21x the numpy path's
+64 ms/step), which is why this module carries a device path and a warm_mode="relax"
+policy. Amortised per-Adam-step cost under warm relaxing is still UNMEASURED; the
+warm_max_chunks budget cap is UNCALIBRATED.
 
 Nothing here reads the observed frame or any answer-key quantity: the solver consumes
 only the model's own parameters and grid geometry supplied by the caller.
@@ -29,6 +32,8 @@ import numpy as np
 import torch
 
 from .losses.terms import steady_state
+from .etdrk4_torch import (_torch_reaction_builder, integrate_etdrk4_rfft_torch,
+                           torch_half_coeffs)
 from .eval.numerics import integrate_etdrk4_rfft, _spectral_k2
 from .eval.rollout import _reaction_np_builder
 from . import observables as obs
@@ -61,7 +66,8 @@ def make_spatial_F(model: RNGRN, n: int, L: float):
     kx = 2.0 * np.pi * np.fft.fftfreq(n, d=L / n)
     ky = 2.0 * np.pi * np.fft.rfftfreq(n, d=L / n)
     KX, KY = np.meshgrid(kx, ky, indexing="ij")
-    k2h = torch.from_numpy(KX**2 + KY**2)      # (n, n//2+1), rfft2 layout
+    # (n, n//2+1), rfft2 layout, on the model's device (no-op on the CPU default path)
+    k2h = torch.from_numpy(KX**2 + KY**2).to(model.device)
 
     def spatial_F(u: torch.Tensor) -> torch.Tensor:
         lap = torch.fft.irfft2(-k2h * torch.fft.rfft2(u), s=(n, n))
@@ -72,8 +78,8 @@ def make_spatial_F(model: RNGRN, n: int, L: float):
 
 def translation_modes(u: torch.Tensor, n: int, L: float) -> tuple[torch.Tensor, torch.Tensor]:
     """du/dx, du/dy of a (N, n, n) periodic field, spectrally (the exact zero modes of A)."""
-    kx = torch.from_numpy(2.0 * np.pi * np.fft.fftfreq(n, d=L / n))
-    ky = torch.from_numpy(2.0 * np.pi * np.fft.rfftfreq(n, d=L / n))
+    kx = torch.from_numpy(2.0 * np.pi * np.fft.fftfreq(n, d=L / n)).to(u.device)
+    ky = torch.from_numpy(2.0 * np.pi * np.fft.rfftfreq(n, d=L / n)).to(u.device)
     KX, KY = torch.meshgrid(kx, ky, indexing="ij")
     uh = torch.fft.rfft2(u)
     tx = torch.fft.irfft2(1j * KX * uh, s=(n, n))
@@ -109,6 +115,151 @@ def _minnorm_solve(apply_fwd, apply_adj, Mmv, b: np.ndarray, size: int,
     return x, res
 
 
+def _sym_ortho(a: float, b: float) -> tuple[float, float, float]:
+    """Stable Givens rotation (ported from scipy.sparse.linalg._isolve; BSD)."""
+    import math
+    if b == 0.0:
+        return math.copysign(1.0, a) if a != 0.0 else 1.0, 0.0, abs(a)
+    if a == 0.0:
+        return 0.0, math.copysign(1.0, b), abs(b)
+    if abs(b) > abs(a):
+        tau = a / b
+        s = math.copysign(1.0, b) / math.sqrt(1.0 + tau * tau)
+        c = s * tau
+        r = b / s
+    else:
+        tau = b / a
+        c = math.copysign(1.0, a) / math.sqrt(1.0 + tau * tau)
+        s = c * tau
+        r = a / c
+    return c, s, r
+
+
+def _lsmr_torch(matvec, rmatvec, b: torch.Tensor, atol: float = 1e-13,
+                btol: float = 1e-13, maxiter: int = 20000) -> torch.Tensor:
+    """LSMR (Fong & Saunders 2011) on torch tensors, any device — a faithful port of
+    scipy.sparse.linalg.lsmr's recurrences (damp=0, x0=0, and scipy's DEFAULT
+    conlim=1e8 stop included: the D1-verified `_minnorm_solve` calls scipy with that
+    default, and on these near-singular operators the conlim test can fire, so dropping
+    it would silently change the verified stopping behaviour). Exists so the CUDA
+    solver path preserves D-FFT-10's minimal-norm semantics instead of bouncing every
+    matvec through the CPU. Rotation scalars stay Python floats (float64), exactly like
+    the scipy reference; only the Golub-Kahan vectors live on the device.
+    ``tests/test_forward_solve.py`` pins parity against scipy on the same operator."""
+    u = b.clone()
+    normb = float(torch.linalg.vector_norm(u))
+    if normb == 0.0:
+        return torch.zeros_like(rmatvec(b))
+    beta = normb
+    u = u / beta
+    v = rmatvec(u)
+    alpha = float(torch.linalg.vector_norm(v))
+    x = torch.zeros_like(v)
+    if alpha > 0.0:
+        v = v / alpha
+    else:
+        return x
+
+    zetabar = alpha * beta
+    alphabar = alpha
+    rho = rhobar = cbar = 1.0
+    sbar = 0.0
+    h = v.clone()
+    hbar = torch.zeros_like(v)
+    betadd = beta
+    betad = 0.0
+    rhodold = 1.0
+    tautildeold = thetatilde = zeta = d = 0.0
+    normA2 = alpha * alpha
+    normr = beta
+    maxrbar = 0.0
+    minrbar = 1e+100
+    ctol = 1e-8                      # 1/conlim, scipy's default conlim=1e8
+    if zetabar == 0.0:
+        return x
+
+    for itn in range(1, maxiter + 1):
+        u = matvec(v) - alpha * u
+        beta = float(torch.linalg.vector_norm(u))
+        if beta > 0.0:
+            u = u / beta
+            v = rmatvec(u) - beta * v
+            alpha = float(torch.linalg.vector_norm(v))
+            if alpha > 0.0:
+                v = v / alpha
+        chat, shat, alphahat = _sym_ortho(alphabar, 0.0)
+        rhoold = rho
+        c, s, rho = _sym_ortho(alphahat, beta)
+        thetanew = s * alpha
+        alphabar = c * alpha
+        rhobarold = rhobar
+        zetaold = zeta
+        thetabar = sbar * rho
+        rhotemp = cbar * rho
+        cbar, sbar, rhobar = _sym_ortho(cbar * rho, thetanew)
+        zeta = cbar * zetabar
+        zetabar = -sbar * zetabar
+        hbar = h + (-(thetabar * rho / (rhoold * rhobarold))) * hbar
+        x = x + (zeta / (rho * rhobar)) * hbar
+        h = v + (-(thetanew / rho)) * h
+        # ||r|| estimate (scipy's rotation cascade, verbatim in structure)
+        betaacute = chat * betadd
+        betacheck = -shat * betadd
+        betahat = c * betaacute
+        betadd = -s * betaacute
+        thetatildeold = thetatilde
+        ctildeold, stildeold, rhotildeold = _sym_ortho(rhodold, thetabar)
+        thetatilde = stildeold * rhobar
+        rhodold = ctildeold * rhobar
+        betad = -stildeold * betad + ctildeold * betahat
+        tautildeold = (zetaold - thetatildeold * tautildeold) / rhotildeold
+        taud = (zeta - thetatilde * tautildeold) / rhodold
+        d = d + betacheck * betacheck
+        normr = float(np.sqrt(d + (betad - taud) ** 2 + betadd * betadd))
+        normA2 = normA2 + beta * beta
+        normA = float(np.sqrt(normA2))
+        normA2 = normA2 + alpha * alpha
+        maxrbar = max(maxrbar, rhobarold)
+        if itn > 1:
+            minrbar = min(minrbar, rhobarold)
+        condA = max(maxrbar, rhotemp) / min(minrbar, rhotemp)
+        normar = abs(zetabar)
+        normx = float(torch.linalg.vector_norm(x))
+        test1 = normr / normb
+        test2 = normar / (normA * normr) if (normA * normr) != 0.0 else np.inf
+        test3 = 1.0 / condA
+        t1 = test1 / (1.0 + normA * normx / normb)
+        rtol = btol + atol * normA * normx / normb
+        if (1.0 + test3 <= 1.0 or 1.0 + test2 <= 1.0 or 1.0 + t1 <= 1.0
+                or test3 <= ctol or test2 <= atol or test1 <= rtol):
+            break
+    return x
+
+
+def _minnorm_solve_t(apply_fwd, apply_adj, Mmv, b: torch.Tensor,
+                     tol: float = 1e-10, maxiter: int = 20000
+                     ) -> tuple[torch.Tensor, float]:
+    """Torch mirror of `_minnorm_solve` — SAME semantics and constants (right
+    preconditioning, LSMR atol=btol=1e-13, 6 refinement rounds on the TRUE residual,
+    stall break at res > 0.9*res_prev), running entirely on b's device. Exists so the
+    CUDA path honours D-FFT-10 without a per-matvec device round-trip."""
+    bn = max(float(torch.linalg.vector_norm(b)), 1e-300)
+    x = torch.zeros_like(b)
+    res_prev = np.inf
+    for _ in range(6):
+        r = b - apply_fwd(x)
+        res = float(torch.linalg.vector_norm(r)) / bn
+        if res < tol or res > 0.9 * res_prev:
+            break
+        res_prev = res
+        y = _lsmr_torch(lambda z: apply_fwd(Mmv(z)), lambda z: Mmv(apply_adj(z)),
+                        r, atol=1e-13, btol=1e-13, maxiter=maxiter)
+        x = x + Mmv(y)
+    else:
+        res = float(torch.linalg.vector_norm(b - apply_fwd(x))) / bn
+    return x, res
+
+
 def solve_adjoint(F_fn, u_star: torch.Tensor, rhs: torch.Tensor, k2_full: np.ndarray,
                   D: np.ndarray, gamma: float, tol: float = 1e-10,
                   maxiter: int = 20000) -> tuple[torch.Tensor, float]:
@@ -121,6 +272,30 @@ def solve_adjoint(F_fn, u_star: torch.Tensor, rhs: torch.Tensor, k2_full: np.nda
     Nsp, n, _ = shape_field
     u0 = u_star.detach()
     _, vjp_fn = torch.func.vjp(F_fn, u0)
+
+    if u0.device.type != "cpu":
+        # Device path: identical algebra via the torch LSMR (`_minnorm_solve_t` mirrors
+        # `_minnorm_solve` constant-for-constant); no per-matvec CPU round-trips.
+        D_dev = torch.from_numpy(np.asarray(D)).to(u0.device)
+        k2_dev = torch.from_numpy(np.asarray(k2_full)).to(u0.device)
+
+        def AT_t(x: torch.Tensor) -> torch.Tensor:
+            (out,) = vjp_fn(x.reshape(shape_field))
+            return out.detach().reshape(-1)
+
+        def Amv_t(x: torch.Tensor) -> torch.Tensor:
+            _, out = torch.func.jvp(F_fn, (u0,), (x.reshape(shape_field),))
+            return out.detach().reshape(-1)
+
+        def Mmv_t(x: torch.Tensor) -> torch.Tensor:
+            vh = torch.fft.fft2(x.reshape(Nsp, n, n), dim=(-2, -1))
+            vh = vh / (gamma + D_dev[:, None, None] * k2_dev[None])
+            return torch.real(torch.fft.ifft2(vh, dim=(-2, -1))).reshape(-1)
+
+        g_t = rhs.detach().reshape(-1)
+        lam_t, res_full = _minnorm_solve_t(AT_t, Amv_t, Mmv_t, g_t,
+                                           tol=tol, maxiter=maxiter)
+        return lam_t, res_full
 
     def AT(x: np.ndarray) -> np.ndarray:
         v = torch.from_numpy(np.ascontiguousarray(x, dtype=np.float64))
@@ -155,12 +330,22 @@ def newton_polish(F_fn, u: torch.Tensor, modes_of, k2_full, D, gamma,
     scale = float(u.norm())
     r = float(F_fn(u).detach().norm()) / max(scale, 1e-300)
     Nsp, n, _ = u.shape
+    on_device = u.device.type != "cpu"
 
     def precon(x: np.ndarray) -> np.ndarray:
         v = x.reshape(Nsp, n, n)
         vh = np.fft.fft2(v, axes=(1, 2))
         vh = vh / (gamma + D[:, None, None] * k2_full[None])
         return np.real(np.fft.ifft2(vh, axes=(1, 2))).reshape(-1)
+
+    if on_device:
+        D_dev = torch.from_numpy(np.asarray(D)).to(u.device)
+        k2_dev = torch.from_numpy(np.asarray(k2_full)).to(u.device)
+
+        def precon_t(x: torch.Tensor) -> torch.Tensor:
+            vh = torch.fft.fft2(x.reshape(Nsp, n, n), dim=(-2, -1))
+            vh = vh / (gamma + D_dev[:, None, None] * k2_dev[None])
+            return torch.real(torch.fft.ifft2(vh, dim=(-2, -1))).reshape(-1)
 
     for _ in range(n_iter):
         if r < tol:
@@ -178,12 +363,26 @@ def newton_polish(F_fn, u: torch.Tensor, modes_of, k2_full, D, gamma,
             (out,) = vjp_fn(v.reshape(u.shape))
             return out.detach().reshape(-1).numpy()
 
+        def Amv_t(x: torch.Tensor) -> torch.Tensor:
+            _, out = torch.func.jvp(F_fn, (u0,), (x.reshape(u.shape),))
+            return out.detach().reshape(-1)
+
+        def ATmv_t(x: torch.Tensor) -> torch.Tensor:
+            (out,) = vjp_fn(x.reshape(u.shape))
+            return out.detach().reshape(-1)
+
         Fv = F_fn(u).detach()
         # Bulk step: minimal-norm LSMR on the UNPROJECTED system (finding F-D1-3 — a
         # projected inner solve hides near-null error and floors Newton at ~1e-9).
-        dx, _ = _minnorm_solve(Amv, ATmv, precon, -Fv.reshape(-1).numpy(),
-                               u.numel(), tol=1e-12, maxiter=8000)
-        step = torch.from_numpy(dx).reshape(u.shape)
+        # Device path = the same algebra through `_minnorm_solve_t` (torch LSMR).
+        if on_device:
+            dx_t, _ = _minnorm_solve_t(Amv_t, ATmv_t, precon_t, -Fv.reshape(-1),
+                                       tol=1e-12, maxiter=8000)
+            step = dx_t.reshape(u.shape)
+        else:
+            dx, _ = _minnorm_solve(Amv, ATmv, precon, -Fv.reshape(-1).numpy(),
+                                   u.numel(), tol=1e-12, maxiter=8000)
+            step = torch.from_numpy(dx).reshape(u.shape)
         # TRANSLATION-SUBSPACE CORRECTION (finding F-D1-2). Grid pinning makes the
         # translations near-null, not null; a theta-perturbed fixed point sits at a
         # slightly different phase and the phase part of the step is best solved
@@ -197,7 +396,8 @@ def newton_polish(F_fn, u: torch.Tensor, modes_of, k2_full, D, gamma,
             if float(q.norm()) > 1e-12:
                 Q.append(q / q.norm())
         if len(Q) == 2:
-            resid_after = Fv.reshape(-1) + torch.from_numpy(Amv(dx))
+            resid_after = Fv.reshape(-1) + (Amv_t(dx_t) if on_device
+                                            else torch.from_numpy(Amv(dx)))
             At = []
             for q in Q:
                 _, Aq = torch.func.jvp(F_fn, (u0,), (q.reshape(u.shape),))
@@ -224,15 +424,21 @@ def newton_polish(F_fn, u: torch.Tensor, modes_of, k2_full, D, gamma,
 
 def relax_to_pattern(model: RNGRN, xstar: np.ndarray, n: int, L: float, dt: float,
                      seed: int, noise: float = 1e-2, chunk: int = 500,
-                     max_chunks: int = 400, flat_tol: float = 1e-4) -> np.ndarray:
-    """ETDRK4 from x* + noise until channel-0 amplitude AND k* are flat to flat_tol over
-    5 consecutive chunks. Deterministic for fixed seed. Raises on blow-up or
-    non-saturation — the CALLER decides whether that is fatal (fresh solve inside
-    training legitimately fails when theta wanders; a diagnostic fixture must not)."""
-    D = model.D.detach().numpy()
+                     max_chunks: int = 400, flat_tol: float = 1e-4,
+                     X0: np.ndarray | None = None) -> np.ndarray:
+    """ETDRK4 from x* + noise (or a supplied warm state X0 — the diag script's original
+    warm-relax parameter, restored for warm_mode="relax") until channel-0 amplitude AND
+    k* are flat to flat_tol over 5 consecutive chunks. Deterministic for fixed seed.
+    Raises on blow-up or non-saturation — the CALLER decides whether that is fatal
+    (fresh solve inside training legitimately fails when theta wanders; a diagnostic
+    fixture must not)."""
+    D = model.D.detach().cpu().numpy()
     reaction_np = _reaction_np_builder(model)
-    rng = np.random.default_rng(seed)
-    X = xstar[:, None, None] + noise * rng.standard_normal((model.N, n, n))
+    if X0 is None:
+        rng = np.random.default_rng(seed)
+        X = xstar[:, None, None] + noise * rng.standard_normal((model.N, n, n))
+    else:
+        X = X0.copy()
     amps: list[float] = []
     ks: list[float] = []
     for _ in range(max_chunks):
@@ -246,6 +452,42 @@ def relax_to_pattern(model: RNGRN, xstar: np.ndarray, n: int, L: float, dt: floa
             if ((a.max() - a.min()) / a.mean() < flat_tol
                     and (k.max() - k.min()) / k.mean() < flat_tol):
                 return X
+    raise RuntimeError(f"no saturation in {max_chunks * chunk} steps")
+
+
+def relax_to_pattern_torch(model: RNGRN, xstar: np.ndarray, n: int, L: float,
+                           dt: float, seed: int, device: torch.device,
+                           noise: float = 1e-2, chunk: int = 500,
+                           max_chunks: int = 400, flat_tol: float = 1e-4,
+                           X0: torch.Tensor | None = None) -> torch.Tensor:
+    """`relax_to_pattern` on the D2-verified torch integrator (etdrk4_torch), fields on
+    `device`. SAME initial condition as the numpy path (numpy rng, same seed) so the two
+    backends relax the same trajectory up to FFT-backend round-off; the saturation
+    detector reads channel 0 on the host per chunk (one small transfer per 500 steps).
+    Returns the (N, n, n) field ON THE DEVICE."""
+    D = model.D.detach().cpu().numpy()
+    reaction_t = _torch_reaction_builder(model, device)
+    coeffs = torch_half_coeffs(D, n, L, dt, device)
+    if X0 is None:
+        rng = np.random.default_rng(seed)
+        X_np = xstar[:, None, None] + noise * rng.standard_normal((model.N, n, n))
+        X = torch.from_numpy(X_np).to(device).unsqueeze(0)      # (1, N, n, n)
+    else:
+        X = X0.detach().to(device).clone().unsqueeze(0)
+    amps: list[float] = []
+    ks: list[float] = []
+    for _ in range(max_chunks):
+        X, blew = integrate_etdrk4_rfft_torch(X, reaction_t, n, dt, chunk, coeffs)
+        if blew:
+            raise RuntimeError("forward relax blew up")
+        ch0 = X[0, 0].detach().cpu().numpy()
+        amps.append(float(ch0.std()))
+        ks.append(float(obs.kstar_of(ch0, L=L)))
+        if len(amps) >= 5:
+            a = np.array(amps[-5:]); k = np.array(ks[-5:])
+            if ((a.max() - a.min()) / a.mean() < flat_tol
+                    and (k.max() - k.min()) / k.mean() < flat_tol):
+                return X[0]
     raise RuntimeError(f"no saturation in {max_chunks * chunk} steps")
 
 
@@ -304,10 +546,28 @@ class PatternSolver:
                                          (warm state cleared: a homogeneous field would
                                          re-converge homogeneous forever as a warm start)
 
-    Warm-start policy (D1): Newton-ONLY from the previous u* — an ETDRK4 re-relax would
-    drift the pinned phase. A failed warm Newton falls back to a fresh relax before
-    reporting failure. dt = 0.2/|eig(J)|_max and gamma = |eig(J)|_max are recomputed per
-    solve from the current theta, as in the diagnostic.
+    Warm-start policy — TWO modes, dispatched by ``warm_mode``:
+
+    - ``"newton"`` (default): Newton-ONLY from the previous u*, exactly the D1
+      instrumentation contract — an ETDRK4 re-relax would drift the pinned phase and
+      contaminate any finite-difference check with grid-phase sensitivity (F-D1-1).
+      A failed warm Newton falls back to a fresh relax before reporting failure.
+    - ``"relax"``: a SHORT warm ETDRK4 re-relax from the previous u* (budget
+      ``warm_max_chunks``, then the standard saturation detector) followed by Newton
+      polish; failure falls back to the fresh path. This is the TRAINING mode: the
+      training losses are translation-invariant, so the phase drift that disqualifies
+      a re-relax for FD instrumentation is harmless there, and the 2026-08-12 cost
+      measurement showed Newton-only warm starts are pathological at Adam-scale theta
+      displacement (warm Newton 5030 s vs fresh 938 s at 96^2 —
+      `experiments/diag_fft/cost/run_attempt1.log`). ``warm_max_chunks=40`` is
+      UNCALIBRATED (a budget cap, not a measured knob).
+
+    Device: ``device=None`` derives the solve device from the model (recover.py moves
+    the model to the training device). On CUDA the relax runs on the D2-verified torch
+    integrator and Newton/adjoint run through the torch LSMR (`_minnorm_solve_t`,
+    same D-FFT-10 semantics); on CPU every path is byte-identical to the D1 port.
+    dt = 0.2/|eig(J)|_max and gamma = |eig(J)|_max are recomputed per solve from the
+    current theta, as in the diagnostic.
     """
 
     #: Newton convergence requirement on ||F||/||u|| (D1 verbatim).
@@ -315,7 +575,8 @@ class PatternSolver:
 
     def __init__(self, model: RNGRN, n: int, L: float, seed: int,
                  noise: float = 1e-2, chunk: int = 500, max_chunks: int = 400,
-                 flat_tol: float = 1e-4):
+                 flat_tol: float = 1e-4, device: str | torch.device | None = None,
+                 warm_mode: str = "newton", warm_max_chunks: int = 40):
         self.model = model
         self.n = int(n)
         self.L = float(L)
@@ -324,6 +585,17 @@ class PatternSolver:
         self.chunk = chunk
         self.max_chunks = max_chunks
         self.flat_tol = flat_tol
+        self.device = torch.device(device) if device is not None else model.device
+        if self.device.type != model.device.type:
+            raise ValueError(
+                f"PatternSolver device={self.device} but the model lives on "
+                f"{model.device} — the spatial F closure mixes model parameters and "
+                "field tensors, so they must share a device. Move the model, or drop "
+                "the device argument (None derives it from the model).")
+        if warm_mode not in ("newton", "relax"):
+            raise ValueError(f"warm_mode must be 'newton' or 'relax', got {warm_mode!r}")
+        self.warm_mode = warm_mode
+        self.warm_max_chunks = int(warm_max_chunks)   # UNCALIBRATED budget cap
         self.k2_full = _spectral_k2(self.n, self.L)
         self._warm: torch.Tensor | None = None
         self.last_residual: float = float("nan")
@@ -334,6 +606,22 @@ class PatternSolver:
     def _newton(self, u0: torch.Tensor, F_fn, gamma: float, D_np: np.ndarray):
         modes_of = lambda uu: list(translation_modes(uu, self.n, self.L))  # noqa: E731
         return newton_polish(F_fn, u0, modes_of, self.k2_full, D_np, gamma)
+
+    def _relax(self, xstar: np.ndarray, dt: float, X0: torch.Tensor | None = None,
+               max_chunks: int | None = None) -> torch.Tensor:
+        """Dispatch the ETDRK4 relax by device. X0 = warm re-relax (warm_mode="relax");
+        None = fresh from x* + noise. Returns a (N, n, n) tensor on the solve device."""
+        mc = self.max_chunks if max_chunks is None else max_chunks
+        if self.device.type == "cpu":
+            X0_np = X0.detach().cpu().numpy() if X0 is not None else None
+            X = relax_to_pattern(self.model, xstar, self.n, self.L, dt, self.seed,
+                                 noise=self.noise, chunk=self.chunk,
+                                 max_chunks=mc, flat_tol=self.flat_tol, X0=X0_np)
+            return torch.from_numpy(np.ascontiguousarray(X))
+        return relax_to_pattern_torch(self.model, xstar, self.n, self.L, dt,
+                                      self.seed, self.device, noise=self.noise,
+                                      chunk=self.chunk, max_chunks=mc,
+                                      flat_tol=self.flat_tol, X0=X0)
 
     def _finish(self, u: torch.Tensor | None, reason: str):
         self.last_reason = reason
@@ -349,28 +637,36 @@ class PatternSolver:
         xs, ok = steady_state(model)
         if not ok:
             return self._finish(None, "solve_failed")
-        xstar = xs.detach().numpy()
+        xstar = xs.detach().cpu().numpy()
         J = model.jacobian(xs, create_graph=False).detach()
         jac_rate = float(torch.linalg.eigvals(J).abs().max())
         if not np.isfinite(jac_rate) or jac_rate <= 0.0:
             raise RuntimeError(f"|eig(J)|_max = {jac_rate!r} — not a usable timescale")
         dt = 0.2 / jac_rate
         gamma = jac_rate
-        D_np = model.D.detach().numpy()
+        D_np = model.D.detach().cpu().numpy()
         F_fn = make_spatial_F(model, self.n, self.L)
 
         u, res = None, np.inf
         if self._warm is not None:
-            u, res = self._newton(self._warm, F_fn, gamma, D_np)
+            if self.warm_mode == "newton":
+                u, res = self._newton(self._warm, F_fn, gamma, D_np)
+            else:
+                # warm_mode="relax": short re-relax from the previous u*, then Newton.
+                # A budget-exhausted or blown-up warm relax is NOT failure — it falls
+                # through to the fresh path below, same as a stalled warm Newton.
+                try:
+                    Xw = self._relax(xstar, dt, X0=self._warm,
+                                     max_chunks=self.warm_max_chunks)
+                    u, res = self._newton(Xw, F_fn, gamma, D_np)
+                except RuntimeError:
+                    u, res = None, np.inf
         if u is None or res > self.CONVERGENCE_TOL:
             try:
-                X = relax_to_pattern(model, xstar, self.n, self.L, dt, self.seed,
-                                     noise=self.noise, chunk=self.chunk,
-                                     max_chunks=self.max_chunks, flat_tol=self.flat_tol)
+                u0 = self._relax(xstar, dt)
             except RuntimeError:
                 return self._finish(None, "solve_failed")
-            u, res = self._newton(torch.from_numpy(np.ascontiguousarray(X)),
-                                  F_fn, gamma, D_np)
+            u, res = self._newton(u0, F_fn, gamma, D_np)
             if res > self.CONVERGENCE_TOL:
                 return self._finish(None, "solve_failed")
         self.last_residual = float(res)

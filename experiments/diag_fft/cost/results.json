@@ -1,0 +1,28 @@
+{
+  "ckpt": "experiments/tune_comp/runs/m3_registry_20260803_190250_seed3/checkpoints/model.pt",
+  "args": {
+    "ckpt": "experiments/tune_comp/runs/m3_registry_20260803_190250_seed3/checkpoints/model.pt",
+    "grids": "96,128,192,256",
+    "periods": 8.0,
+    "seed": 0,
+    "warm_eps": 0.001,
+    "warm_count": 0,
+    "out": "experiments/diag_fft/cost"
+  },
+  "git_rev": "fa4c294",
+  "torch_version": "2.13.0+cu130",
+  "kstar_lin": 0.17607003501750879,
+  "L": 285.48572988264687,
+  "sig_max": 0.35666856809478087,
+  "grids": {
+    "96": {
+      "fresh_s": 1374.1993364640002,
+      "fresh_amplitude": 0.170125521568445,
+      "fresh_kstar": 0.18261154485633604,
+      "warm_s": [],
+      "adjoint_s": 0.8386735839994799,
+      "maxrss_gib": 0.6780433654785156,
+      "note": "PatternSolver exposes no relax-vs-Newton time breakdown; totals only \u2014 see module docstring"
+    }
+  }
+}

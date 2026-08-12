@@ -282,6 +282,207 @@ def test_failed_warm_newton_falls_back_to_fresh_relax(machine, monkeypatch):
     assert reason == "ok" and len(relaxed) == 1
 
 
+# ---------------------------------------------------------------- torch LSMR parity
+
+def test_torch_lsmr_matches_scipy_on_a_well_conditioned_system():
+    """The CUDA path's `_lsmr_torch` is a port of scipy's LSMR recurrences; on a
+    well-conditioned overdetermined system (unique LS solution) the two must agree to
+    machine precision. Near-singular agreement is pinned by the wrapper test below."""
+    from scipy.sparse.linalg import lsmr
+    rng = np.random.default_rng(0)
+    A = rng.standard_normal((60, 40))
+    b = rng.standard_normal(60)
+    x_sp = lsmr(A, b, atol=1e-13, btol=1e-13, maxiter=5000)[0]
+    At, bt = torch.from_numpy(A), torch.from_numpy(b)
+    x_t = fwd._lsmr_torch(lambda v: At @ v, lambda v: At.T @ v, bt, maxiter=5000)
+    assert float(np.max(np.abs(x_t.numpy() - x_sp))) < 1e-8
+
+
+def test_minnorm_solve_torch_matches_scipy_on_a_near_singular_operator():
+    """`_minnorm_solve_t` must mirror `_minnorm_solve` (D-FFT-10 semantics) including
+    the refinement/stall behaviour on a NEAR-SINGULAR operator — the regime the real
+    linearisation lives in (F-D1-2's near-null translations)."""
+    rng = np.random.default_rng(1)
+    A = rng.standard_normal((60, 40))
+    S = A.T @ A
+    S[0] *= 1e-8
+    S[:, 0] *= 1e-8                      # a near-null direction, like a pinned phase
+    b = rng.standard_normal(40)
+    St = torch.from_numpy(S)
+    x1, r1 = fwd._minnorm_solve(lambda v: S @ v, lambda v: S.T @ v, lambda v: v,
+                                b, 40, tol=1e-10, maxiter=5000)
+    x2, r2 = fwd._minnorm_solve_t(lambda v: St @ v, lambda v: St.T @ v, lambda v: v,
+                                  torch.from_numpy(b), tol=1e-10, maxiter=5000)
+    assert abs(r1 - r2) < 1e-12, f"stall residuals differ: scipy {r1} vs torch {r2}"
+    assert float(np.max(np.abs(x2.numpy() - x1))) < 1e-8
+
+
+def test_adjoint_solve_torch_path_matches_scipy_path(base):
+    """The full `solve_adjoint` through `_minnorm_solve_t` (forced by moving nothing —
+    exercised on CPU tensors via the torch primitives directly) must agree with the
+    scipy path on a real linearisation. Uses the module's base pattern at 64^2 with a
+    random translation-orthogonal rhs, the D-FFT-10 operating regime."""
+    u0 = base.u.detach()
+    F_fn = fwd.make_spatial_F(base.model, N_GRID, base.L)
+    k2_full = fwd._spectral_k2(N_GRID, base.L)
+    D_np = base.model.D.detach().numpy()
+    J = base.model.jacobian(steady_state(base.model)[0],
+                            create_graph=False).detach()
+    gamma = float(torch.linalg.eigvals(J).abs().max())
+    rng = np.random.default_rng(5)
+    rhs = torch.from_numpy(rng.standard_normal(tuple(u0.shape)))
+    # scipy path (device dispatch picks it for CPU tensors)
+    lam_sp, res_sp = fwd.solve_adjoint(F_fn, u0, rhs, k2_full, D_np, gamma)
+    # torch path, forced explicitly through the same closures the CUDA branch builds
+    _, vjp_fn = torch.func.vjp(F_fn, u0)
+    Nsp, n, _ = u0.shape
+    D_t = torch.from_numpy(D_np)
+    k2_t = torch.from_numpy(k2_full)
+
+    def AT_t(x):
+        (out,) = vjp_fn(x.reshape(u0.shape))
+        return out.detach().reshape(-1)
+
+    def Amv_t(x):
+        _, out = torch.func.jvp(F_fn, (u0,), (x.reshape(u0.shape),))
+        return out.detach().reshape(-1)
+
+    def Mmv_t(x):
+        vh = torch.fft.fft2(x.reshape(Nsp, n, n), dim=(-2, -1))
+        vh = vh / (gamma + D_t[:, None, None] * k2_t[None])
+        return torch.real(torch.fft.ifft2(vh, dim=(-2, -1))).reshape(-1)
+
+    lam_t, res_t = fwd._minnorm_solve_t(AT_t, Amv_t, Mmv_t, rhs.reshape(-1))
+    assert res_sp <= 1e-10 and res_t <= 1e-10, (res_sp, res_t)
+    rel = float((lam_t - lam_sp.reshape(-1)).norm() / lam_sp.norm())
+    assert rel < 1e-6, f"torch vs scipy adjoint solutions differ by {rel:.2e}"
+
+
+# ---------------------------------------------------------------- warm_mode="relax"
+
+def test_warm_relax_mode_rerelaxes_from_the_warm_state(machine, monkeypatch):
+    """In warm_mode='relax' a present warm state goes through a SHORT re-relax (X0 = the
+    warm state, budget warm_max_chunks) and then Newton — never Newton-only, never a
+    fresh from-noise relax."""
+    solver = PatternSolver(machine.solver.model, machine.solver.n, machine.solver.L, 0,
+                           warm_mode="relax")
+    calls = []
+
+    def fake_relax(*args, **kwargs):
+        calls.append(kwargs)
+        assert kwargs.get("X0") is not None, "warm relax must start from the warm state"
+        assert kwargs.get("max_chunks") == solver.warm_max_chunks
+        return machine.wavy.numpy()
+
+    monkeypatch.setattr(fwd, "relax_to_pattern", fake_relax)
+    monkeypatch.setattr(fwd, "newton_polish", lambda F_fn, u0, *a, **k: (u0, 1e-12))
+    solver._warm = machine.wavy.clone()
+    u, reason = solver.solve()
+    assert reason == "ok" and len(calls) == 1
+
+
+def test_warm_relax_budget_exhaustion_falls_back_to_fresh(machine, monkeypatch):
+    """A warm re-relax that cannot saturate within warm_max_chunks (RuntimeError) is not
+    a failure: the solver falls back to exactly one FRESH relax, as the approved state
+    machine requires."""
+    solver = PatternSolver(machine.solver.model, machine.solver.n, machine.solver.L, 0,
+                           warm_mode="relax")
+    fresh_calls = []
+
+    def fake_relax(*args, **kwargs):
+        if kwargs.get("X0") is not None:
+            raise RuntimeError("no saturation in the warm budget")
+        fresh_calls.append(1)
+        return machine.wavy.numpy()
+
+    monkeypatch.setattr(fwd, "relax_to_pattern", fake_relax)
+    monkeypatch.setattr(fwd, "newton_polish", lambda F_fn, u0, *a, **k: (u0, 1e-12))
+    solver._warm = machine.wavy.clone()
+    u, reason = solver.solve()
+    assert reason == "ok" and len(fresh_calls) == 1
+
+
+def test_warm_mode_is_validated_at_construction(machine):
+    with pytest.raises(ValueError, match="warm_mode"):
+        PatternSolver(machine.solver.model, machine.solver.n, machine.solver.L, 0,
+                      warm_mode="hot")
+
+
+# ---------------------------------------------------------------- CUDA path
+
+needs_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="no CUDA device")
+
+
+@needs_cuda
+def test_cuda_fresh_solve_matches_cpu_on_translation_invariant_stats(base):
+    """The CUDA solve (torch relax + torch LSMR Newton) must land on the same pattern
+    branch as the CPU solve, compared translation-invariantly: channel-0 amplitude
+    within 1%, k* within one radial bin (the repo's k* tolerance)."""
+    model_c = _load_ckpt().to("cuda")
+    solver = PatternSolver(model_c, N_GRID, base.L, SEED)
+    t0 = time.perf_counter()
+    u_c, reason = solver.solve()
+    dt_s = time.perf_counter() - t0
+    assert reason == "ok", f"CUDA solve did not pattern: {reason}"
+    amp_cpu = float(base.u.detach()[0].std())
+    amp_gpu = float(u_c.detach()[0].std())
+    k_gpu = float(obs.kstar_of(u_c.detach()[0].cpu().numpy(), L=base.L))
+    one_bin = 2.0 * np.pi / base.L
+    print(f"\n[timing] CUDA fresh solve at {N_GRID}^2: {dt_s:.1f}s "
+          f"(CPU base was {base.base_seconds:.1f}s)")
+    assert abs(amp_gpu - amp_cpu) / amp_cpu < 0.01, (amp_cpu, amp_gpu)
+    assert abs(k_gpu - base.kstar) <= one_bin, (base.kstar, k_gpu, one_bin)
+
+
+@needs_cuda
+def test_ift_gradient_matches_finite_differences_on_cuda():
+    """The FD regression tripwire (5e-3, NOT a re-acceptance — see module docstring) on
+    the CUDA path: torch relax, torch-LSMR Newton and adjoint. One direction, two terms,
+    warm Newton-only FD points, exactly like the CPU test."""
+    model = _load_ckpt().to("cuda")
+    xs, ok = steady_state(model)
+    assert ok
+    J = model.jacobian(xs, create_graph=False).detach()
+    kg = torch.linspace(1e-3, 10.0, 2000, device="cuda")
+    sig = model.dispersion(xs, kg, J=J).detach()
+    kstar_lin = float(kg[int(sig.argmax())])
+    L = PERIODS * 2.0 * np.pi / kstar_lin
+
+    solver = PatternSolver(model, N_GRID, L, SEED)
+    u, reason = solver.solve()
+    assert reason == "ok", reason
+    kstar_pat = float(obs.kstar_of(u.detach()[0].cpu().numpy(), L=L))
+    spec_shape, amp_fluct = _make_terms(u.detach().cpu(), L, kstar_pat)
+
+    params = [getattr(model, nm) for nm in THETA_NAMES]
+    loss = spec_shape(u.cpu()) + amp_fluct(u.cpu())
+    g = torch.autograd.grad(loss, params)
+    g_flat = torch.cat([gi.reshape(-1) for gi in g]).cpu().numpy()
+    v = _flat_direction(model, SEED + 1)
+    d_ift = float(g_flat @ v)
+
+    eps = 1e-4
+    vals = {}
+    for sgn in (+1.0, -1.0):
+        m2 = _load_ckpt().to("cuda")
+        off = 0
+        with torch.no_grad():
+            for nm in THETA_NAMES:
+                p = getattr(m2, nm)
+                dv = torch.from_numpy(v[off:off + p.numel()]).reshape(p.shape).to("cuda")
+                p.add_(sgn * eps * dv)
+                off += p.numel()
+        s2 = PatternSolver(m2, N_GRID, L, SEED)
+        s2._warm = u.detach().clone()
+        u2, reason = s2.solve()
+        assert reason == "ok", f"CUDA FD solve failed at sgn={sgn}: {reason}"
+        vals[sgn] = float(spec_shape(u2.detach().cpu()) + amp_fluct(u2.detach().cpu()))
+    d_fd = (vals[+1.0] - vals[-1.0]) / (2.0 * eps)
+    rel = abs(d_fd - d_ift) / max(abs(d_fd), abs(d_ift), 1e-300)
+    print(f"\n[cuda-fd] rel err {rel:.2e}")
+    assert rel <= 5e-3, f"CUDA IFT-vs-FD relative error {rel:.2e} exceeds the tripwire"
+
+
 # ---------------------------------------------------------------- 4. near-null modes
 
 def test_translation_modes_are_near_null(base):

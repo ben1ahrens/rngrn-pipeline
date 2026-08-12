@@ -34,6 +34,9 @@ RECOVERY_SIDE = [
     # the model's own parameters and grid geometry; reads no observed frame and no
     # ground-truth quantity (module docstring). Imported by recover.py (also recovery-side)
     # and losses/total.py only indirectly via the SpectralContext duck-typed `.solve()`.
+    "etdrk4_torch.py",                              # 2026-08-12, GPU-port unit: the batched
+    # torch ETDRK4 integrator ported from scripts/diag_fft_d2.py (D2-verified bit-equivalent
+    # to eval/numerics). Same character as forward.py: model parameters + grid geometry only.
 ]
 
 # SCORING-side modules under losses/ and eval/. These MAY read the answer key; they are
@@ -155,7 +158,7 @@ def test_every_loss_and_eval_module_is_classified():
     # forward.py added alongside history.py (unit U4): both are package-root modules the
     # losses/eval glob below cannot see, so both must be listed explicitly or a package-root
     # addition goes unaudited exactly the way history.py itself once did.
-    discovered = {"history.py", "forward.py"}
+    discovered = {"history.py", "forward.py", "etdrk4_torch.py"}
     for pkg in ("losses", "eval"):
         for path in sorted((SRC / pkg).glob("*.py")):
             if path.name == "__init__.py":

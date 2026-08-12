@@ -1,0 +1,52 @@
+fixture: k*_lin=0.1761 L=285.49 dt=0.1850 n=512 on NVIDIA GeForce RTX 5070 Ti Laptop GPU
+  chunk   1: amp=0.1683 k*=0.1874 flat=nan/nan (2s)
+  chunk   2: amp=0.1720 k*=0.1842 flat=nan/nan (4s)
+  chunk   3: amp=0.1733 k*=0.1311 flat=nan/nan (6s)
+  chunk   4: amp=0.1740 k*=0.1319 flat=nan/nan (8s)
+  chunk   5: amp=0.1745 k*=0.1327 flat=3.64e-02/3.67e-01 (10s)
+  tol=0.01 fired at chunk 12 (23s)
+  chunk  20: amp=0.1769 k*=0.1379 flat=7.64e-04/6.00e-03 (38s)
+  tol=0.003 fired at chunk 27 (52s)
+  tol=0.001 fired at chunk 28 (54s)
+  chunk  40: amp=0.1775 k*=0.1460 flat=1.94e-04/2.16e-03 (77s)
+  chunk  60: amp=0.1776 k*=0.1473 flat=8.60e-05/1.45e-03 (114s)
+  chunk  80: amp=0.1777 k*=0.1481 flat=7.32e-05/8.30e-04 (152s)
+  tol=0.0003 fired at chunk 86 (163s)
+  chunk 100: amp=0.1778 k*=0.1485 flat=3.16e-05/8.11e-04 (190s)
+  chunk 120: amp=0.1779 k*=0.1488 flat=3.32e-05/3.12e-04 (228s)
+  chunk 140: amp=0.1779 k*=0.1490 flat=3.94e-05/1.42e-04 (266s)
+  chunk 160: amp=0.1779 k*=0.1492 flat=4.30e-05/5.55e-04 (304s)
+  chunk 180: amp=0.1780 k*=0.1497 flat=2.27e-05/6.31e-04 (342s)
+  chunk 200: amp=0.1780 k*=0.1501 flat=1.49e-05/3.60e-04 (382s)
+  tol=0.0001 did NOT fire within 200 chunks
+candidate tol=0.01 (chunk 12): Newton polish...
+    newton[01] res=1.387e-03 (357s)
+    newton[02] res=1.387e-03 (713s)
+    newton[03] res=1.387e-03 (1071s)
+    -> wall cap 900s reached; recording residual honestly
+  -> res=1.39e-03 converged=False newton=1071s total=1094s capped=True
+candidate tol=0.003 (chunk 27): Newton polish...
+    newton[01] res=2.139e-04 (273s)
+    newton[02] res=2.139e-04 (552s)
+    newton[03] res=2.139e-04 (829s)
+    newton[04] res=2.139e-04 (1106s)
+    -> wall cap 900s reached; recording residual honestly
+  -> res=2.14e-04 converged=False newton=1106s total=1158s capped=True
+candidate tol=0.001 (chunk 28): Newton polish...
+    newton[01] res=2.130e-04 (276s)
+    newton[02] res=2.130e-04 (557s)
+    newton[03] res=2.130e-04 (842s)
+    newton[04] res=2.130e-04 (1154s)
+    -> wall cap 900s reached; recording residual honestly
+  -> res=2.13e-04 converged=False newton=1154s total=1208s capped=True
+candidate tol=0.0003 (chunk 86): Newton polish...
+    newton[01] res=1.330e-04 (229s)
+    newton[02] res=1.330e-04 (446s)
+    newton[03] res=1.330e-04 (654s)
+    newton[04] res=1.330e-04 (862s)
+    newton[05] res=1.330e-04 (1072s)
+    -> wall cap 900s reached; recording residual honestly
+  -> res=1.33e-04 converged=False newton=1072s total=1235s capped=True
+
+SUMMARY: NO candidate handoff state Newton-converged — the finding is that the handoff needs something other than a looser flat_tol
+wrote experiments/diag_fft/sat512/results.json

@@ -1,0 +1,5 @@
+guarded_run: START MemAvailable=16181MB oom_score_adj=500 -- .venv/bin/python -u scripts/diag_fft_cost.py --grids 96,128,192,256 --out experiments/diag_fft/cost
+fixture: sig_max=0.3567 k*_lin=0.1761 L=285.49
+=== grid n=96 ===
+  fresh: 937.89s amp=0.1701 k*=0.183 maxrss=0.679 GiB
+  warm[1]: 5029.87s maxrss=0.679 GiB

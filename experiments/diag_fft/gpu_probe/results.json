@@ -1,0 +1,45 @@
+{
+  "ckpt": "experiments/tune_comp/runs/m3_registry_20260803_190250_seed3/checkpoints/model.pt",
+  "L": 287.44573432015784,
+  "dt": 0.18499806288587756,
+  "device": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+  "dtype": "float64",
+  "git_rev": "fa4c294",
+  "torch_version": "2.13.0+cu130",
+  "timed_steps": 200,
+  "warmup_steps": 20,
+  "rows": [
+    {
+      "n": 256,
+      "B": 1,
+      "ms_per_step": 1.5248662200247054,
+      "ms_per_step_per_member": 1.5248662200247054,
+      "blew_up": false,
+      "vram_peak_gib": 0.286649227142334
+    },
+    {
+      "n": 256,
+      "B": 4,
+      "ms_per_step": 3.213565354999446,
+      "ms_per_step_per_member": 0.8033913387498615,
+      "blew_up": false,
+      "vram_peak_gib": 0.13150262832641602
+    },
+    {
+      "n": 512,
+      "B": 1,
+      "ms_per_step": 3.2530783699985477,
+      "ms_per_step_per_member": 3.2530783699985477,
+      "blew_up": false,
+      "vram_peak_gib": 1.19008207321167
+    },
+    {
+      "n": 512,
+      "B": 4,
+      "ms_per_step": 12.020651284983614,
+      "ms_per_step_per_member": 3.0051628212459036,
+      "blew_up": false,
+      "vram_peak_gib": 0.430788516998291
+    }
+  ]
+}

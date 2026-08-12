@@ -100,9 +100,12 @@ def raps_torch(field: torch.Tensor, L: float) -> tuple[np.ndarray, torch.Tensor]
     kbins = np.arange(n_edges) * dk
     which = np.clip(np.digitize(KR.ravel(), kbins) - 1, 0, len(kbins) - 2)
     counts = np.bincount(which, minlength=len(kbins) - 1)
-    idx = torch.from_numpy(which)
-    power = torch.zeros(len(kbins) - 1, dtype=field.dtype).scatter_add_(0, idx, P.reshape(-1))
-    power = power / torch.from_numpy(np.maximum(counts, 1)).to(field.dtype)
+    # binning tensors live on the field's device (GPU-port unit: a CUDA u_star must not
+    # crash here; on CPU the .to() calls are no-ops and the arithmetic is unchanged)
+    idx = torch.from_numpy(which).to(field.device)
+    power = torch.zeros(len(kbins) - 1, dtype=field.dtype,
+                        device=field.device).scatter_add_(0, idx, P.reshape(-1))
+    power = power / torch.from_numpy(np.maximum(counts, 1)).to(field.dtype).to(field.device)
     power = power.clone()
     power[0] = 0.0
     k_centers = 0.5 * (kbins[:-1] + kbins[1:])
@@ -226,7 +229,8 @@ def spec_shape(u_star: torch.Tensor, targets: dict, cfg: SpectralConfig
         raise ValueError(
             "u_star's spatial grid does not match the observed frame's grid — RAPS bin "
             f"counts differ ({k_centers.shape[0]} vs {targets['k_centers'].shape[0]})")
-    mask = torch.from_numpy(band_mask(k_centers, targets["kstar_obs"], cfg.b_lo, cfg.b_hi))
+    mask = torch.from_numpy(band_mask(k_centers, targets["kstar_obs"],
+                                      cfg.b_lo, cfg.b_hi)).to(power.device)
     band_power = power[mask]
     norm = band_power.sum()
     # Fail loud, mirroring build_frame_targets' guard on the observed side: a solved
@@ -237,7 +241,7 @@ def spec_shape(u_star: torch.Tensor, targets: dict, cfg: SpectralConfig
             f"(norm={float(norm):.3e}) — the solved pattern has no spectral content in "
             "the fitting band; this should have been caught by the pattern_floor gate.")
     s = band_power / norm
-    t = targets["raps_band_target"]
+    t = targets["raps_band_target"].to(s.device)
     val = ((torch.log(s + 1e-300) - torch.log(t + 1e-300)) ** 2).sum()
     return val, dict(spec_shape_raw=float(val.detach()))
 
@@ -249,7 +253,7 @@ def spec_aniso(u_star: torch.Tensor, targets: dict, cfg: SpectralConfig
     `scoring.morphology.spectral_distance_2d` (the comparator this is analogous to) reports
     RMSE, i.e. this term's square root, not the same scalar."""
     blk = spectral_block_torch(u_star[0], cfg.nblk)
-    val = ((blk - targets["block_target"]) ** 2).mean()
+    val = ((blk - targets["block_target"].to(blk.device)) ** 2).mean()
     return val, dict(spec_aniso_raw=float(val.detach()))
 
 

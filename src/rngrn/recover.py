@@ -539,8 +539,15 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         if use_spectral:
             from .forward import PatternSolver
             from .losses.spectral import SpectralContext
+            # warm_mode="relax" is the TRAINING policy (GPU-port unit, 2026-08-12): the
+            # losses are translation-invariant so a warm re-relax's phase drift is
+            # harmless here, and Newton-only warm starts measured pathological at
+            # Adam-scale theta displacement (5030 s vs fresh 938 s at 96^2). The
+            # "newton" default on PatternSolver itself remains the FD-instrumentation
+            # contract. Device is derived from the model (already .to(dev) above).
             solver = PatternSolver(model, n=frame.shape[-1], L=L_model,
-                                   seed=_restart_seed(model_seed, r))
+                                   seed=_restart_seed(model_seed, r),
+                                   warm_mode="relax")
             spectral_ctx = SpectralContext(solver=solver, targets=spec_targets, cfg=spec_cfg)
         latent_module = None
         latent = None

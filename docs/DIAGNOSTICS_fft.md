@@ -11,7 +11,7 @@ None of these numbers is a recovery result. M0 licenses exactly one sentence cla
 
 ---
 
-## D1 — IFT feasibility (GO/NO-GO)                      [status: RUNNING — see run.log]
+## D1 — IFT feasibility (GO/NO-GO)                      [status: PASS at 64² probe; full 96²×10-direction record in results.json]
 
 `scripts/diag_fft_d1.py`, `experiments/diag_fft/d1/results.json`.
 
@@ -49,18 +49,64 @@ Measured at 96² (final verdict pending the FD loop):
 (skewness) are NOT exactly invariant under sub-pixel translation of a band-limited field
 (the v³ spectrum aliases), so ∂L/∂u for `real_moments` has a small zero-mode component:
 1.3e-4 at 64² → ~1e-6 at 96². It converges away with grid but is structurally nonzero.
-Consequence for M1: the term is usable, but its gradient carries an O(grid) bias along
-translations; if its FD check misses tolerance the options are (a) accept with the
-measured bound, (b) compute moments from the band-limited spectrum side. Decision
-deferred to the D1 verdict; not silently absorbed.
+With the corrected adjoint (F-D1-3) the term's gradient nevertheless passes the FD check
+at 1.0e-5 — the leakage is real but harmless at these grids.
+
+**Finding F-D1-2 (grid pinning defeats a translation-projected Newton).** On the grid the
+translations are only NEAR-null (‖At‖/‖Av‖ ≈ 8e-4 at 64², 3.6e-4 at 96²), so a
+θ-perturbed fixed point sits at a slightly different pinned phase and Newton steps
+projected off the translations stall at a measured floor of 2.4e-8 — the residual
+component along the modes is exactly what the projection refuses to correct. Fixed by a
+2×2 mode-subspace solve (G_ij = ⟨t̂_i, A t̂_j⟩) added to each Newton step; solves then
+reach ≤1e-11 in ~2 s at 64².
+
+**Finding F-D1-3 — THE ADJOINT MUST BE THE MINIMAL-NORM SOLUTION; a projected-GMRES
+adjoint is measurably WRONG. This is the load-bearing result of D1 and binds M1's
+`forward.py`.** The first implementation solved P AᵀP λ = P g (Krylov space projected off
+the translations). Its PROJECTED residual converged to 1e-13 while its TRUE residual
+‖Aᵀλ − g‖/‖g‖ stalled at 5.5e-4–5.7e-3 (per term, measured) — invisible to the solver,
+and it biased every gradient by exactly that order: FD-vs-IFT rel err 1e-5 (amp terms) to
+5.5e-2 (spec_aniso), CONSTANT across ε over three decades (the systematic-bias
+signature; the u*(θ) map itself is smooth — drift scales exactly linearly with ε). A
+tangent-mode cross-check agreed with the adjoint and disagreed with FD, proving the
+transpose/∂F∂θ assembly correct and localising the error to the solve. The mathematics:
+for a translation-invariant loss (∂L/∂u ⊥ t, measured ≤1e-18) the pinning response drops
+out of dL/dθ identically and the correct adjoint is the MINIMAL-NORM least-squares
+solution of Aᵀλ = g. Implemented as right-preconditioned LSMR (M = (γ + Dk²)⁻¹,
+symmetric) with true-residual refinement; true residuals then reach 1.4–3.6e-12 and the
+FD check passes every term: 1.2e-8 / 2.2e-7 / 1.8e-6 / 1.0e-5 / 2.8e-5
+(amp_fluct / amp_mean / shape / moments / aniso), against tolerance 1e-4, with the
+textbook ε-signature (truncation at 1e-3, FD roundoff at 1e-6). 64² probe:
+`/…/tmp/d1_probe2` artefacts; the committed `experiments/diag_fft/d1/results.json` is
+the full 96², 10-direction record.
 
 ---
 
-## D2 — forward-solve characterisation                   [status: script authored, full sweep pending]
+## D2 — forward-solve characterisation                   [status: DONE]
 
-`scripts/diag_fft_d2.py` (`--smoke` / `--full`), `experiments/diag_fft/d2/`.
-Full sweep runs after D1 releases the machine (its timings need a quiet box), via
-`bash scripts/guarded_run.sh .venv/bin/python -u scripts/diag_fft_d2.py --full`.
+`scripts/diag_fft_d2.py --full` via `guarded_run.sh` → `experiments/diag_fft/d2/
+results_full.json` (D1's single nice'd thread ran concurrently; timings are
+factor-level planning numbers, stated as such). Fixture = the D1 checkpoint,
+L = 8·2π/k*_lin, 3 seeds/grid.
+
+- **Rollout cost to horizon (606 steps, etdrk4_rfft, CPU)**: 0.81 s (96²), 1.33 s
+  (128²), 6.8 s (256²), **39.2 s (512²)**. All runs stop at 'horizon'; the saturation
+  rule never fires (consistent with rollout.py's own documentation of its [TUNE] knobs).
+- **Ignition floor**: Turing saturated amplitude 0.170–0.172 vs non-Turing decay
+  ≤6.7e-17 (contrast model verified sig_max = −0.433) — separation 2.6e15. The existing
+  `pattern_floor = max(1e-3, 0.02·|x*₀|)` (= 9.7e-3 here) sits mid-gap → KEPT, now
+  measured (D-FFT-9 closure 2).
+- **Grid fidelity — NEGATIVE: no cheaper validation grid is licensed** (D-FFT-9
+  closure 3). Morphology class vs 512²: flips on 2/3 seeds at 256² (spots vs labyrinth);
+  k* one-bin agreement fails 2/6 at 96²/128². All class calls and F-gates run at 512².
+  Band-limited spectral quantities did agree at 256² (D4's pilot remains valid for its
+  band-distance purpose).
+- **Torch ETDRK4 port**: bit-equivalent to numpy (max Δ 1.1e-13 after 100 steps).
+  **Batched CUDA: 0.091 ms/step/member at 96²/B=32 — 11.6× over serial CPU** (1.05
+  ms/step); CPU batching saturates (B=32 worse per member than B=1). Confirms PLAN §7's
+  batched-GPU direction for restarts × members.
+- **RSS**: 512² rollout peaks ~1.57 GiB — consistent with the §7a per-trainer footprint;
+  the memory-guard floor stays correct.
 
 ---
 
@@ -95,9 +141,44 @@ Band-edge decision → `docs/DECISIONS.md` (closure of the D-FFT-9 ledger item).
 
 ---
 
-## D5 — baseline zero-call and seed spread               [status: pending]
+## D5 — baseline zero-call and seed spread               [status: DONE]
 
-## D4 — null-spread pilot                                 [status: pending, after D5]
+`configs/m3_registry.yaml` (N=3, m=3, observed (0,1,2), 2000 Adam steps × 4 restarts —
+the current default objective; base.yaml alone is N=2 and a first launch with it was
+discarded as wrong-model), `turing_labyrinth/sample_0000`, seeds 0–9, via
+`guarded_run.sh`. Runs: `experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed*`;
+analysis: `scripts/diag_fft_d5_analysis.py` → `experiments/diag_fft/d5/analysis.json`.
+
+- **4/10 seeds Turing-unstable**; the 6 failures all collapse to a dispersion maximum
+  pinned at the k-grid floor (`kstar_model` = kmin = 0.00668 identically). The 4 Turing
+  seeds hit `kstar_fft_rel_err` ≈ 0.014 each.
+- **10 distinct sign structures in 10 seeds — zero baseline sign reproducibility.** The
+  R1 statistic's baseline value is 0/45 pairwise agreements. THIS is the A0 number the
+  spectral arm must beat.
+- **No edge is consistently present or consistently absent across seeds** (all 9 edges
+  "mixed" at the 80 % consensus bar), so the zero-call calibration's precondition does
+  not exist on the baseline. Per the pre-registered rule (D-FFT-9): a finding, not a
+  licence — the threshold stays UNCALIBRATED until Stage-0 spectral runs produce stable
+  structures to calibrate on.
+- Invariant-combination log10 max-pairwise spreads (SPEC §9.4 combos): tightest is
+  d_ratio at 0.44 decades (Turing subset, n=4); Dk*²/δ 2.12; α/δ 3.92; KA 8.0, β/δ 9.2,
+  KR 10.9 decades. Absolute-rate-adjacent quantities are wholly unpinned — the
+  data-starvation premise (SPEC §2), measured directly.
+
+## D4 — null-spread pilot                                 [status: DONE — gate is NOT vacuous]
+
+`scripts/diag_fft_d4.py` (FORBIDDEN — opens payload; AnswerKey discarded unread) →
+`experiments/diag_fft/d4/results.json`. Pilot approximation, stated: the alternative
+sign structures are the D5 seeds themselves (10 distinct structures fit to the same data
+under identical budget by the baseline objective) — frozen-gate B_train refits are M1
+machinery. Rollouts at 256² (grid caveat pending D2's fidelity table), D3's band edges.
+
+- All 4 patterned alternatives land k*_sim within ~one radial bin of k*_obs
+  (0.273–0.286 vs 0.284) — the fundamental does NOT discriminate mechanism.
+- Their held-out-band spec_shape distances span **47 → 149** (B_harm alone 19.6 → 107.8,
+  a 5.5× spread); train-band 6.4 → 41.4. Different wirings differ strongly in exactly
+  the bands the Stage-0 fit will never see. **The held-out-band gate has discriminative
+  content; it is not vacuous.** (The spread dwarfs D3's patch-to-patch estimation floor.)
 
 ---
 

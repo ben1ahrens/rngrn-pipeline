@@ -1,0 +1,59 @@
+guarded_run: START MemAvailable=15233MB oom_score_adj=500 -- env KMP_AFFINITY=disabled OMP_NUM_THREADS=1 .venv/bin/python -u scripts/diag_fft_d2.py --full
+fixture: k*_lin=0.17487, sig_max=0.35667, L=287.446 (8 periods/box), x*_0=0.48497
+== full: rollouts, grids ascending, 3 seeds each ==
+  n=  96 seed=0:    0.86 s,    606 steps, stopped=horizon, patterned=True, kstar=0.1821188497810319, morph=spots, rss_after=615656 KiB
+  n=  96 seed=1:    0.77 s,    606 steps, stopped=horizon, patterned=True, kstar=0.14811395790256304, morph=spots, rss_after=615656 KiB
+  n=  96 seed=2:    0.79 s,    606 steps, stopped=horizon, patterned=True, kstar=0.24777629866043183, morph=labyrinth, rss_after=615656 KiB
+  n= 128 seed=0:    1.41 s,    606 steps, stopped=horizon, patterned=True, kstar=0.14535158472939075, morph=labyrinth, rss_after=645616 KiB
+  n= 128 seed=1:    1.30 s,    606 steps, stopped=horizon, patterned=True, kstar=0.18443129397324282, morph=spots, rss_after=645616 KiB
+  n= 128 seed=2:    1.29 s,    606 steps, stopped=horizon, patterned=True, kstar=0.16404262095321076, morph=spots, rss_after=645616 KiB
+  n= 256 seed=0:    7.25 s,    606 steps, stopped=horizon, patterned=True, kstar=0.18578454955509663, morph=spots, rss_after=838456 KiB
+  n= 256 seed=1:    6.55 s,    606 steps, stopped=horizon, patterned=True, kstar=0.1654504476629483, morph=spots, rss_after=838456 KiB
+  n= 256 seed=2:    6.49 s,    606 steps, stopped=horizon, patterned=True, kstar=0.16107509886349872, morph=spots, rss_after=838456 KiB
+  n= 512 seed=0:   40.94 s,    606 steps, stopped=horizon, patterned=True, kstar=0.1863452898468567, morph=labyrinth, rss_after=1607612 KiB
+  n= 512 seed=1:   38.43 s,    606 steps, stopped=horizon, patterned=True, kstar=0.1614795238609671, morph=spots, rss_after=1607612 KiB
+  n= 512 seed=2:   38.30 s,    606 steps, stopped=horizon, patterned=True, kstar=0.169492493052482, morph=labyrinth, rss_after=1607612 KiB
+== full: time-to-stop per grid ==
+  n=96: seconds mean/min/max 0.81/0.77/0.86, steps 606/606/606 (horizon)
+  n=128: seconds mean/min/max 1.33/1.29/1.41, steps 606/606/606 (horizon)
+  n=256: seconds mean/min/max 6.76/6.49/7.25, steps 606/606/606 (horizon)
+  n=512: seconds mean/min/max 39.22/38.30/40.94, steps 606/606/606 (horizon)
+== full: amplitude trajectories, Turing fixture at 96² ==
+  seed=0: final amp 0.1698 (606 steps, cap hit=False)
+  seed=1: final amp 0.1714 (606 steps, cap hit=False)
+  seed=2: final amp 0.1724 (606 steps, cap hit=False)
+== full: non-Turing contrast (sig_max=-0.4327 < 0 verified) ==
+  seed=0: final amp 0 (532 steps, cap hit=False)
+  seed=1: final amp 5.642e-17 (532 steps, cap hit=False)
+  seed=2: final amp 6.656e-17 (532 steps, cap hit=False)
+  Turing final range [0.1698483733511656, 0.17239214093224411], decayed final range [0.0, 6.655553224256149e-17], proposed floor (geomean) 3.3621940587836572e-09, repo pattern_floor 0.009699416298328094
+== full: grid fidelity vs 512² (one bin = 0.02186) ==
+  n=  96 seed=0: kstar=0.1821188497810319 vs 0.1863452898468567 (dk=0.004226440065824788, one-bin=True), class spots vs labyrinth match=False
+  n=  96 seed=1: kstar=0.14811395790256304 vs 0.1614795238609671 (dk=0.013365565958404046, one-bin=True), class spots vs spots match=True
+  n=  96 seed=2: kstar=0.24777629866043183 vs 0.169492493052482 (dk=0.07828380560794981, one-bin=False), class labyrinth vs labyrinth match=True
+  n= 128 seed=0: kstar=0.14535158472939075 vs 0.1863452898468567 (dk=0.040993705117465945, one-bin=False), class labyrinth vs labyrinth match=True
+  n= 128 seed=1: kstar=0.18443129397324282 vs 0.1614795238609671 (dk=0.022951770112275727, one-bin=False), class spots vs spots match=True
+  n= 128 seed=2: kstar=0.16404262095321076 vs 0.169492493052482 (dk=0.005449872099271252, one-bin=True), class spots vs labyrinth match=False
+  n= 256 seed=0: kstar=0.18578454955509663 vs 0.1863452898468567 (dk=0.0005607402917600646, one-bin=True), class spots vs labyrinth match=False
+  n= 256 seed=1: kstar=0.1654504476629483 vs 0.1614795238609671 (dk=0.003970923801981219, one-bin=True), class spots vs spots match=True
+  n= 256 seed=2: kstar=0.16107509886349872 vs 0.169492493052482 (dk=0.008417394188983296, one-bin=True), class spots vs labyrinth match=False
+  n= 512 seed=0: kstar=0.1863452898468567 vs 0.1863452898468567 (dk=0.0, one-bin=True), class labyrinth vs labyrinth match=True
+  n= 512 seed=1: kstar=0.1614795238609671 vs 0.1614795238609671 (dk=0.0, one-bin=True), class spots vs spots match=True
+  n= 512 seed=2: kstar=0.169492493052482 vs 0.169492493052482 (dk=0.0, one-bin=True), class labyrinth vs labyrinth match=True
+== full: torch ETDRK4 prototype ==
+  equivalence: max |Δfield| = 1.079e-13 -> PASS
+  cpu n= 96 B= 1: 1.05 ms/step (1.050 ms/step/member)
+  cpu n= 96 B= 8: 11.04 ms/step (1.380 ms/step/member)
+  cpu n= 96 B=32: 68.52 ms/step (2.141 ms/step/member)
+  cpu n=128 B= 1: 1.86 ms/step (1.858 ms/step/member)
+  cpu n=128 B= 8: 22.77 ms/step (2.846 ms/step/member)
+  cpu n=128 B=32: 137.02 ms/step (4.282 ms/step/member)
+  cuda n= 96 B= 1: 0.97 ms/step (0.969 ms/step/member)
+  cuda n= 96 B= 8: 1.17 ms/step (0.147 ms/step/member)
+  cuda n= 96 B=32: 2.90 ms/step (0.091 ms/step/member)
+  cuda n=128 B= 1: 1.33 ms/step (1.334 ms/step/member)
+  cuda n=128 B= 8: 1.59 ms/step (0.198 ms/step/member)
+  cuda n=128 B=32: 4.61 ms/step (0.144 ms/step/member)
+
+D2 full PASS -> experiments/diag_fft/d2/results_full.json
+guarded_run: END rc=0 MemAvailable=15084MB

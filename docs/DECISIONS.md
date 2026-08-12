@@ -2819,3 +2819,76 @@ placeholder is not a measurement. Caveat recorded: these edges are measured on O
 tuning-role sample; Stage 2 re-measures per sample class before any cross-sample claim.
 
 **Where it lives:** `loss.spectral` config when M1 lands; `docs/DIAGNOSTICS_fft.md` §D3.
+
+### D-FFT-10 — the IFT adjoint is the MINIMAL-NORM solution (LSMR + refinement); a translation-projected GMRES adjoint is rejected, with measurement
+
+**Date:** 2026-08-12. **Status:** DECIDED (binds M1's forward/adjoint module).
+**Decided by:** the implementing agent under §10 delegated authority, from diagnostic D1.
+
+**The decision:** the adjoint system Aᵀλ = ∂L/∂u at the patterned state is solved for the
+minimal-norm least-squares solution — right-preconditioned LSMR (M = (γ + D k²)⁻¹) with
+iterative refinement on the TRUE residual until ≤1e-10 — never by a Krylov method whose
+space is projected off the translation modes. Newton polish of the pattern solve carries a
+2×2 translation-subspace correction (G_ij = ⟨t̂_i, A t̂_j⟩) per step.
+
+**Evidence** (`scripts/diag_fft_d1.py`; probe artefacts summarised in
+`docs/DIAGNOSTICS_fft.md` F-D1-2/F-D1-3): grid pinning makes the translations near-null,
+not null (‖At‖/‖Av‖ 3.6e-4 at 96²). The projected-GMRES adjoint reported residual 1e-13
+while its true residual stalled at 5.5e-4–5.7e-3, biasing gradients by 1e-5–5.5e-2
+relative — flat in ε (systematic), with a tangent-mode cross-check localising the error to
+the solve. With the minimal-norm scheme, true residuals reach ≤3.6e-12 and all five loss
+terms pass FD verification at ≤2.8e-5 (tolerance 1e-4). The theory: for translation-
+invariant losses (∂L/∂u ⊥ t at ≤1e-18) the pinning response cancels in dL/dθ, leaving
+exactly the minimal-norm adjoint as the correct object.
+
+**What was rejected and why:** (a) projected GMRES — measurably biased, above; (b) loosening
+the D1 tolerance to accept the biased gradients — the bias was a defect, not a floor, and
+the non-negotiable forbids tolerance changes to make things pass; (c) explicit
+deflation/eigen-computation of the near-null defect modes — unnecessary once the
+minimal-norm formulation removed the projection error, and far more machinery.
+
+**Where it lives:** `scripts/diag_fft_d1.py::solve_adjoint` (the reference
+implementation); to be ported into the M1 forward/adjoint module with a regression test
+against finite differences (small grid).
+
+#### D-FFT-9 closure 2 — ignition amplitude floor: KEEP the existing rollout pattern floor, now measured
+
+**Date:** 2026-08-12. **Status:** CLOSED (this item).
+**Decided by:** the implementing agent under §10, from diagnostic D2.
+
+**The decision:** the ignition detector uses the repo's existing
+`pattern_floor = max(1e-3, 0.02·|x*_0|)` (eval/rollout.py) unchanged.
+
+**Evidence** (`experiments/diag_fft/d2/results_full.json`): on the known-Turing fixture,
+saturated Turing amplitudes span 0.170–0.172 while the non-Turing contrast model decays to
+≤6.7e-17 — a 2.6e15 separation. The existing floor (9.7e-3 for this fixture) sits inside
+that gap with ≥17× margin to the patterned side and ~14 orders to the decayed side.
+
+**What was rejected and why:** the geometric-mean proposal (3.4e-9) — needlessly deep into
+the decayed range; a floor that low would call float-noise "patterned" under any future
+noise arm. Inventing any new number when the existing, already-tested rule is measured to
+sit mid-gap would be change without evidence.
+
+**Where it lives:** the ignition gate reuses `pattern_floor` when M1 lands; noted in
+`docs/DIAGNOSTICS_fft.md` §D2.
+
+#### D-FFT-9 closure 3 — validation grid: 512² only; NO cheaper grid is licensed
+
+**Date:** 2026-08-12. **Status:** CLOSED (this item).
+**Decided by:** the implementing agent under §10, from diagnostic D2's grid-fidelity table.
+
+**The decision:** forward validation (F1–F3 + morphology reporting) runs on the target
+frame's grid, 512². No downsampled validation grid is adopted.
+
+**Evidence** (`experiments/diag_fft/d2/results_full.json` grid_fidelity, 3 seeds × 4
+grids, same L): morphology class agrees with 512² in only 1/3 seeds at 256² and 4/6 at
+96²/128² (spots-vs-labyrinth flips); k* one-bin agreement fails 2/6 at ≤128². SPEC §8
+pre-registered exactly this check as the licence condition for a cheaper grid; it fails.
+Cost accepted: ~39 s per 512² rollout (measured, 606 steps).
+
+**What was rejected and why:** validating at 256² (the tempting 6× saving) — it
+misclassifies morphology on this very fixture. Band-limited SPECTRAL quantities (k*,
+band powers) did agree at 256², which is why D4's pilot rollouts at 256² remain valid for
+their band-distance purpose — but no class call below 512² may be reported.
+
+**Where it lives:** SPEC §8 step 1 (the licence stays unexercised); `docs/DIAGNOSTICS_fft.md` §D2.

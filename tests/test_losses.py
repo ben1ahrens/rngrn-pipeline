@@ -393,3 +393,24 @@ def test_loss_config_staging_defaults_match_the_promoted_objective():
     assert cfg.staging_off_frac == pytest.approx(0.25)
     assert cfg.staging_ramp_frac == pytest.approx(0.25)
     assert cfg.detach_xstar is False    # library behaviour preserved; see compute_terms
+
+
+def test_composite_loss_includes_the_anchor_term():
+    """Regression (merge damage, repaired 2026-08-12): `composite_loss` computed its
+    loss/parts twice — the second block, added with param_prior, overwrote the first and
+    silently dropped w['anchor']*L_s and the L_anchor part. The active path
+    (losses/total.compute_terms) never had the defect; this pins the standalone reference
+    form: the total must move by exactly w_anchor * L_anchor, and the part must be logged."""
+    m, xs = _model_at_steady_state(0)
+    g = torch.Generator().manual_seed(0)
+    frame = torch.rand(3, 8, 8, generator=g, dtype=torch.float64) + 0.5
+    loss0, parts0 = T.composite_loss(m, frame, L=10.0, observed_idx=(0, 1, 2),
+                                     kgrid=KGRID, kstar_obs=1.0,
+                                     weights=dict(anchor=0.0))
+    loss2, parts2 = T.composite_loss(m, frame, L=10.0, observed_idx=(0, 1, 2),
+                                     kgrid=KGRID, kstar_obs=1.0,
+                                     weights=dict(anchor=2.0))
+    assert "L_anchor" in parts2
+    assert parts2["L_anchor"] == pytest.approx(parts0["L_anchor"])   # term itself unweighted
+    assert parts2["L_anchor"] > 0.0    # a random init does not sit on the frame scale
+    assert float(loss2) - float(loss0) == pytest.approx(2.0 * parts2["L_anchor"])

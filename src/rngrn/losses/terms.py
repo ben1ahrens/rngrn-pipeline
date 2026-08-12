@@ -797,18 +797,16 @@ def composite_loss(model, frame, L, observed_idx, kgrid, kstar_obs,
     L_r, p_r = stationarity_residual(model, frame, L, observed_idx, latent_fields)
     L_a, p_a = anticollapse(model, xstar, jac_floor=jac_floor)
     L_s, p_s = frame_scale_anchor(xstar, float(frame.mean()))
+    L_p, p_p = param_prior(model, dratio_centre=dratio_centre, dratio_spread=dratio_spread,
+                           box_path=bio_box_path)
+    # Merge damage repaired 2026-08-12: this function previously computed loss/parts TWICE —
+    # the second block (added with param_prior) overwrote the first and silently dropped
+    # w['anchor']*L_s and the L_anchor/**p_s entries. The active path (losses/total.py)
+    # never had the defect; tests/test_losses.py pins this form against it now.
     loss = (w['kstar']*L_k + w['turing']*L_t + w['resid']*L_r
-            + w['anticollapse']*L_a + w['anchor']*L_s)
+            + w['anticollapse']*L_a + w['anchor']*L_s + w['param_prior']*L_p)
     parts = dict(total=float(loss), ss_converged=conv,
                  L_kstar=float(L_k), L_turing=float(L_t), L_resid=float(L_r),
                  L_anti=float(L_a), L_anchor=float(L_s),
-                 **p_k, **p_t, **p_r, **p_a, **p_s)
-
-    L_p, p_p = param_prior(model, dratio_centre=dratio_centre, dratio_spread=dratio_spread,
-                           box_path=bio_box_path)
-    loss = (w['kstar']*L_k + w['turing']*L_t + w['resid']*L_r + w['anticollapse']*L_a
-           + w['param_prior']*L_p)
-    parts = dict(total=float(loss), ss_converged=conv,
-                 L_kstar=float(L_k), L_turing=float(L_t), L_resid=float(L_r), L_anti=float(L_a),
-                 **p_k, **p_t, **p_r, **p_a, **p_p)
+                 **p_k, **p_t, **p_r, **p_a, **p_s, **p_p)
     return loss, parts

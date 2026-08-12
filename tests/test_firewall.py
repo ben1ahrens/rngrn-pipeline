@@ -22,6 +22,10 @@ RECOVERY_SIDE = [
     "losses/terms.py", "losses/total.py", "losses/weighting.py",
     "eval/rollout.py", "eval/numerics.py", "eval/dynamical.py",
     "eval/analysis.py", "eval/topology.py",
+    "eval/lifted.py",                              # finite-mu lift of the RECOVERED model:
+    # reads only the model's own parameters (same character as eval/dynamical.py); classified
+    # 2026-08-12 after arriving unclassified in the feature/turing-training merge — the
+    # completeness test caught it, which is that test doing its job.
 ]
 
 # SCORING-side modules under losses/ and eval/. These MAY read the answer key; they are

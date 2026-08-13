@@ -2999,6 +2999,29 @@ modules (`canon_stripes_evidence`, `exp02`–`exp12`) were added to
 618 passed / 1 skipped, unsandboxed (the +3 over the pre-review 615 are the 512² RAPS
 parity case and the two new refusal tests).
 
+#### D-FFT-11 owner-flags closure — all three signed off by the owner
+
+**Date:** 2026-08-13. **Status:** CLOSED (owner sign-off, in session, on the consolidated
+evidence summary of the 2026-08-12 measurements).
+
+- **Flag 1 (forward-solve cost) — CLOSED, measured.** CPU disqualified for training
+  solves (fresh 938–1374 s at 96², warm-Newton 5030 s, 64 ms/step at 512²;
+  `experiments/diag_fft/cost/`). GPU-native adopted (D-FFT-13): 3.25 ms/step at 512²
+  fp64, CUDA chain FD-verified 4.75e-8. The 512² Newton stall (sat512: all handoff
+  tolerances stall ~1.3e-4; F-D1-4) makes the TRAINING-solve grid a design choice: train
+  at the finest grid where ‖F‖/‖u‖ ≤ 1e-9 is reachable, 512² stays validation-only
+  (rollout detector). The coarse-grid convergence + FD measurement decides the number.
+- **Flag 2 (real_moments F-D1-1 leakage) — kept as a STANDING SWEEP CONSTRAINT:**
+  `w_real_moments` stays 0 in Stage-0 sweeps unless the sweep design explicitly accounts
+  for the measured leakage scale (~1e-6 at 96², shrinking with grid).
+- **Flag 3 (warm-Newton branch continuation) — CLOSED by redesign.** Training warm
+  starts are ETDRK4 re-relax + Newton (D-FFT-13): the flow cannot converge to a
+  dynamically unstable branch, so the root-tracking failure mode is designed out;
+  residual stable-but-different-branch risk is caught by the fresh 512² validation
+  gates; solver stalls degrade to skips (omitted-not-zeroed), a throughput cost, not a
+  correctness leak. The fresh-vs-warm agreement check joins Stage-0 validation instead
+  of standing alone.
+
 ### D-FFT-12 — three M2 sweep-design additions harvested from the legacy feasibility notebook (rules pre-registered; every number deliberately unchosen)
 
 **Date:** 2026-08-12 (comparison session: `RNGRN_Diffusion_notebook_vf.ipynb` — the

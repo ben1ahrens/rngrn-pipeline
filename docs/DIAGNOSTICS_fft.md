@@ -86,6 +86,27 @@ textbook ε-signature (truncation at 1e-3, FD roundoff at 1e-6). 64² probe:
 `/…/tmp/d1_probe2` artefacts; the committed `experiments/diag_fft/d1/results.json` is
 the full 96², 10-direction record.
 
+**F-D1-4 (addendum 2026-08-13) — Newton TRUE-STALLS exist at some θ; strict F = 0 is
+not universally reachable, and this worsens with grid.** A seed-1 re-witness run
+(`--seed 1 --out experiments/diag_fft/d1_rerun`) died in SETUP: the loss-target solve at
+θ + 0.01·N(0,1) stalled at ‖F‖/‖u‖ = 1.29e-7 against the 1e-9 bar. Diagnosed
+(`scripts/diag_fft_d1_stall.py`, `experiments/diag_fft/d1_stall/results.json`): verdict
+**true_stall** — the residual is flat over 12 Newton iterations (1.287e-7 to four
+digits), and a 4× relax budget at 10× tighter saturation tolerance returns the
+bit-identical relaxed state (amp shift 0.00e+00), so this is neither an iteration-budget
+nor a premature-saturation problem. The immovable residual component is NOT a
+translation (the 2×2 correction is active): a non-translation near-marginal mode of the
+annealed labyrinth. Companion finding at 512² (`experiments/diag_fft/sat512/`): NO
+relax-handoff tolerance yields Newton convergence — all polishes stall ~1.3e-4, i.e.
+stall severity grows with the density of near-marginal defect modes (~n² in the band).
+Consequences: (1) the D1 ACCEPTANCE (seed 0) stands — the instrument is fine; a
+re-witness needs a different target-construction seed, not a looser bar; (2) training
+already treats sub-1e-9 solves as SKIPS (omitted-not-zeroed), so stalls are a throughput
+cost, not a correctness leak; (3) the training-solve grid must be one where 1e-9 is
+reachable — measured yes at 96² (seed-0 θ), no at 512²; the coarse-training-grid
+measurement (128²/256² at fixed L) is the open decisive run. See D-FFT-13's evidence
+block and CLAUDE.local.md §4c.
+
 ---
 
 ## D2 — forward-solve characterisation                   [status: DONE]

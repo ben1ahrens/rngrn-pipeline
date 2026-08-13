@@ -1,0 +1,23 @@
+perturbed model (seed 1): L=285.49 dt=0.1850 gamma=1.0811
+ARM A: default relax (chunk=500, max_chunks=400, flat_tol=1e-4)
+  relaxed: amp=0.1715 k*=0.1485
+  newton[01] ||F||/||u|| = 1.351e-07
+  newton[02] ||F||/||u|| = 1.287e-07
+  newton[03] ||F||/||u|| = 1.287e-07
+  newton[04] ||F||/||u|| = 1.287e-07
+  newton[05] ||F||/||u|| = 1.287e-07
+  newton[06] ||F||/||u|| = 1.287e-07
+  newton[07] ||F||/||u|| = 1.287e-07
+  -> stalled (5 iterations without 1% improvement)
+ARM B: extended relax (max_chunks=1600, flat_tol=1e-5)
+  relaxed: amp=0.1715 k*=0.1485 (amp moved 0.00e+00 vs arm A)
+  newton[01] ||F||/||u|| = 1.351e-07
+  newton[02] ||F||/||u|| = 1.287e-07
+  newton[03] ||F||/||u|| = 1.287e-07
+  newton[04] ||F||/||u|| = 1.287e-07
+  newton[05] ||F||/||u|| = 1.287e-07
+  newton[06] ||F||/||u|| = 1.287e-07
+  newton[07] ||F||/||u|| = 1.287e-07
+  -> stalled (5 iterations without 1% improvement)
+VERDICT: arm A converged=False (last 1.29e-07), arm B converged=False (last 1.29e-07) -> true_stall
+wrote experiments/diag_fft/d1_stall/results.json

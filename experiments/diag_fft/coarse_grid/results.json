@@ -1,0 +1,103 @@
+{
+  "ckpt": "experiments/tune_comp/runs/m3_registry_20260803_190250_seed3/checkpoints/model.pt",
+  "args": {
+    "ckpt": "experiments/tune_comp/runs/m3_registry_20260803_190250_seed3/checkpoints/model.pt",
+    "seed": 0,
+    "relax_cap_s": 700.0,
+    "newton_cap_s": 500.0,
+    "out": "experiments/diag_fft/coarse_grid"
+  },
+  "git_rev": "f816b7d",
+  "torch_version": "2.13.0+cu130",
+  "device": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+  "L": 185.01,
+  "grids": [
+    96,
+    128,
+    192,
+    256
+  ],
+  "stall_seeds": [
+    11,
+    12,
+    13
+  ],
+  "base": {
+    "96": {
+      "n": 96,
+      "seed": 0,
+      "relax_chunks": 54,
+      "relax_seconds": 29.195990337000694,
+      "relax_saturated": true,
+      "amp": 0.17609265179544523,
+      "kstar": 0.1437534488456849,
+      "newton_seconds": 667.2515654029994,
+      "newton_iters": 3,
+      "residual": 2.9268504791318258e-05,
+      "newton_wall_capped": true,
+      "converged": false,
+      "patterned": true,
+      "final_amp": 0.17610220621078526,
+      "total_seconds": 696.4475557400001,
+      "status": "newton_stalled"
+    },
+    "128": {
+      "n": 128,
+      "seed": 0,
+      "relax_chunks": 85,
+      "relax_seconds": 51.796097124999505,
+      "relax_saturated": true,
+      "amp": 0.17716285336290474,
+      "kstar": 0.1538944371557955,
+      "newton_seconds": 572.0396380499951,
+      "newton_iters": 3,
+      "residual": 4.72919142442787e-05,
+      "newton_wall_capped": true,
+      "converged": false,
+      "patterned": true,
+      "final_amp": 0.1771684183007114,
+      "total_seconds": 623.8357351749946,
+      "status": "newton_stalled"
+    },
+    "192": {
+      "n": 192,
+      "seed": 0,
+      "relax_chunks": 187,
+      "relax_seconds": 107.78055432900146,
+      "relax_saturated": true,
+      "amp": 0.17742183711683626,
+      "kstar": 0.1605560484571875,
+      "newton_seconds": 630.0788878770036,
+      "newton_iters": 3,
+      "residual": 3.407292453084162e-05,
+      "newton_wall_capped": true,
+      "converged": false,
+      "patterned": true,
+      "final_amp": 0.1774242436034744,
+      "total_seconds": 737.859442206005,
+      "status": "newton_stalled"
+    },
+    "256": {
+      "n": 256,
+      "seed": 0,
+      "relax_chunks": 271,
+      "relax_seconds": 176.62651543699758,
+      "relax_saturated": true,
+      "amp": 0.17774373546193908,
+      "kstar": 0.15793914213145707,
+      "newton_seconds": 574.9054863329948,
+      "newton_iters": 8,
+      "residual": 1.4778395681513242e-05,
+      "newton_wall_capped": true,
+      "converged": false,
+      "patterned": true,
+      "final_amp": 0.17774509155454166,
+      "total_seconds": 751.5320017699923,
+      "status": "newton_stalled"
+    }
+  },
+  "fd": {},
+  "stall": {},
+  "band_sanity": {},
+  "recommended_n": null
+}

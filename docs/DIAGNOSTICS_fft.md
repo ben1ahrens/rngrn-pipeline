@@ -107,6 +107,33 @@ reachable — measured yes at 96² (seed-0 θ), no at 512²; the coarse-training
 measurement (128²/256² at fixed L) is the open decisive run. See D-FFT-13's evidence
 block and CLAUDE.local.md §4c.
 
+**F-D1-5 (2026-08-13) — the coarse-grid measurement is NEGATIVE at the training
+geometry; strict F = 0 does not survive the move to the data box, at ANY grid.**
+`scripts/diag_fft_coarse_grid.py` → `experiments/diag_fft/coarse_grid/results.json`
+(CUDA fp64, fixture θ, L = 185.01 — the data box): the relax saturates at every
+n ∈ {96, 128, 192, 256}, and Newton then wall-caps (500 s) at residuals 2.9e-5 / 4.7e-5
+/ 3.4e-5 / 1.5e-5 — ZERO grids reach 1e-9; the FD, stall-rate and band arms never ran.
+UNIFYING PATTERN (hypothesis, stated as such): every convergent solve to date used a
+COMMENSURATE box — D1 chose L = 8·2π/k*_lin exactly, and there 96² reached 3.5e-13.
+The data box gives the fixture ~5.2 periods (incommensurate): the pattern cannot fit an
+integer number of wavelengths, carries permanent strain, and Newton grinds on the
+resulting shallow manifold at EVERY resolution. F-D1-4's stall fits (the 0.01-perturbed
+θ shifts k*, breaking commensurability with D1's own box), as does sat512 (fine-grid
+mode density adds a second stall channel). Since training θ varies continuously,
+incommensurability is the GENERIC training condition. Consequence: the training-solve
+grid question is DISSOLVED, not answered — no grid choice rescues the strict-1e-9
+forward-map contract at the training geometry. This is a PLAN-§2-falsifier-class
+finding: the convergence contract of the forward map needs an OWNER decision. Options
+on the table (none adopted; the 1e-9 bar is D1-anchored and untouched): (a) a
+model-adaptive commensurate solve box L_solve(θ) = round(p)·2π/k*(θ) with band
+statistics compared through the loss's own band masks (SPEC §4 change); (b) a looser
+convergence bar WITH a measured gradient-error bound at that residual (touches a
+pre-registered-class threshold — owner only); (c) accept relax-only u* for the loss and
+restrict IFT gradients to the near-converged subset (skip-heavy; may starve the
+spectral signal); (d) any combination after a D1-style FD verification at the chosen
+operating point. Nothing here invalidates D1's PASS — the IFT machinery is verified
+where F = 0 is reachable; the finding is about WHERE that is.
+
 ---
 
 ## D2 — forward-solve characterisation                   [status: DONE]

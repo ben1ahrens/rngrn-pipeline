@@ -39,19 +39,29 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
   (added M1, 2026-08-12; docs/DECISIONS.md D-FFT-11). Swept at Stage 0 per
   `docs/SPEC_fourier_training.md` §5; settled values go to the D-FFT-9 ledger. Any nonzero
   weight ignites the forward pattern solve (`src/rngrn/forward.py`) on detected Turing
-  instability — cost at training grids is UNMEASURED (~3–9 s/solve at 64², an unrecorded
-  test timing), so weight
-  sweeps need `scripts/guarded_run.sh` and a measured budget first. Serial path only;
-  the batched path refuses loudly.
+  instability. Cost is now MEASURED, closed by the D-FFT-11 owner-flags closure
+  (2026-08-13): CPU fresh solve **1374 s at 96²** (`experiments/diag_fft/cost/results.json`,
+  the canonical figure; a superseded 938 s appears only in `cost/run_attempt1.log` — prefer
+  results.json). D-FFT-13 added a GPU path: **3.25 ms/step at 512² fp64**
+  (`experiments/diag_fft/gpu_probe/results.json`). Weight sweeps still need
+  `scripts/guarded_run.sh` and a measured budget, now that the budget itself is known.
+  Serial path only (CPU or GPU, one solve at a time); the batched path still refuses
+  loudly (`recover.py:430-435`).
+
+  **More important than the cost:** before any spectral-weight calibration begins, read
+  `docs/DIAGNOSTICS_fft.md` F-D1-5. At the real data box (L=185.01) the forward solve's
+  1e-9 convergence bar is not reached at ANY grid from 96² to 256² — Newton wall-caps at
+  residuals 1.5e-5–4.7e-5. The forward-map convergence contract is the single blocking
+  owner decision before M2; spectral-weight calibration cannot begin until it is settled.
 - **[TUNE] `loss.spectral_ignition_margin` (1e-3) — UNCALIBRATED**, mirrors the
   `turing_hinges_split` margin default (`losses/terms.py:186`). The band edges
   `loss.spectral_b_lo/b_hi = 0.60/1.55` are MEASURED (D-FFT-9 closure 1), not free
   knobs — re-measure per sample class (Stage 2) rather than sweeping them.
 - **[IMPL] k\* tolerance band `tau` — INERT. Reads nothing; sweeping it is a no-op.**
-  `loss.tau` (0.12) is threaded `train.py:211` → `recover.py:224` → `total.py` →
+  `loss.tau` (0.12) is threaded `train.py:216` → `recover.py:224` → `total.py` →
   `terms.kstar_anchor` (`losses/terms.py:291`, and `kstar_anchor_batched` at `:732`) and is
   **never referenced in either function body** — those bodies use only `sig`, `temp`,
-  `kgrid` and `kstar_obs`. It is exported to the run index (`export.py:47`), so a sweep over
+  `kgrid` and `kstar_obs`. It is exported to the run index (`export.py:51`), so a sweep over
   `loss.tau` will produce differently-labelled rows carrying bit-identical losses and
   bit-identical recovered models. Do not report such a sweep as "k\* tolerance has no
   effect"; it measures nothing. `docs/DATA_INTO_MODEL.md:439` already recorded this.

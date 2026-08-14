@@ -10,10 +10,11 @@ where to start.
 
 The harness for both experiments is built and wired. **Corrected 2026-08-04: it no longer
 dry-runs for all four arms.** `expA_hidden_channel` and `expB_overparam` are both `N=3, m=2`,
-and `recover.py:376` now raises `ValueError` when `m < N` and the stationarity residual has
-weight 0 — which is the default (`configs/base.yaml:33`, `resid: 0.0`). Only the two control
-arms run as written; see the corrected recipe below. (557 passed, 1 skipped, re-measured
-2026-08-11; was 420 when this was written.) **Nothing is tuned and no scientific
+and `recover.py:394-407` now raises `ValueError` when `m < N` and the stationarity residual has
+weight 0 — which is the default (`configs/base.yaml:37`, `resid: 0.0`). Only the two control
+arms run as written; see the corrected recipe below. (Per `CLAUDE.md` §3, re-measure the
+suite pass count rather than trusting one recorded here — every count this document has
+recorded has gone stale.) **Nothing is tuned and no scientific
 result has been produced** — the dry run uses 6 Adam steps and recovers nothing meaningful.
 That is expected and correct for this stage; do not present dry-run numbers as findings.
 
@@ -99,8 +100,8 @@ arm against its control, never against zero.**
 | `configs/exp{A,B}_*.yaml` | 4 configs: 2 experiments + 2 controls |
 | `tests/test_{permutation,overparam}_scoring.py`, `test_experiment_arms.py` | 46 new tests |
 
-Test inventory: firewall 12 · science 7 · smoke 5 · registry 7 · permutation 23 ·
-overparam 18 · experiment-arms 5 = **77**.
+Test inventory (recounted 2026-08-14 via `pytest --collect-only`): firewall 20 · science 26 ·
+smoke 11 · registry 7 · permutation 23 · overparam 18 · experiment-arms 5 = **110**.
 
 ## Scoring API (all scoring-side; never imported by recovery)
 
@@ -171,8 +172,9 @@ more than the code does — a prior audit caught overstated provenance in this r
 ```bash
 pip install -e ".[dev]"
 export KMP_AFFINITY=disabled OMP_NUM_THREADS=1   # only if torch aborts with OMP Error #179
-pytest -q     # expect 557 passed, 1 skipped (2026-08-11). Run with the SANDBOX DISABLED:
-              # payload.h5 is on its read-deny list and a sandboxed run fakes ~15 failures.
+pytest -q     # per CLAUDE.md §3, re-measure the pass count rather than trusting one recorded
+              # here. Run with the SANDBOX DISABLED: payload.h5 is on its read-deny list and
+              # a sandboxed run fakes ~15 failures.
 
 # datasets are local and gitignored — see docs/LOCAL_DATA_SETUP.md
 rngrn scan-datasets
@@ -186,7 +188,7 @@ rngrn --runs-root experiments benchmark --degradation
 ```
 
 > **Corrected 2026-08-04.** `expA_hidden_channel` and `expB_overparam` (`N=3, m=2`) raise
-> `ValueError` at `recover.py:376`: `m < N` with the stationarity residual at weight 0, which
+> `ValueError` at `recover.py:394-407`: `m < N` with the stationarity residual at weight 0, which
 > is the default. Pass `-o loss.weights.resid=<nonzero>` to run them — there is no known-good
 > value, so picking one is a science decision under CLAUDE.md §10. Full explanation in
 > `docs/IDENTIFIABILITY_EXPERIMENTS.md` §"Running them".
@@ -213,7 +215,7 @@ layout — no conversion.
 4. **Consider ≥2 hidden species** (N=4, m=2) if you want the permutation machinery to be
    exercised for real; the current N=3/m=2 setup cannot.
 
-Unrelated stubs still open elsewhere: `eval/numerics.bdf1_newton_krylov`, GradNorm/NTK
+Unrelated stubs still open elsewhere: `eval/numerics.py::integrate_bdf1_newton_krylov`, GradNorm/NTK
 (which now **raise `NotImplementedError`** rather than falling back to fixed weights —
-`weighting.py:69`, `:87`; corrected 2026-08-04)
+`weighting.py:71`, `:89`; corrected 2026-08-04)
 weighting in `losses/weighting.py`, coupled-matrix ETDRK4. See TUNING.md.

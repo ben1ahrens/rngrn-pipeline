@@ -1,5 +1,18 @@
 # HANDOFF — the canonical Turing training datasets
 
+> **ARCHIVED 2026-08-14.** This handoff was picked up and completed. §7's two follow-ups are
+> struck through and marked DONE, closed by commits `3ecdcca` and `4060461`. Every deliverable
+> it promises exists on disk: `data/canonical_selection.json` (tracked),
+> `experiments/figures_report/canonical/` (10 per-sample figures plus both galleries), and
+> `D-CANON-1..5` in `docs/DECISIONS.md`. It is superseded by
+> **`docs/CANONICAL_DATASETS.md`**, which is the current reference for these datasets — read
+> that document, not this one, for anything other than history. Two numeric errors present in
+> the original text (five-distinct-systems-each in §1; the generator-morphology-class claim in
+> §2 read as contradicting §1) were corrected in place before archiving; see
+> `docs/CANONICAL_DATASETS.md` for the corrected figures and full defect note.
+
+---
+
 **Branch:** `feature/canonical-datasets`, off `feature/training-data-plots`.
 **Date:** 2026-08-10. **Written for a zero-context reader.**
 
@@ -7,8 +20,10 @@
 
 ## 1. What exists now
 
-Two registered datasets at **512×512**, five distinct 3-gene systems each, which the owner
-has designated **the training data source** for simulated-data work from 2026-08-10:
+Two registered datasets at **512×512** — `turing_labyrinth` promotes 4 distinct 3-gene
+systems, `turing_spots` promotes 3 (5 sample-rows each; some systems occupy two rows — see
+`docs/CANONICAL_DATASETS.md` §3 defect note, added 2026-08-14) — which the owner has
+designated **the training data source** for simulated-data work from 2026-08-10:
 
 | dataset | n | composition | periods | px/wavelength |
 |---|---|---|---|---|
@@ -25,7 +40,11 @@ observed_idx=(0,1,2))`. Verified working. Every sample stores all three species 
 ## 2. What is VERIFIED
 
 - **Every sample is a Turing pattern.** `peak_bin` 7–39 against a floor of 3; `cv` 0.43–1.04
-  against a floor of 0.30; all ten kept their generator morphology class at 512².
+  against a floor of 0.30; all ten kept their generator's own **stored** morphology class at
+  512² — true only of the generator's own classifier, which structurally cannot emit `holes`
+  (§1: `turing_labyrinth` measures as 3 holes + 2 labyrinths under the separate measured
+  classifier, `scripts/phase_topology.measure`; the stored label is unchanged by that
+  measurement).
 - **The domain-size leak is measured, not assumed.** An oracle blind predictor that reads
   only `L` scores **37.5 %** median error on `turing_spots` and **33.3 %** on
   `turing_labyrinth`, against **0.0 %** on the legacy sets.

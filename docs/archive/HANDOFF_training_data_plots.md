@@ -1,5 +1,15 @@
 # HANDOFF — visual inspection of the training data
 
+> **ARCHIVED 2026-08-14.** This handoff was picked up and completed. Every deliverable it
+> promises exists on disk: `notebooks/training_data_simulations.ipynb`,
+> `scripts/td_figures.py`, `tests/test_td_figures.py`, and
+> `experiments/figures_report/training_data/` (62 files). `D-TDPLOT-1` is recorded in
+> `docs/DECISIONS.md`. It is superseded by its own deliverables — the notebook and
+> `experiments/figures_report/training_data/` are the current reference for the visual
+> inspection this handoff performed; nothing else in the repo carries this content forward.
+
+---
+
 **Branch:** `feature/training-data-plots`, off `feature/fft-training` (`7c8bf37`).
 **Date:** 2026-08-10.
 **Written for a zero-context reader.**
@@ -47,7 +57,7 @@ All 413 samples across the **11 datasets registered as of 2026-08-10 14:00** —
 every one that existed when this ran. It is no longer "all": `turing_spots` and
 `turing_labyrinth` were generated six hours later the same day and are **not** among these
 413. Their patterning is verified separately and differently — see
-`docs/HANDOFF_canonical_datasets.md` §2.
+`docs/archive/HANDOFF_canonical_datasets.md` §2.
 
 - **Every field panel carries a colorbar, both axes labelled, and tick marks in physical
   length units** (`extent=(0, L, 0, L)`), so a wavelength is readable straight off the

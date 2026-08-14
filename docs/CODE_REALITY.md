@@ -48,7 +48,10 @@ What remains true, and is the actual reason this section exists:
 | `RatioWeighting` | `losses/weighting.py:94` | **implemented** (`strategy: ratio`), and mentioned by no other doc |
 | `integrate_bdf1_newton_krylov` | `eval/numerics.py` | **stub** — delegates to ETDRK4, so the "independent stiff cross-check" does not exist |
 | `morphology_consistency` | `losses/terms.py` | non-differentiable numpy diagnostic, **not in `compute_terms`** — the `loss.weights.morphology` knob is inert |
-| `robustness_cloud` | `eval/analysis.py` | runs, but never validated, never run on a recovery, output never reaches the run index (see `ROBUSTNESS_MEASUREMENT.md` §3 for four measured defects) |
+| `robustness_cloud` | `eval/analysis.py` | **Corrected: runs on a recovery.** `rngrn analyze` loads a run's checkpoint and calls it (`cli.py:154`), but the result only ever reaches stdout — never the run index. Its sibling `robustness_volumes` (same perturbation math, a different criterion) DOES run automatically inside every recovery's scoring (`validate.py:64,386`) and DOES reach the run index, as the `turing_volume_*` columns (see `ROBUSTNESS_MEASUREMENT.md` §3 for four measured defects) |
+| `forward.py::PatternSolver` | `forward.py` | the forward pattern solve, gated on detected Turing instability AND a nonzero spectral weight (landed 2026-08-12, D-FFT-11). All five spectral weights default to 0.0 (`config.py:104-105`, `configs/base.yaml`), so under any default config it never fires — the largest body of inert-by-default code in the repo, UNCALIBRATED, until the spectral weights are swept (see TUNING.md and F-D1-5) |
+| `losses/spectral.py` | `losses/spectral.py` | the five spectral loss terms (`spec_shape`, `spec_aniso`, `spec_amp_mean`, `spec_amp_fluct`, `real_moments`) plus their RAPS/band-mask/ignition machinery (D-FFT-11). Default weight 0.0 for all five (`losses/terms.py:783-784`, `config.py:104-105`, `configs/base.yaml`) — same inert-by-default status as `forward.py` |
+| `etdrk4_torch.py` | `etdrk4_torch.py` | the torch ETDRK4 step used by `forward.py`'s CUDA path (D-FFT-13); only exercised when the forward solve fires, so inert under the same default-0.0 spectral weights |
 | in-pipeline 3-node reference systems | `data/rd_models.py` | absent — N=3 enters only via registry/HDF5, so new N=3 systems cannot be generated from this repo |
 | a biological-plausibility score | `scoring/plausibility.py` | **Corrected 2026-08-04: implemented.** Box in `configs/bio_box.yaml`; run-index columns `plausibility_score` + `plausibility_*_in_box` (`validate.py:329`); aggregated as VIABILITY (`target_report.py:328-333`); matching training-time prior `terms.py::param_prior` (opt-in, `loss.weights.param_prior=0.0`). **Remaining caveat:** the box is centred on literature values, not the generators' — see `DECISIONS.md` D3 |
 | Experiment B (N=2 truth → N=3 model) | `configs/expB_*.yaml`, `scoring/overparam.py` | **Corrected 2026-08-04:** the B arm (`N=3, m=2`) now *cannot* run under the default `resid: 0.0` — `recover.py:376` raises `ValueError`. It needs `-o loss.weights.resid=<nonzero>`, for which there is no known-good value (`TUNING.md:102`). Threshold uncalibrated; both configs pin `sample_key: sample_0000` |
@@ -158,10 +161,10 @@ and exploited for *scale* anchoring — two different terms, by design.
 
 - **Legal arm axes** (`_ARM_AXES`): `data.sample_key`, `data.dataset_id`,
   `model.observed_idx`, `model.m`, `model.N`.
-- **Forbidden** (data *generation* params): `data.system`, `data.L`, `data.resolution`,
-  `data.T_max`, `data.dt`, `data.seed`, `data.cache_root`, `data.datasets_root`,
-  `data.source`. Varying these compares *different problems* rather than different
-  methods.
+- **Forbidden** (data *generation* params): `data.system`, `data.L`, `data.L_override`,
+  `data.resolution`, `data.T_max`, `data.dt`, `data.seed`, `data.cache_root`,
+  `data.datasets_root`, `data.source`. Varying these compares *different problems* rather
+  than different methods.
 
 `DataConfig.L_override` exists as the explicit, sweep-forbidden cross-check knob (added
 when the hardcoded `L=100.0` bug was fixed).
@@ -179,10 +182,15 @@ when the hardcoded `L=100.0` bug was fixed).
 | `robustness_cloud` draw | ~**59 ms**, serial |
 | `eval.rollout.simulate` at 96×96 | ~4.2 ms/step × ~128k steps = ~**9 minutes** per field (14 min at the 200k clip) |
 | exp11 robustness baseline, 127 samples × 4 σ × 400 draws | ~60 s (vectorised numpy) |
-| test suite | 557 passed + 1 skipped, ~2 min 55 s via the pre-push hook (re-measured 2026-08-11, sandbox disabled). Was 420 on 2026-08-04 — re-measure rather than trusting this cell |
+| test suite | pass count has gone stale within days every time it was recorded here — measure it yourself (`pytest -q`, sandbox disabled) rather than trusting this cell |
 
 The rollout figure is the one that bites: an earlier brief assumed ~1.9 s, off by three
-orders of magnitude. Never roll out inside a per-run scoring path.
+orders of magnitude. **Corrected:** the morphology rollout now DOES run inside the
+per-run scoring path, by default. `solver.morphology_rollout` defaults `True`
+(`config.py:184`) and `train._morphology_rollout` runs on every `fit()` call unless it is
+explicitly turned off, capped by `solver.morphology_max_steps` (15000, `config.py:192`).
+That cap plus the `etdrk4_rfft` speedup below (0.9-1.7 s, not the ~9 min figure above) is
+what makes running it by default affordable — see TUNING.md unit 7.
 
 ---
 
@@ -215,29 +223,18 @@ orders of magnitude. Never roll out inside a per-run scoring path.
 
 ## 9. Branch state
 
-**Rewritten 2026-08-11. The table that stood here was wholly obsolete** — it described `main`
-as a bare template at `4509632` and routed the reader to five worktrees, *all five of which
-have since been deleted*. Following it today produces `No such file or directory` on every
-row. It is replaced by the one fact that now matters:
+**Rewritten 2026-08-11, corrected again 2026-08-14 — this section keeps restaling.** A
+worktree/branch snapshot goes out of date within days (it previously claimed "no
+worktrees exist" while six were live). Rather than record another number that will drift,
+use the commands directly:
 
-> **`main` is the trunk and contains everything.** It was fast-forwarded 137 commits to
-> `e5d222a` on 2026-08-11. All the science that used to live on `feature/turing-training`,
-> `feature/spatial-mode-recovery`, `feature/identifiability-experiments` and the rest is on
-> `main`. **There are no worktrees** — `git worktree list` shows the single checkout.
+```bash
+git worktree list    # which worktrees exist and what branch each is on
+git branch -vv       # every local branch, ahead/behind main, tracking state
+git branch --merged main / --no-merged main   # merged vs. still-unmerged
+```
 
-Of 41 branches, **35 are fully merged into `main`** and are kept only as history; every one is
-pushed to `origin` as an off-machine backup. Six carry commits `main` does not have, and all
-six are deliberate:
-
-| branch | why it is not on `main` |
-|---|---|
-| `feature/rngrn-c-mu` | PARKED — finite-mu machinery, explicitly incomplete and unvalidated |
-| `chore/legacy-experiments` | stale run artefacts (a plumbing check + a noise-robustness **mockup**) parked off `main` on purpose |
-| `chore/claude-md-reflow` | a WIP `CLAUDE.md` reflow based on a superseded version; merging it would revert real corrections |
-| `chore/claude-harness` | holds the redundant commit dropped when `main` was fast-forwarded |
-| `docs/agent-conventions`, `docs/hooks-config` | the original `CLAUDE.md` lineage; its content reached `main` by another path |
-
-`CLAUDE.md` originated on `docs/agent-conventions` and now lives at the repo root on `main`.
+`main` is the trunk. `CLAUDE.md` originated on `docs/agent-conventions` and now lives at the repo root on `main`.
 That root copy — not the `docs/agent-conventions` one — is authoritative for environment, git,
 testing, house style, the firewall, datasets, compute reality, evidence discipline, run
 locations, the autonomy rule, and the subagent/workflow rules.
@@ -247,9 +244,13 @@ locations, the autonomy rule, and the subagent/workflow rules.
 ## 10. The two conventions most likely to be violated by accident
 
 **Run outputs go to `experiments/<purpose>/`**, passed as `--runs-root` — e.g.
-`experiments/dryrun/`, `experiments/tuning/`, `experiments/identifiability/`. The whole
-`experiments/` tree is gitignored. Name the subdirectory for its purpose so a plumbing
-check is never later mistaken for a result.
+`experiments/dryrun/`, `experiments/tuning/`, `experiments/identifiability/`. **Corrected:
+the `experiments/` tree is NOT gitignored wholesale.** Run records (run index, frozen
+configs, checkpoints, plottable arrays) are tracked in git — this is why every number in
+these docs is traceable to the run behind it. `.gitignore:13-17` states the rule
+explicitly: only specific bulky/regenerable artifacts are excluded (`figures/`, `*.h5`,
+`*.npz` outside `arrays/`, `*.npy`, `*.png` outside `figures_report/`). Name the
+subdirectory for its purpose so a plumbing check is never later mistaken for a result.
 
 **The autonomy rule — SUPERSEDED 2026-07-29. See `CLAUDE.md` §10, which is authoritative.**
 This section used to say "stop and ask whenever a science decision appears". The owner

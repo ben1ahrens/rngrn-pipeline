@@ -13,6 +13,79 @@ tests in `test_forward_solve.py` skipped on a CPU-only path.
 
 ---
 
+## Execution status — updated 2026-08-14
+
+Phases 1 and 2 have been **executed on this branch** (owner-approved scope). Phase 0's
+tracking step is done; Phase 0's *commit* step and all of Phase 3 are not.
+
+**Done**
+- `.claude/rules/orchestration.md` is now **tracked** — the dangling `@`-import is fixed.
+- `three_gene_qvar_smoke` manifest checksum corrected to `b881e667b8b9275b`. **All 14
+  payloads now verify clean against their manifests.** Repaired surgically rather than via
+  `rngrn scan-datasets --refresh`, which has no per-dataset scoping and would have rewritten
+  all 14 manifests and appended 14 index rows — more provenance churn than the defect
+  warranted. The one wrong field was the checksum; every other manifest field was verified
+  against the payload first.
+- §3.1 firewall-guard overclaim corrected in `.claude/rules/pre-merge-checklist.md`, plus a
+  new checklist line requiring any new **package-root** module to be added to the test's
+  `discovered` set at birth (nothing else catches it). `pytest tests/test_firewall.py` green.
+- §3.3–§3.7 corrections applied across `README.md`, `TUNING.md`, `CODE_REALITY.md`,
+  `CANONICAL_DATASETS.md`, `DATA_INTO_MODEL.md`, `data/datasets/README.md`,
+  `GOAL_tica_equivalent.md`, `TIMESCALE_MU.md`, `FUTURE_WORK.md`,
+  `ROBUSTNESS_MEASUREMENT.md`, `LGEN_TRANSFER_FIRST_RESULT.md`,
+  `HANDOFF_identifiability.md`, `IDENTIFIABILITY_EXPERIMENTS.md`,
+  `.claude/skills/{new-worktree,run-training}/SKILL.md`.
+- The 57→41 defect and the split-integrity defect are now **recorded** in
+  `CANONICAL_DATASETS.md` and `data/datasets/README.md` as dated defect notes. The rule
+  itself was not altered; the remedy remains an owner decision (§1.1).
+- §2.1 archives: `HANDOFF_canonical_datasets.md` and `HANDOFF_training_data_plots.md` moved
+  to `docs/archive/` with dated supersession headers, bodies intact. Their in-body errors
+  were fixed first so the archived copies are not wrong.
+- Orchestrator-applied, in the three highest-stakes files: the 12.5 %→**11.96 %** correction
+  (SPEC §9.1, PLAN §2), the labyrinth-topology correction (the set spans **three**
+  topologies, not `double_inhibitor` alone), the adjoint-residual correction
+  (**2.3–6.1e-12**, was "4–7e-13"), and a dated evidence note recording that the
+  `/tmp/d1_probe2` 64² artefacts are **gone** (confirmed absent) so every figure sourced to
+  them is indicative, not reportable.
+
+**Two briefs were corrected by the units that executed them** — recorded because it matters
+for trusting the rest:
+- `robustness_cloud` and `robustness_volumes` are **distinct functions**; the audit wording
+  conflated them. `robustness_cloud` does run on a recovery but stays in stdout;
+  `robustness_volumes` is what reaches the run index as `turing_volume_*`.
+- TUNING.md's "the batched path refuses loudly" is **still true** —
+  `recover.py:430-435` still raises on `batched=True` with a nonzero spectral weight. Only
+  the serial/GPU framing was superseded.
+- `TUNING.md:102` had moved to `:125`, not the `:115` the audit predicted.
+
+**Not done, and why**
+- `CLAUDE.md`, `.claude/README.md`, the four `.claude/agents/*.md`, and **`docs/DECISIONS.md`**
+  were untouched: all carry uncommitted changes in the `feature/fft-training` worktree, and
+  editing them here would cause exactly the line-granularity merge damage CLAUDE.md §11
+  documents. This defers §3.1's `CLAUDE.md` §5 firewall lists, §3.2's dangerous payload loop,
+  and **all of §3.8's ledger repairs** — including opening `D-FFT-15`. Three specific items
+  are waiting on that file, verified as the *only* remaining stale references repo-wide:
+  `DECISIONS.md:2104` and `:2613` still point at the pre-archive paths
+  `docs/HANDOFF_training_data_plots.md` and `docs/HANDOFF_canonical_datasets.md` (now under
+  `docs/archive/`), and `:2366` carries the same 57-vs-41 defect corrected elsewhere.
+  `DECISIONS.md:2606-2607` also still carries the 12.5 % figure corrected to 11.96 % in
+  SPEC §9.1. A repo-wide link check confirms **zero broken markdown links** and no other
+  dangling path.
+- `docs/STATE_OF_THE_SCIENCE.md` was untouched by design: it is cited **by line number** from
+  11+ source files and tests, so editing it breaks source comments. Its corrections need a
+  paired source-comment update and are deferred.
+- Phase 3 in full — it is blocked on §1.
+- `src/rngrn/eval/lifted.py:4` carries the same wrong `STATE_OF_THE_SCIENCE.md §713-714`
+  pointer that was fixed in `FUTURE_WORK.md:88` (correct span is §792-794). Source left
+  untouched; flagged here.
+- `TIMESCALE_MU.md`'s six placeholders: **no rendering script exists**. A repo-wide grep for
+  the placeholder strings hits only that document. `stage0b_mu.py` writes arrays and
+  `stage0b_figures.py` writes PNGs; neither emits the tables. The renderer has to be written
+  before the document can be completed — this is more than a re-run. A dated UNRENDERED
+  banner was added in the meantime.
+
+---
+
 ## 0. The headline, stated plainly
 
 **The problem is not that there are too many documents. Only two of twenty-four are

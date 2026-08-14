@@ -119,7 +119,7 @@ rngrn --runs-root experiments benchmark --degradation
 >   --config configs/expA_hidden_channel.yaml -o loss.weights.resid=<nonzero>
 > ```
 >
-> There is **no known-good value** for it: `TUNING.md:102` records that hidden-channel
+> There is **no known-good value** for it: `TUNING.md:125` records that hidden-channel
 > (m &lt; N) recovery has no objective at `resid = 0` and that the alternative is unproven.
 > Treat choosing one as a science decision under CLAUDE.md §10 —
 > calibrate it against the matched control and record it in `docs/DECISIONS.md`.

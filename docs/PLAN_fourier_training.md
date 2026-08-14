@@ -25,10 +25,16 @@ The pre-registered split (PREREGISTRATION.md: per canonical set, 2 tuning/burned
 samples + 3 held-out; roles are payload attrs) shapes everything: iteration happens
 ONLY on tuning-role samples; held-out samples are touched exactly once, at Stage 3,
 with a frozen config. The canonical labyrinth set (`turing_labyrinth`, 5 samples,
-3×512×512 single final frames, double_inhibitor topology) contains exactly two
-measured labyrinths: `sample_0000` (role: tuning) and `sample_0004` (role:
-held_out); the other three are measured holes (D-CANON-5 — the set is a mixture,
-never treat it as one class).
+3×512×512 single final frames) contains exactly two measured labyrinths:
+`sample_0000` (role: tuning) and `sample_0004` (role: held_out); the other three
+are measured holes (D-CANON-5 — the set is a mixture, never treat it as one class).
+
+> **Corrected 2026-08-14 (documentation audit).** This sentence described the set as
+> "double_inhibitor topology". It is not one topology: read from the payload attrs,
+> the set spans **three** — `double_inhibitor` (sample_0000, sample_0004),
+> `cross_repress` (sample_0001, sample_0003) and `relay_chain` (sample_0002). Only
+> the two *measured labyrinths* are double_inhibitor. The mixture claim itself was
+> verified correct against the same attrs and is unchanged.
 
 | Stage | Data | Establishes | Explicitly does NOT establish |
 |---|---|---|---|
@@ -51,7 +57,9 @@ on), highest contrast in the set (cv 0.81), p = 8 periods per box, L = 185.01,
 512², all three channels observed (`observed_idx=(0,1,2)`, m = N — no latent
 machinery). Chosen over `sample_0004` because using a held-out sample for
 iteration would contaminate the pre-registered split. Known costs, accepted:
-coarsest k* resolution in the set (one bin = 12.5% of k*), near-flat channels 1–2
+coarsest k* resolution in the set (one bin = 11.96% of k*, measured — see SPEC §9.1
+and the 2026-08-14 correction there; the declared p=8 gives 12.5%, the measured
+p=8.3587 gives 11.96%), near-flat channels 1–2
 (cv ≈ 0.075).
 
 **Split** (all masks are loss-level config; the gate/`RecoveryInput` is untouched):

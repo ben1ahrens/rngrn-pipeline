@@ -49,7 +49,12 @@ Measured at 96²:
   in the continuum limit.
 - ∂L/∂u ⊥ zero modes: spec_shape/spec_aniso/spec_amp_* all ≤ 2e-17 (exact in float64 —
   FFT-power losses are analytically phase-blind). `real_moments`: 1.2e-6 / 9.2e-8.
-- Adjoint solve residuals: 4–7e-13 for all five terms.
+- Adjoint solve residuals: **2.3–6.1e-12** for all five terms (corrected 2026-08-14 —
+  this read "4–7e-13", understating by 5–15×. Read from
+  `experiments/diag_fft/d1/results.json`, `adjoint_residuals`: spec_shape 3.39e-12,
+  spec_aniso 3.64e-12, spec_amp_mean 6.08e-12, spec_amp_fluct 2.34e-12, real_moments
+  2.35e-12. All remain far below the 1e-8 tripwire at `forward.py:_ADJOINT_RESIDUAL_TRIPWIRE`,
+  so no conclusion in this document moves; `forward.py:39-42` already carried the right range.)
 
 **Finding F-D1-1 (real_moments finite-grid phase sensitivity).** Pixel-space moments
 (skewness) are NOT exactly invariant under sub-pixel translation of a band-limited field
@@ -85,6 +90,24 @@ FD check passes every term: 1.2e-8 / 2.2e-7 / 1.8e-6 / 1.0e-5 / 2.8e-5
 textbook ε-signature (truncation at 1e-3, FD roundoff at 1e-6). 64² probe:
 `/…/tmp/d1_probe2` artefacts; the committed `experiments/diag_fft/d1/results.json` is
 the full 96², 10-direction record.
+
+> ⚠ **Evidence note, 2026-08-14 (documentation audit). The 64² probe directory no
+> longer exists** — `/…/tmp/d1_probe2` was checked and is gone. Per
+> `.claude/rules/reporting-numbers.md` ("a number with no run is not reportable"), every
+> figure sourced to that probe is **indicative, not reportable**, until re-run. That
+> covers: the projected-GMRES true-residual stall (5.5e-4–5.7e-3, F-D1-3) and its induced
+> gradient bias (1e-5–5.5e-2); the minimal-norm true residuals 1.4–3.6e-12 and the five
+> per-term FD errors quoted immediately above; F-D1-2's 2.4e-8 Newton floor and "≤1e-11 in
+> ~2 s at 64²"; and F-D1-1's 1.3e-4 at 64².
+>
+> **No decision moves.** D-FFT-10 (reject projected GMRES, adopt minimal-norm LSMR) rests
+> independently on the committed 96² record, which measured true residuals ≤6.1e-12 and
+> worst FD rel err 6.4146e-8 — and `docs/DECISIONS.md:2840-2843` already carries a
+> 2026-08-12 evidence-audit correction distinguishing the probe figures from the record.
+> What was missing, and is recorded here, is that the probe's artefacts are not retained.
+> Recommended repair: re-run `scripts/diag_fft_d1.py` at 64² into a tracked
+> `experiments/diag_fft/d1_probe64/`, since the projected-GMRES-is-biased result is this
+> branch's most consequential negative finding. Not done here.
 
 **F-D1-4 (addendum 2026-08-13) — Newton TRUE-STALLS exist at some θ; strict F = 0 is
 not universally reachable, and this worsens with grid.** A seed-1 re-witness run

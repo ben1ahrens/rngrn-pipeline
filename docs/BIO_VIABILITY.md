@@ -177,6 +177,17 @@ Turing system here; it only adds 1196 uniform instabilities. Reported for contin
 because it also validates the log k-grid of `D-BIO-3` against the library's own grid on
 the population where both are applicable.
 
+> **⚠ CORRECTED 2026-08-14 — `turing_ok`'s default changed under this section.** See
+> `src/rngrn/eval/analysis.py:30-35,72` and `docs/DECISIONS.md` D-EVID-11 (2026-08-04, after
+> this section was written). `turing_ok`'s primary test (`stable_uniform`, feeding `ok`) is
+> now the **strict** `max Re eig(J) < 0` — the same test this section argues for — not the
+> `tr(J) < 0` test the section header and "`eval/analysis.py::turing_ok` uses the loose test"
+> (above) describe. The old trace test now survives only as the separately-reported
+> `turing_loose` / `stable_uniform_loose`. So the header's "do not use `turing_ok`'s number"
+> is no longer the right caution: today `turing_ok`'s own `ok` already reflects the strict
+> criterion this section measured at 19/80 000. The measurement itself (1215 loose vs. 19
+> strict on these 80 000 draws) is untouched, as is everything below this box.
+
 ### 1.4 The unscored directions, and what the rate is a rate *of*
 
 `beta` is `source: UNCITED` and is never scored (`D-BIO-1`). The default arm draws it from

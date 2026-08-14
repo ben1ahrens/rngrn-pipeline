@@ -67,8 +67,10 @@ machine (CLAUDE.md §7a) and five sessions have been OOM-killed.
 
 ### What each step does, and why it is not optional
 
-- **`canon_select.py`** picks systems from the 57 that can be re-simulated at all — only
-  `three_gene_qvar` and `three_gene_multiL` store both `params_json` and `sim_seed`; the 127
+- **`canon_select.py`** picks systems from the 41 that can be re-simulated at all (34 in
+  `three_gene_qvar` ∪ 23 in `three_gene_multiL`, overlapping by 16 — 57 is the row count
+  across those two datasets, not the system count) — only `three_gene_qvar` and
+  `three_gene_multiL` store both `params_json` and `sim_seed`; the 127
   legacy samples store neither and their kinetics are gone. It applies admission gates
   (`peak_bin ≥ 3`, `cv ≥ 0.30`, positive class margin), ranks by distance from the class
   boundary, and requires the morphology label to survive re-simulation at a different box
@@ -110,13 +112,23 @@ additionally carry **`morphology_measured`**, computed from the field by
 `scripts/phase_topology.py` — which phase fragments into domains, and whether those domains
 are round or worm-like.
 
-They disagree, and the disagreement is real. Across the 57 re-simulatable systems:
+They disagree, and the disagreement is real. Across the 57 **sample-rows** in the
+re-simulatable pool (41 distinct systems — the two eligible datasets overlap by 16 systems,
+see §1; a row is one sample, not one system):
 
 | stored label | → spots | → holes | → labyrinth |
 |---|---|---|---|
 | `spots` (29) | **28** | 0 | 1 |
 | `labyrinth` (17) | 3 | **7** | **7** |
 | `stripes` (11) | 2 | 1 | 8 |
+
+**Reading this table:** the row totals (29/17/11 = 57) are sample-rows over 41 distinct
+systems, not 57 distinct systems — `three_gene_multiL` carries the same system at four domain
+sizes, and 16 systems are also independently present in `three_gene_qvar`. The `spots`
+marginal (29) is reproducible. The `labyrinth`/`stripes` marginals are **not** recomputed here
+on a per-system basis: which `multiL` replicate (of a system that appears more than once)
+represents that system is a methodology choice, not a fact, so those two marginals are
+reported as measured — row-level — rather than re-derived at the system level.
 
 `spots` is reliable. Only 41 % of `labyrinth` is a labyrinth — most of the rest is a **hole**
 pattern, which the generator's rule cannot name because its `phi > 0.66` test can essentially
@@ -142,7 +154,8 @@ keep their stored attribute, so no existing number changes meaning.
 ## 7. Where the reasoning lives
 
 - `docs/CANONICAL_DATASETS.md` — the canonical sets in detail.
-- `docs/HANDOFF_canonical_datasets.md` — zero-context handoff.
+- `docs/archive/HANDOFF_canonical_datasets.md` — zero-context handoff (archived, completed;
+  superseded by `docs/CANONICAL_DATASETS.md`).
 - `docs/DATASETS_L.md` — the L-decoupled sets and the leak audit.
 - `docs/DECISIONS.md` — `D-CANON-1..5` (canonical sets), `D6` (the L policy), `D15`
   (the 6 px/wavelength floor), `D-TDPLOT-1` (the periodicity gate).

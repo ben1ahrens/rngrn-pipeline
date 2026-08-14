@@ -1,5 +1,22 @@
 # TIMESCALE_MU.md — is the circuit still ROBUST once the quasi-steady-state reduction is UNDONE?
 
+> **⚠ UNRENDERED, dated 2026-08-14.** This document's headline deliverable is not readable
+> from the file as committed: §4's results table and five other blocks are literal,
+> unrendered template placeholders (`<!--RESULTS_TABLE-->`, `<!--OSC_LINE-->`,
+> `<!--LADDER_TABLE-->`, `<!--DTCONV_TABLE-->`, `<!--DISSENT-->`, `<!--CONTEXT-->` — confirm
+> with `grep -n '<!--' docs/TIMESCALE_MU.md`). §1's **"The measurement CONFIRMS it"** cannot be
+> verified from this document as it stands — the evidence it points to ("Section 4 is the
+> evidence") is exactly the unrendered part. The backing arrays do exist, committed at
+> `experiments/figures_report/stage0b/arrays/{robust,mucrit,dtconv}.json`, but no script in
+> this repository currently renders them into these placeholders (checked
+> `scripts/stage0b_mu.py` and `scripts/stage0b_figures.py`: neither writes into this file; a
+> repo-wide grep for the placeholder strings finds them only in this document and in
+> `docs/HANDOFF_docs_audit.md`, which already flags this as a rendering fix, not a
+> re-measurement). `docs/FUTURE_WORK.md` §1 separately marks the backing `mucrit` arrays
+> "partial, do not cite" — a caution this banner does not lift. Neither the claim nor the
+> tables have been deleted or fabricated here; render the six blocks from the committed
+> arrays before citing §4.
+
 Stage 0b, branch `feature/rngrn-c-mu`, base `34c3c51`. All numbers below were produced by
 `scripts/stage0b_mu.py` and are reproducible from the committed arrays under
 `experiments/figures_report/stage0b/arrays/`; the figures are `scripts/stage0b_figures.py`.
@@ -97,9 +114,12 @@ and dynamics*, never the steady state.
 `turing_volume` is the fraction of a lognormal parameter cloud that is still **strictly**
 Turing: `max Re eig(J) < 0` at `k = 0` **and** some `k > 0` unstable. Here `J` is the full
 **21 × 21 lifted** Jacobian, with `diag(D_x, 0, 0)`. Never the trace test — Stage 0 measured
-`eval/analysis.py::turing_ok`'s trace criterion overcounting by 64×, and on a lifted system
-it is worse than useless, because `tr(J_full)` is dominated by the `-1/mu` gate diagonal and
-stays negative at any `mu` even after the uniform state has gone unstable.
+the trace criterion overcounting by 64× (that was `eval/analysis.py::turing_ok`'s *default*
+test until the 2026-08-04 fix, D-EVID-11; it now survives only as the separately-reported
+`turing_loose` / `stable_uniform_loose`, with `turing_ok`'s own default already the strict
+test). Trace is worse than useless on a lifted system regardless of which name it goes by,
+because `tr(J_full)` is dominated by the `-1/mu` gate diagonal and stays negative at any `mu`
+even after the uniform state has gone unstable.
 
 **Perturbation model.** `lifted.draw_param_cloud`: independent lognormal multiplicative
 factors on the **physical kinetic parameters** (`KA, KR, alpha, beta, delta, D`), with `x*`

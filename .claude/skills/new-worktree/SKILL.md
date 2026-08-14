@@ -104,18 +104,23 @@ disabled both Experiment B arms for the life of a branch.
   definitions of which only the last takes effect. That exact failure reverted `resid` to 0.3,
   dropped the anchor weight, and discarded `model_seed`. Run the `merge-damage-hunter` agent
   after any wave integration.
-- **Subagents cannot ask the owner.** A unit decides under CLAUDE.md §10 and reports. A
-  precisely diagnosed defect a unit could not fix is a better outcome than a green test that
-  hides it — say which, explicitly.
+- **A unit does not decide the science — it returns the decision point.** CLAUDE.md §11 (see
+  `.claude/rules/orchestration.md` for the full framing) has the unit report what it found, the
+  options, and its recommendation, then stop that thread; the orchestrator rules and records it
+  under §10. A precisely diagnosed defect a unit could not fix is a better outcome than a green
+  test that hides it — say which, explicitly.
 - **A wave can die wholesale to an upstream outage.** Six phase-B units returned API 500s
   simultaneously. Check whether failures are server-side before diagnosing them as code.
 
 ## 5. Finishing
 
 Merge to `main` only after the tests pass **and the user has validated the results** —
-passing tests alone is not the bar. Do not commit on the user's behalf unless the work was
-explicitly scoped as "commit it". Substantial branches get a `docs/HANDOFF_<topic>.md` written
-for a **zero-context reader**: what changed, what is verified, what is not, where to start.
+passing tests alone is not the bar. Committing and pushing on the branch's own prefixed name is
+pre-authorised (CLAUDE.md §2) — a unit does not stop to ask. Three gates stay in force
+regardless: never commit to `main`; merging still needs the user's validation of the results;
+bypassing the pre-push hook with `git push --no-verify` stays a deliberate, explicit choice, not
+a default. Substantial branches get a `docs/HANDOFF_<topic>.md` written for a **zero-context
+reader**: what changed, what is verified, what is not, where to start.
 
 Before removing any worktree, **check for real (non-symlink) payloads inside it** — see the
 `harvest-dataset` skill.

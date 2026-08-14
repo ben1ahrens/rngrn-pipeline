@@ -48,7 +48,10 @@ Two consequences a reader should not have to work out for themselves:
 
 ## 1. What they are, in one paragraph
 
-Two registered datasets, five distinct 3-gene systems each, at **512×512**. Every sample is
+Two registered datasets, at **512×512**: `turing_labyrinth` promotes **4** distinct 3-gene
+systems (5 sample-rows; one system occupies two of them — see the defect note in §3),
+`turing_spots` promotes **3** distinct systems (5 sample-rows; two systems each occupy two
+of them). Every sample is
 a re-simulation of a system that already exists in `three_gene_qvar` or `three_gene_multiL`,
 run at a larger domain and a much finer grid. They are not new physics: the kinetics, the
 screening and the integrator are the tracked generator's, unchanged. What is new is the
@@ -69,8 +72,11 @@ Only two datasets carry both:
 | `three_gene_train/val/test` | 127 | **no** | **no** | no — generator was gitignored |
 | `*_classical_*` | 160 | yes | **no** | no — and not 3-gene GRNs |
 
-So the eligible pool is **57 distinct systems**, not 413. Everything below selects from
-those. Re-simulation was verified bit-exact at 96×96 before being trusted at 512×512.
+So the eligible pool is **41 distinct systems**, not 413 — `three_gene_qvar` (34) ∪
+`three_gene_multiL` (23), overlapping by 16. (57 is the row count across those two datasets;
+`system_id` is numbered per source dataset, so a system present in both is counted twice as a
+row but is one system.) Everything below selects from those. Re-simulation was verified
+bit-exact at 96×96 before being trusted at 512×512.
 
 ## 3. How the five per class were chosen
 
@@ -85,6 +91,25 @@ Deterministic and seeded, in this order:
    for `qvar` it costs one extra 96×96 run.
 4. **Split roles.** Tuning slots prefer systems recovery experiments have already burned;
    held-out slots are restricted to systems never run.
+
+> **Defect noted 2026-08-14: rule 4 did not hold.** `row_uid = f"{source_dataset}:{system_id}"`
+> (`scripts/canon_select.py:210-211`) is documented as a stable identity for a *system*, but
+> `system_id` is numbered per source dataset — so a system present in both `three_gene_qvar`
+> and `three_gene_multiL` gets two different `row_uid`s and was not deduplicated against
+> itself. Verified from payload attrs (SHA-256 over canonicalised `params_json`), three pairs
+> of canonical samples are the same kinetic system on both sides of the split:
+>
+> | kinetics hash | sample A | sample B |
+> |---|---|---|
+> | `c6883c26e273` | `turing_labyrinth/sample_0001` — **tuning** (`three_gene_qvar:18`, declared burned) | `turing_labyrinth/sample_0003` — **held_out** (`three_gene_multiL:36`) |
+> | `f4bbab1a81cc` | `turing_spots/sample_0000` — **tuning** (`three_gene_qvar:2`) | `turing_spots/sample_0002` — **held_out** (`three_gene_multiL:0`) |
+> | `4bcb7502631e` | `turing_spots/sample_0003` — held_out | `turing_spots/sample_0004` — held_out |
+>
+> The FFT track's own Stage-0 (`turing_labyrinth/sample_0000`) and Stage-3
+> (`turing_labyrinth/sample_0004`) samples are both unique and appear in none of these pairs,
+> so the Stage-3 labyrinth claim is unaffected. The remedy — record-only, re-derive the
+> selection with a kinetics-keyed uid, or amend the preregistration — is an **owner decision**
+> and is not taken here.
 
 **The `peak_bin` gate is load-bearing, not decoration.** Ranking by margin alone puts
 `three_gene_qvar/sample_0032` *first* among spots — its area fraction of 0.032 gives it the
@@ -154,8 +179,8 @@ One 96²-era assumption was relaxed to make this possible. `simulate_and_classif
 `18 ≤ L ≤ 220`; every canonical sample exceeds it. Those bounds encode *resolution* at a
 96×96 grid, and `L` enters the physics only as a unit (CLAUDE.md §7c) — the binding
 constraint is pixels-per-wavelength, which `canon_generate` now enforces directly at
-`PPW_MIN/PPW_MAX = 16/32`. The bound is a parameter defaulting to the old values, so every
-existing caller is bit-for-bit unaffected.
+`PPW_MIN/PPW_MAX = 12.0/64.0` (`scripts/canon_generate.py:47`). The bound is a parameter
+defaulting to the old values, so every existing caller is bit-for-bit unaffected.
 
 ## 6. Why there is no `turing_stripes`
 
@@ -166,10 +191,14 @@ box admits few orientations and forces the pattern onto one axis. Full argument,
 rejected alternatives in `docs/DECISIONS.md` **D-CANON-2**; the figure is
 `experiments/figures_report/canonical/s1_stripes_is_a_small_box_artefact.png`.
 
-`holes` is absent for a different and older reason: it is structurally unreachable. Species 0
-is the self-activator in all six topologies, so the observed channel is positively skewed by
-construction, while `holes` (φ > 0.66) needs strong negative skew. The corpus contains zero
-`holes` samples in 413.
+`holes` is absent for a different and older reason: **under the generator's own stored-label
+rule** it is structurally unreachable. Species 0 is the self-activator in all six topologies,
+so the observed channel is positively skewed by construction, while `holes` (φ > 0.66) needs
+strong negative skew. The corpus contains zero `holes` samples in 413 **by that rule's
+label**. This does not contradict §0's "3 hole patterns" above, which is a count under the
+*measured* classifier (`scripts/phase_topology.measure`, §5 of `data/datasets/README.md`) —
+a different rule the generator's own logic cannot produce, applied after the fact to the
+canonical `turing_*` payloads.
 
 ## 7. What is stored
 
@@ -190,9 +219,12 @@ datasets.
 ## 8. The integration horizon varies per sample
 
 `Tmax = 260` was chosen for 96×96 boxes and is not always enough at 512, where a sample holds
-16–32 periods rather than 3–14. Each sample doubles its own horizon until the saturation gate
-passes, capped at 8×. The horizon actually used is recorded per sample as the `tmax`
-attribute, because it is needed to reproduce the frame.
+16–32 periods rather than 3–14, so the base horizon here is `TMAX_BASE = 500.0`. Each sample
+doubles its own horizon until the saturation gate passes, capped at `TMAX_MAX = 2000.0` — a
+**4×** cap (`scripts/canon_generate.py:61-62`). The horizon actually used is recorded per
+sample as the `tmax` attribute, because it is needed to reproduce the frame; payload attrs
+confirm `tmax = 500.0` for all ten canonical samples, i.e. the saturation gate passed on the
+first attempt with no escalation.
 
 The generator is *not* early-stopped when the cv plateaus. That would make the saturation
 check trivially true afterwards — the gate would be testing the rule that produced the frame.

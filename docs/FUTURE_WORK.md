@@ -36,6 +36,15 @@ the gate dynamics for both regulation forms — but it is called from exactly on
 simulated in space, never run at finite `mu`, never coupled to diffusion, and never asked
 whether a pattern forms or survives perturbation.**
 
+**Correction 2026-08-14 — the paragraph above describes `lift_check` only, and the table row
+below it is stale.** `eval/dynamical.py::lift_check` itself is still exactly as described: 0-D
+algebra only, called only from `tests/test_science.py:71`. But the separate `eval/lifted.py`
+module (see table below) is no longer merely "written" — it now HAS been simulated in space,
+run at finite `mu`, and coupled to diffusion: that is the entire content of Stage 0b
+(`docs/TIMESCALE_MU.md`, `scripts/stage0b_mu.py`). `tests/test_lifted.py` is green: **16
+passed** (measured 2026-08-14, `uv run pytest tests/test_lifted.py -q`, sandbox disabled).
+The `mucrit`/`fixedpoint` array caution in the table below is untouched and still correct.
+
 ### Why it was deferred
 
 The owner's position, verbatim: *"Separation of time scales is a whole nother problem. My
@@ -50,7 +59,7 @@ measurement, and this project has not tested it.
 
 | artefact | where | state |
 |---|---|---|
-| `eval/lifted.py` — lifted state packing, Jacobian, dispersion, fixed-point residual | branch `feature/rngrn-c-mu`, commit `17e9ad2` | **written, NOT validated, NOT tested, no results** |
+| `eval/lifted.py` — lifted state packing, Jacobian, dispersion, fixed-point residual | `src/rngrn/eval/lifted.py` (704 lines), merged to `main` via `17e9ad2` | ~~**written, NOT validated, NOT tested, no results**~~ **CORRECTED 2026-08-14: written AND tested (`tests/test_lifted.py`, 16 passed) — simulated in space, run at finite `mu`, coupled to diffusion (Stage 0b, `docs/TIMESCALE_MU.md`)** |
 | `scripts/stage0b_mu.py` — the driver | same branch | partial |
 | `mucrit.json` / `mucrit.npz` / `fixedpoint.npz` | `experiments/figures_report/stage0b/arrays/` on that branch | partial, **do not cite** |
 | `eval/dynamical.py::lift_check` | `main` line | the algebra, validated in the `mu → 0` limit only |
@@ -85,7 +94,8 @@ calibration rather than needing its own.
   test overcounting by **64×** on 80,000 box-constrained draws, with all 1,196 extra
   acceptances being uniform instabilities rather than Turing patterns.
 - **Name the `mu` you mean.** This codebase uses `mu` for two unrelated things, recorded at
-  `STATE_OF_THE_SCIENCE.md` §713–714: the lift's fast-variable timescale (this entry) and the
+  `STATE_OF_THE_SCIENCE.md` §792–794 (corrected 2026-08-14; was miscited as §713–714, which is
+  unrelated content): the lift's fast-variable timescale (this entry) and the
   generator's degradation rate (the RNGRN's `delta`, which `scripts/stage0_bio_viability.py`
   swept). One unit has already confused them; say which you mean.
 

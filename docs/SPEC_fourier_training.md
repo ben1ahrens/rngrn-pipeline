@@ -381,7 +381,17 @@ independent `train.fit` runs (distinct `train.seed`), identical config otherwise
 
 ### 9.1 Wavelength: one radial bin (BINDING)
 `|k*_sim − k*_obs| ≤ 2π/L` — equivalently rel-err ≤ 1/p for a sample with p periods
-per box: 12.5% for `turing_labyrinth/sample_0000` (p=8), 2.9% at p=35.
+per box: **11.96%** for `turing_labyrinth/sample_0000`, 2.9% at p=35.
+
+> **Corrected 2026-08-14 (documentation audit).** This line read "12.5% … (p=8)",
+> which is `1/8` from the *declared* ladder value `periods_per_box: 8` in
+> `data/canonical_selection.json`. The *measured* value is `p = 8.3587`
+> (`experiments/diag_fft/d3/results.json`, `channel_0.kstar_in_bins_p`), giving
+> `Δk/k* = 0.033962/0.283878 = 11.96%` — matching `docs/DIAGNOSTICS_fft.md:174`,
+> which had it right. The binding rule `|k*_sim − k*_obs| ≤ 2π/L` is unchanged and
+> unaffected; only the illustrative percentage was wrong, and the correction
+> **tightens** it. `docs/DECISIONS.md:2606-2607` still carries the old 12.5% and is
+> pending the same fix (that file had uncommitted changes when this audit ran).
 Reasoning: the RAPS estimator's resolution IS Δk = 2π/L; the pre-registered 8.3%
 was derived on the three_gene sets and D-EVID-8 records it is not
 dataset-independent; at p=8 it demands sub-bin precision the measurement does not

@@ -8,8 +8,9 @@ object is a differentiable reaction–diffusion model (the RNGRN) whose weights
 > **Status: TUNING — past template, short of a result.** Rewritten 2026-08-11; it had said
 > "TEMPLATE … the next stage, on a CUDA machine", which stopped being true weeks ago.
 >
-> **What is done.** The six-stage pipeline is wired and runs (**557 tests pass, 1 skipped**,
-> re-measured 2026-08-11 with the sandbox disabled; all eleven CLI subcommands work). Real
+> **What is done.** The six-stage pipeline is wired and runs (**measure the pass count
+> yourself** — `pytest -q` with the sandbox disabled; it has gone stale within days every
+> time it was recorded here, see CLAUDE.md §3 — all eleven CLI subcommands work). Real
 > tuning campaigns have run on real data: **133 recorded runs** across
 > `experiments/`, with run records, frozen configs, checkpoints and plottable arrays tracked
 > in git so every number is traceable to the run behind it. **39 dated decisions** are
@@ -18,10 +19,13 @@ object is a differentiable reaction–diffusion model (the RNGRN) whose weights
 >
 > **What is NOT done, stated as plainly as the above.** No pre-registered criterion in
 > **[docs/PREREGISTRATION.md](docs/PREREGISTRATION.md)** §3 has been declared met, and
-> criterion 3.1 (`topology_consistency`) has failed three independent ways. All 133 runs are
-> against `three_gene_qvar` or older sets — **nothing has yet been fitted against
-> `turing_spots`/`turing_labyrinth`**, which have been the pre-registered PRIMARY data since
-> 2026-08-10. So: the machine runs and is measured, the science is not yet proven.
+> criterion 3.1 (`topology_consistency`) has failed three independent ways. Almost all 133 runs
+> are against `three_gene_qvar` or older sets. The exception is the D5 diagnostic cell
+> (`experiments/diag_fft/d5/`): 10 committed recovery runs and a K=10 target report against
+> `turing_labyrinth/sample_0000` — the tuning-role sample, not a split violation. **No
+> held-out sample has been touched**: `sample_0004` (`turing_labyrinth`'s held-out split) is
+> still untouched, and `turing_spots` has no runs at all. So: the machine runs and is
+> measured, the science is not yet proven.
 >
 > Read **[docs/STATE_OF_THE_SCIENCE.md](docs/STATE_OF_THE_SCIENCE.md)** for the evidence
 > ledger and **[TUNING.md](TUNING.md)** for the knobs, stubs and unproven science.
@@ -45,6 +49,11 @@ src/rngrn/
   index.py               metadata-index backends: jsonl (default) | sqlite
   model.py               the RNGRN core (VALIDATED science)         [recovery side]
   observables.py         image-only k*, morphology, Laplacians       [recovery side]
+  forward.py             PatternSolver: forward pattern solve on detected instability
+  etdrk4_torch.py        torch ETDRK4 step used by forward.py
+  history.py             per-step optimisation history capture
+  plotdata.py            plottable-array export for recorded runs
+  export.py              run index -> tidy/long CSV
   data/
     rd_models.py         reference RD systems + analytic answer keys [ANSWER-KEY side]
     solver.py            forward RD generator                        [ANSWER-KEY side]
@@ -53,6 +62,7 @@ src/rngrn/
     gate.py              THE FIREWALL: -> (RecoveryInput, AnswerKey)  [boundary]
   losses/
     terms.py             differentiable loss terms
+    spectral.py          spectral loss terms (spec_shape/aniso/amp_mean/amp_fluct, real_moments)
     weighting.py         fixed/scheduled/gradnorm/ntk strategies
     total.py             assemble terms -> weighting -> scalar (fail-loud)
   recover.py             per-frame variational recovery              [recovery side]
@@ -64,21 +74,30 @@ src/rngrn/
     rollout.py           lift-and-simulate (the real success test)
     analysis.py          linear stability, Turing conditions, robustness cloud
     topology.py          learned-GRN diagram
+    lifted.py            lifted-field helpers for rollout/scoring
+    lgen_eval.py         L-generalisation evaluation helpers
+  scoring/
+    lgen.py              cross-L modal-agreement metrics
+    morphology.py        morphology matching/distance
+    overparam.py         spare-species inertness scoring
+    permutation.py       hidden-channel permutation alignment
+    plausibility.py      biological-plausibility box scoring
+    reproducibility.py   seed-reproducibility scoring
   optim/
     sweep.py             outer loop over fit() -> run index
     benchmark.py         cross-run comparison table + identifiability metric
   cli.py                 rngrn {generate-data,register-data,scan-datasets,list-datasets,
                                 train,evaluate,analyze,sweep,benchmark,
                                 target-report,export}
-configs/                 base.yaml + milestone1/2/3 + sweep_example.yaml
+configs/                 15 configs — see configs/ for the full list
 tests/                   firewall audit · science anchors · end-to-end smoke
 ```
 
 ## Install & run
 
 ```bash
-pip install -e .            # torch, numpy, scipy, h5py, matplotlib, pyyaml, networkx
-pytest -q                   # 557 passed, 1 skipped: firewall + science anchors + scorers + smoke
+pip install -e .            # torch, numpy, scipy, h5py, matplotlib, pyyaml, networkx, pandas
+pytest -q                   # measure the pass count yourself: firewall + science anchors + scorers + smoke
                             # RUN THIS WITH THE SANDBOX DISABLED. payload.h5 is on the sandbox
                             # read-deny list, so a sandboxed run fakes ~15 PermissionError
                             # failures that look exactly like code faults. See CLAUDE.md §3.

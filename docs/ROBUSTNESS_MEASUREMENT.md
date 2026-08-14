@@ -53,6 +53,18 @@ Two properties of their number to carry forward:
 > recoveries — see `C1_COMPETITIVE_TUNING.md` §9.2 (`robustness_n_used = 8`).
 > §1 (the Tica reference numbers), §4 (the 127-sample generator baseline) and §5's
 > still-open items remain current.
+>
+> **Extended 2026-08-14 — a separate, later fix to `turing_ok` itself, not covered above.**
+> The fix above (`8321133`, 2026-07-29) is to `robustness_cloud`'s perturbation and speed; it
+> already reports the strict criterion. §3.5 below is about a different function,
+> `eval/analysis.py::turing_ok`, evaluated at a single (J, D) rather than over a cloud. As of
+> a **later, separate fix** (2026-08-04, D-EVID-11; `analysis.py:30-35,72`), `turing_ok`'s own
+> default test (`stable_uniform`, feeding `ok`) is also the **strict** `max Re eig(J) < 0`,
+> not the `tr(J) < 0` §3.5 describes below — that trace test now survives only as the
+> separately-reported `turing_loose` / `stable_uniform_loose`. So "`turing_ok` tests
+> `tr(J) < 0`" (§3.5) and "`eval/analysis.py::turing_ok` uses the loose test" (as echoed in
+> `docs/BIO_VIABILITY.md` §1.3) both describe the pre-2026-08-04 function. §3.5's underlying
+> measurement (1215 loose vs. 19 strict acceptances on the same 80,000 draws) is untouched.
 
 *Historical, as of 2026-07-29 — superseded, see the box above:*
 

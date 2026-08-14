@@ -3,6 +3,24 @@
 **Audit of every quantity that reaches the RNGRN model or its loss during recovery.**
 Branch `feature/turing-training` @ `c237d30`. Read-only audit; nothing modified.
 
+> **Read this before citing any number below (added 2026-08-14).** Every measurement in this
+> document was taken over the **287-sample / 786-channel-instance legacy corpus** — the 9
+> datasets registered before 2026-07-29 (`three_gene_{train,val,test}`,
+> `three_gene_classical_{train,val,test}`, `two_gene_classical_{train,val,test}`). The
+> registry now holds **426 samples / 1203 channel-instances across 14 datasets**, and this
+> document's measurements **exclude the canonical `turing_spots` / `turing_labyrinth` sets
+> that are now the primary training data source** (`docs/CANONICAL_DATASETS.md` §0), along
+> with `three_gene_qvar`, `three_gene_multiL` and `three_gene_qvar_smoke`. Every number below
+> is arithmetically correct *for its era* — none has been recomputed — but none should be read
+> as describing the current registry.
+>
+> **Flagged specifically:** this document's most-cited line — "94.8% of the 287 samples have
+> `k*_true ≡ 6·2π/L`" (§0, §5.4) — does **not** hold on the canonical sets. Their periods were
+> deliberately drawn as a geometric ladder across a wide range (8–36 periods-per-box) to break
+> exactly this leak: an oracle blind predictor reading only `L` scores **37.5%** median error
+> on `turing_spots` and **33.3%** on `turing_labyrinth`, against ~0% on this document's legacy
+> corpus (`docs/CANONICAL_DATASETS.md` §5, the periods table).
+
 Every claim below carries a `file:line` citation. **Where the code and the docs disagree,
 the code wins** and the discrepancy is called out explicitly in §6.
 

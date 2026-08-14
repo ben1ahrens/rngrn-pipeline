@@ -34,6 +34,12 @@ The `trivial_kstar_err` of 50 % is the point of the new datasets: on the legacy 
 image-blind predictor scored ~0 %, which made any k\* number unreadable. Here it is
 useless, so the 4.6 % is a real measurement.
 
+**Caveat added 2026-08-14:** this run predates `trivial_kstar_fft_err`. Per
+`src/rngrn/validate.py:193-194`, the control matched to `kstar_fft_rel_err` is
+`trivial_kstar_fft_err`, not `trivial_kstar_err` — `validate.py:41-42` warns that reading the
+headline against the linear control overstates the win by orders of magnitude. The 4.6 %
+above currently has no matched control on this run.
+
 ## Transfer
 
 | L | L/L_train | k\* model | k\* TRUE | err | q model | q TRUE | class | TRUE | px/λ |
@@ -99,8 +105,8 @@ nothing. It is now recorded, so every number here is re-plottable without re-run
 |---|---|
 | `experiments/lgen_transfer/lgen_eval.jsonl` | one flat row per (run_id, L) — the transfer table |
 | `experiments/lgen_transfer/lgen_summary.jsonl` | one row per evaluation — the §3.5a quantities |
-| `runs/m3_registry_20260730_005701/arrays/lgen_fields.npz` | the (3, 128, 128) field at each L |
-| `runs/m3_registry_20260730_013119/arrays/plot_arrays.npz` | the full per-run arrays + training trajectory |
+| `experiments/lgen_transfer/runs/m3_registry_20260730_005701/arrays/lgen_fields.npz` | the (3, 128, 128) field at each L |
+| `experiments/lgen_transfer/runs/m3_registry_20260730_013119/arrays/plot_arrays.npz` | the full per-run arrays + training trajectory |
 
 Re-running the `evaluate` command above reproduced the transfer table exactly
 (`kstar_phys_cv` 0.047636, `periods_slope_rel_err` 0.014345,

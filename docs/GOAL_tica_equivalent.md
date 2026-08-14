@@ -263,6 +263,20 @@ makes "the equivalent gene circuit" a claim about behaviour rather than wiring �
 "equivalent circuit" in the goal statement reads more like A. Worth resolving
 explicitly rather than by drift.
 
+**Note added 2026-08-14 (docs audit) — this conflicts with `SPEC_fourier_training.md` §1,
+unresolved.** This section's owner quote above — "the only thing I really care about is that
+the model recovers the same dominant spatial mode, pattern morphology... This overrides older
+docs in this repo that emphasise J sign structure or parameter recovery as goals" — is
+recorded verbatim above. `SPEC_fourier_training.md` §1 makes **R1 (binding now): sign-structure
+reproducibility** the binding gate for its Criterion 1: "Over 5 independent training runs (5
+seeds) on the same pattern, all 5 recovered sign structures are identical: every pairwise
+comparison of the 5 recovered N×N sign matrices agrees on all entries, under the identity
+species mapping" — and demotes morphology to "reported only, for now" under Criterion 2,
+noting "[w]hether morphology becomes a binding gate is a decision point scheduled at Stage 2 of
+the plan — deferred by the owner, not forgotten." Neither document references the other. Which
+one governs — morphology-first per this section, or sign-structure-first per SPEC R1 — is an
+**unresolved OWNER decision**; this note records the conflict and does not resolve it.
+
 ---
 
 ## 4. Where the project stands relative to this goal
@@ -366,8 +380,11 @@ the gaps as they currently read.
    has a degenerate minimum reachable by flattening σ(k) instead of relocating its
    peak. Two fixes tried and rejected. This blocks everything else, because a
    robustness claim needs a recovered system to make it about.
-2. **The D-ratio prior is designed but unwired.** Failing runs collapse the D-ratio
-   toward ~8 while the generators sit at 108–140. The literature-vs-generator tension
+2. ~~**The D-ratio prior is designed but unwired.**~~ **CORRECTED 2026-08-14: it is wired.**
+   `src/rngrn/losses/total.py:134-137` wires `param_prior` into the loss when
+   `param_prior_kw` is passed (see also §4's 2026-08-11 note at :184-191, which records the
+   companion `plausibility_score` fix). What is still true and still open: failing runs
+   collapse the D-ratio toward ~8 while the generators sit at 108–140. The literature-vs-generator tension
    (measured Nodal/Lefty ratio ~7.5 in zebrafish vs our generators' ~100) is
    unresolved, and Tica's own point is that a third node *relaxes* the requirement.
    Note §4.4: our data says the third node helps only in the immobile-slow-node
@@ -380,8 +397,10 @@ the gaps as they currently read.
 4. **The dataset's L defect.** `L = clip(6·2π/k*, 18, 220)` makes k*_true ≡ 6·2π/L for
    94.8 % of samples, so the domain size carries the answer. Only regeneration fixes
    it. Any k* result on the current data is confounded by this.
-5. **No Turing-vs-Hopf-vs-Turing-Hopf classification.** `turing_ok` tests `tr J < 0`,
-   which is weaker than uniform stability, and never inspects whether the leading mode
+5. **No Turing-vs-Hopf-vs-Turing-Hopf classification.** ~~`turing_ok` tests `tr J < 0`, which
+   is weaker than uniform stability, and~~ **FIXED 2026-08-04 (D-EVID-11): `turing_ok`'s
+   default test is now the strict `max Re eig(J) < 0`** (the trace test survives only as
+   `turing_loose`). It still never inspects whether the leading mode
    at k* is complex. On the current data this happens not to matter (127/127 agree
    under both criteria, 0/127 have a complex leading mode at k*), but under
    perturbation the loose criterion overcounts by up to 70 % of draws for a single
@@ -393,8 +412,12 @@ the gaps as they currently read.
 7. **No experimental-perturbation model.** Reading D above. DAPG, temperature and agar
    thickness are structured perturbations; isotropic log-normal noise is a proxy whose
    adequacy has not been argued.
-8. **Biological plausibility is uninstrumented** (goal component 2, §2.2). No plausibility
-   score exists, nothing checks recovered parameters against a box, and the `three_gene`
+8. ~~**Biological plausibility is uninstrumented** (goal component 2, §2.2). No plausibility
+   score exists, nothing checks recovered parameters against a box~~ **CORRECTED 2026-08-14:
+   this contradicted §4's own 2026-08-11 note at :184-191, which is the accurate account.**
+   `src/rngrn/scoring/plausibility.py` (2026-07-29) is called from `validate.py:397-398`
+   (`out.update(PLAUS.plausibility_report(...))`), and `plausibility_score` is live on every
+   run row — see `experiments/stage0_bioviab/runs.jsonl`. What is still true: the `three_gene`
    family — the one all recovery work uses — does not store `params_json`, so the
    generator's own draws are not available for that family.
 9. **Experiment B has never been run** (goal component 3, §2.3). The harness and metrics

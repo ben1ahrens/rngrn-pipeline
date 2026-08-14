@@ -88,10 +88,13 @@ achieves X". Dry-run numbers are never findings.
 The GPU *loses* on the serial path (one Adam step at N=3: CPU 138 ms vs CUDA 418 ms) because
 `terms.steady_state` is a damped Newton with up to 100 sequential 3×3 solves and
 `torch.linalg.eigvals` has no batched cuSOLVER kernel for small non-symmetric matrices.
-Batched, the same maths strongly favours CUDA (162× on 127 matrices with the closed-form
-cubic dispersion). Multiprocessing over seeds is the CPU throughput lever; scale `--workers`
-to `len(os.sched_getaffinity(0))`, not a fixed number — and remember the guard's floor
-assumes ~1.6 GiB per worker.
+Batched, CUDA wins only past a crossover. The 162× figure (156.6 ms vs 0.965 ms on 127
+matrices, `experiments/exp10_cubic_dispersion.json`) is `eig_cuda` vs `cubic_cuda` — a backend
+comparison at a fixed device, not CPU vs CUDA. At n=127 `cubic_cpu` (0.292 ms) actually *beats*
+`cubic_cuda` (0.965 ms); the CPU→CUDA crossover for the cubic backend is around 6,400 matrices.
+Stay on CPU below that. Multiprocessing over seeds is the CPU throughput lever; scale
+`--workers` to `len(os.sched_getaffinity(0))`, not a fixed number — and remember the guard's
+floor assumes ~1.6 GiB per worker.
 
 ## 6. Environment
 

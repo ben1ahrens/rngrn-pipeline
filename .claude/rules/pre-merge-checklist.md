@@ -34,10 +34,17 @@ executable form. Every line is a check that has caught a real defect in this rep
 ## Firewall
 
 - [ ] `firewall-auditor` agent run if the branch touched `model.py`, `observables.py`,
-      `recover.py`, `losses/`, `eval/`, `scoring/`, `train.py` or `validate.py`.
+      `recover.py`, `forward.py`, `etdrk4_torch.py`, `losses/`, `eval/`, `scoring/`, `train.py`
+      or `validate.py`.
 - [ ] Any new module under `eval/` or `losses/` has been classified recovery-side or not, and
-      `tests/test_firewall.py`'s module list updated to match. Inside `src/rngrn/` the
-      completeness test enforces this for you; it will fail on an unclassified module.
+      `tests/test_firewall.py`'s module list updated to match. The completeness test
+      (`test_every_loss_and_eval_module_is_classified`) globs only `losses/` and `eval/`, plus
+      three hard-coded package-root modules (`history.py`, `forward.py`, `etdrk4_torch.py`) it
+      seeds into `discovered` by hand — it does NOT auto-catch an unclassified module anywhere
+      else at `src/rngrn/<name>.py`.
+- [ ] **Any new package-root module under `src/rngrn/`** (i.e. not inside `losses/` or `eval/`)
+      is added to `test_every_loss_and_eval_module_is_classified`'s `discovered` set at birth —
+      nothing else catches it, which is how `history.py` itself first went unaudited.
 - [ ] **Any new `scripts/` module that opens `payload.h5` was added to `FORBIDDEN`.** The
       completeness test globs `src/rngrn` only, so it is blind to `scripts/` — and scripts are
       importable by bare top-level name because the suite and notebooks put `scripts/` on

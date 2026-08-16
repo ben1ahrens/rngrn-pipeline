@@ -1,0 +1,152 @@
+fixture: sig_max=0.3567 at k*=0.176, max Re eig(J)=-0.4367
+relaxing to patterned state on 96x96, L=285.49, dt=0.1850 ...
+patterned: amp=0.1701, k*=0.183, ||F||/||u|| = 3.38e-13
+zero modes: ||A t||/||A v_rand|| = tx 3.57e-04, ty 3.55e-04
+  dL/du ⊥ zero modes [spec_shape]: tx 6.72e-19, ty 4.47e-19
+  dL/du ⊥ zero modes [spec_aniso]: tx 9.56e-20, ty 7.63e-19
+  dL/du ⊥ zero modes [spec_amp_mean]: tx 1.13e-18, ty 4.21e-18
+  dL/du ⊥ zero modes [spec_amp_fluct]: tx 5.12e-19, ty 3.19e-19
+  dL/du ⊥ zero modes [real_moments]: tx 1.16e-06, ty 9.20e-08
+adjoint residuals: spec_shape 3.4e-12, spec_aniso 3.6e-12, spec_amp_mean 6.1e-12, spec_amp_fluct 2.3e-12, real_moments 2.3e-12
+    [dir 0 eps 0.001 sgn +1] solve 36.9s res 2.3e-12 drift 1.77e-04
+    [dir 0 eps 0.001 sgn -1] solve 37.2s res 2.4e-12 drift 1.77e-04
+    [dir 0 eps 0.0001 sgn +1] solve 35.2s res 3.5e-13 drift 1.77e-05
+    [dir 0 eps 0.0001 sgn -1] solve 39.0s res 4.0e-13 drift 1.77e-05
+    [dir 0 eps 1e-05 sgn +1] solve 20.0s res 2.2e-12 drift 1.77e-06
+    [dir 0 eps 1e-05 sgn -1] solve 21.2s res 2.3e-12 drift 1.77e-06
+    [dir 0 eps 1e-06 sgn +1] solve 19.6s res 3.4e-13 drift 1.77e-07
+    [dir 0 eps 1e-06 sgn -1] solve 20.3s res 3.8e-13 drift 1.77e-07
+      spec_shape: ift +9.7139e-04  eps0.001: +9.7115e-04 (2.4e-04)  eps0.0001: +9.7138e-04 (2.4e-06)  eps1e-05: +9.7139e-04 (2.9e-09)  eps1e-06: +9.7139e-04 (2.5e-08)
+      spec_aniso: ift -2.7319e-09  eps0.001: -2.7325e-09 (2.1e-04)  eps0.0001: -2.7319e-09 (2.1e-06)  eps1e-05: -2.7319e-09 (2.4e-09)  eps1e-06: -2.7319e-09 (3.7e-09)
+      spec_amp_mean: ift +1.0547e-02  eps0.001: +1.0547e-02 (9.2e-07)  eps0.0001: +1.0547e-02 (9.2e-09)  eps1e-05: +1.0547e-02 (4.0e-11)  eps1e-06: +1.0547e-02 (3.2e-10)
+      spec_amp_fluct: ift -1.4036e-04  eps0.001: -1.4038e-04 (1.7e-04)  eps0.0001: -1.4036e-04 (1.7e-06)  eps1e-05: -1.4036e-04 (6.4e-08)  eps1e-06: -1.4036e-04 (3.1e-07)
+      real_moments: ift +2.9071e-03  eps0.001: +2.9071e-03 (6.4e-06)  eps0.0001: +2.9071e-03 (6.5e-08)  eps1e-05: +2.9071e-03 (8.9e-09)  eps1e-06: +2.9071e-03 (3.3e-07)
+  dir 0: rel err  spec_shape 2.9e-09  spec_aniso 2.4e-09  spec_amp_mean 4.0e-11  spec_amp_fluct 6.4e-08  real_moments 8.9e-09
+    [dir 1 eps 0.001 sgn +1] solve 62.0s res 3.8e-13 drift 2.72e-04
+    [dir 1 eps 0.001 sgn -1] solve 58.9s res 3.2e-13 drift 2.72e-04
+    [dir 1 eps 0.0001 sgn +1] solve 42.9s res 3.5e-13 drift 2.72e-05
+    [dir 1 eps 0.0001 sgn -1] solve 40.1s res 4.0e-13 drift 2.72e-05
+    [dir 1 eps 1e-05 sgn +1] solve 39.5s res 3.7e-13 drift 2.72e-06
+    [dir 1 eps 1e-05 sgn -1] solve 38.9s res 3.5e-13 drift 2.72e-06
+    [dir 1 eps 1e-06 sgn +1] solve 20.9s res 4.1e-13 drift 2.72e-07
+    [dir 1 eps 1e-06 sgn -1] solve 21.2s res 4.3e-13 drift 2.72e-07
+      spec_shape: ift -7.6802e-04  eps0.001: -7.8475e-04 (2.1e-02)  eps0.0001: -7.6818e-04 (2.1e-04)  eps1e-05: -7.6802e-04 (2.1e-06)  eps1e-06: -7.6802e-04 (5.3e-08)
+      spec_aniso: ift -1.4358e-08  eps0.001: -1.4407e-08 (3.4e-03)  eps0.0001: -1.4358e-08 (3.3e-05)  eps1e-05: -1.4358e-08 (3.3e-07)  eps1e-06: -1.4358e-08 (2.5e-09)
+      spec_amp_mean: ift +8.0353e-03  eps0.001: +8.0354e-03 (1.3e-05)  eps0.0001: +8.0353e-03 (1.2e-07)  eps1e-05: +8.0353e-03 (1.1e-09)  eps1e-06: +8.0353e-03 (2.9e-09)
+      spec_amp_fluct: ift +1.7095e-02  eps0.001: +1.7092e-02 (1.7e-04)  eps0.0001: +1.7095e-02 (1.7e-06)  eps1e-05: +1.7095e-02 (1.7e-08)  eps1e-06: +1.7095e-02 (2.9e-09)
+      real_moments: ift +1.1169e-02  eps0.001: +1.1166e-02 (2.3e-04)  eps0.0001: +1.1169e-02 (2.3e-06)  eps1e-05: +1.1169e-02 (2.6e-08)  eps1e-06: +1.1169e-02 (4.7e-09)
+  dir 1: rel err  spec_shape 5.3e-08  spec_aniso 2.5e-09  spec_amp_mean 1.1e-09  spec_amp_fluct 2.9e-09  real_moments 4.7e-09
+    [dir 2 eps 0.001 sgn +1] solve 41.1s res 4.2e-13 drift 1.57e-04
+    [dir 2 eps 0.001 sgn -1] solve 39.5s res 3.9e-13 drift 1.57e-04
+    [dir 2 eps 0.0001 sgn +1] solve 37.7s res 4.5e-13 drift 1.57e-05
+    [dir 2 eps 0.0001 sgn -1] solve 36.7s res 3.5e-13 drift 1.57e-05
+    [dir 2 eps 1e-05 sgn +1] solve 18.0s res 5.0e-13 drift 1.57e-06
+    [dir 2 eps 1e-05 sgn -1] solve 17.3s res 4.6e-13 drift 1.57e-06
+    [dir 2 eps 1e-06 sgn +1] solve 17.8s res 3.6e-13 drift 1.57e-07
+    [dir 2 eps 1e-06 sgn -1] solve 18.0s res 3.6e-13 drift 1.57e-07
+      spec_shape: ift -1.3190e-03  eps0.001: -1.3190e-03 (2.7e-05)  eps0.0001: -1.3190e-03 (2.7e-07)  eps1e-05: -1.3190e-03 (4.7e-10)  eps1e-06: -1.3190e-03 (2.1e-09)
+      spec_aniso: ift -2.5372e-09  eps0.001: -2.5374e-09 (8.9e-05)  eps0.0001: -2.5372e-09 (8.9e-07)  eps1e-05: -2.5372e-09 (3.5e-10)  eps1e-06: -2.5372e-09 (8.0e-09)
+      spec_amp_mean: ift -9.2595e-03  eps0.001: -9.2595e-03 (6.0e-07)  eps0.0001: -9.2595e-03 (6.0e-09)  eps1e-05: -9.2595e-03 (4.3e-11)  eps1e-06: -9.2595e-03 (8.7e-10)
+      spec_amp_fluct: ift +3.4335e-03  eps0.001: +3.4335e-03 (1.7e-06)  eps0.0001: +3.4335e-03 (1.7e-08)  eps1e-05: +3.4335e-03 (1.2e-10)  eps1e-06: +3.4335e-03 (1.8e-08)
+      real_moments: ift +1.0758e-03  eps0.001: +1.0758e-03 (2.0e-05)  eps0.0001: +1.0758e-03 (2.2e-07)  eps1e-05: +1.0758e-03 (1.9e-08)  eps1e-06: +1.0758e-03 (7.9e-07)
+  dir 2: rel err  spec_shape 4.7e-10  spec_aniso 3.5e-10  spec_amp_mean 4.3e-11  spec_amp_fluct 1.2e-10  real_moments 1.9e-08
+    [dir 3 eps 0.001 sgn +1] solve 57.3s res 3.9e-13 drift 2.31e-04
+    [dir 3 eps 0.001 sgn -1] solve 57.2s res 3.6e-13 drift 2.30e-04
+    [dir 3 eps 0.0001 sgn +1] solve 38.0s res 3.6e-13 drift 2.31e-05
+    [dir 3 eps 0.0001 sgn -1] solve 37.2s res 4.0e-13 drift 2.31e-05
+    [dir 3 eps 1e-05 sgn +1] solve 36.8s res 3.5e-13 drift 2.31e-06
+    [dir 3 eps 1e-05 sgn -1] solve 42.0s res 4.1e-13 drift 2.31e-06
+    [dir 3 eps 1e-06 sgn +1] solve 20.4s res 3.8e-13 drift 2.31e-07
+    [dir 3 eps 1e-06 sgn -1] solve 19.5s res 3.8e-13 drift 2.31e-07
+      spec_shape: ift +4.9978e-03  eps0.001: +4.9947e-03 (6.2e-04)  eps0.0001: +4.9978e-03 (6.0e-06)  eps1e-05: +4.9978e-03 (6.0e-08)  eps1e-06: +4.9978e-03 (2.3e-09)
+      spec_aniso: ift -8.1067e-09  eps0.001: -8.1655e-09 (7.2e-03)  eps0.0001: -8.1073e-09 (7.1e-05)  eps1e-05: -8.1067e-09 (7.1e-07)  eps1e-06: -8.1067e-09 (3.2e-09)
+      spec_amp_mean: ift +1.4732e-02  eps0.001: +1.4732e-02 (1.3e-05)  eps0.0001: +1.4732e-02 (1.2e-07)  eps1e-05: +1.4732e-02 (1.3e-09)  eps1e-06: +1.4732e-02 (6.9e-10)
+      spec_amp_fluct: ift +1.6226e-02  eps0.001: +1.6224e-02 (1.3e-04)  eps0.0001: +1.6226e-02 (1.3e-06)  eps1e-05: +1.6226e-02 (1.3e-08)  eps1e-06: +1.6226e-02 (3.6e-10)
+      real_moments: ift +6.1101e-03  eps0.001: +6.1050e-03 (8.5e-04)  eps0.0001: +6.1101e-03 (8.2e-06)  eps1e-05: +6.1101e-03 (8.3e-08)  eps1e-06: +6.1101e-03 (4.2e-09)
+  dir 3: rel err  spec_shape 2.3e-09  spec_aniso 3.2e-09  spec_amp_mean 6.9e-10  spec_amp_fluct 3.6e-10  real_moments 4.2e-09
+    [dir 4 eps 0.001 sgn +1] solve 39.1s res 4.5e-13 drift 1.21e-04
+    [dir 4 eps 0.001 sgn -1] solve 42.2s res 3.9e-13 drift 1.21e-04
+    [dir 4 eps 0.0001 sgn +1] solve 43.2s res 3.3e-13 drift 1.21e-05
+    [dir 4 eps 0.0001 sgn -1] solve 40.6s res 3.7e-13 drift 1.21e-05
+    [dir 4 eps 1e-05 sgn +1] solve 22.2s res 5.4e-13 drift 1.21e-06
+    [dir 4 eps 1e-05 sgn -1] solve 21.2s res 5.3e-13 drift 1.21e-06
+    [dir 4 eps 1e-06 sgn +1] solve 19.7s res 3.9e-13 drift 1.21e-07
+    [dir 4 eps 1e-06 sgn -1] solve 19.8s res 3.7e-13 drift 1.21e-07
+      spec_shape: ift -6.4486e-04  eps0.001: -6.4486e-04 (9.4e-06)  eps0.0001: -6.4486e-04 (9.4e-08)  eps1e-05: -6.4486e-04 (2.2e-09)  eps1e-06: -6.4486e-04 (3.7e-08)
+      spec_aniso: ift +6.4059e-10  eps0.001: +6.4069e-10 (1.6e-04)  eps0.0001: +6.4059e-10 (1.6e-06)  eps1e-05: +6.4059e-10 (8.9e-10)  eps1e-06: +6.4059e-10 (5.6e-08)
+      spec_amp_mean: ift +3.6887e-03  eps0.001: +3.6887e-03 (8.7e-07)  eps0.0001: +3.6887e-03 (8.7e-09)  eps1e-05: +3.6887e-03 (2.5e-10)  eps1e-06: +3.6887e-03 (5.5e-10)
+      spec_amp_fluct: ift -7.2997e-03  eps0.001: -7.2997e-03 (9.3e-07)  eps0.0001: -7.2997e-03 (9.2e-09)  eps1e-05: -7.2997e-03 (7.5e-11)  eps1e-06: -7.2997e-03 (1.5e-08)
+      real_moments: ift -9.1917e-04  eps0.001: -9.1916e-04 (1.1e-05)  eps0.0001: -9.1917e-04 (1.2e-07)  eps1e-05: -9.1917e-04 (1.1e-08)  eps1e-06: -9.1917e-04 (8.5e-08)
+  dir 4: rel err  spec_shape 2.2e-09  spec_aniso 8.9e-10  spec_amp_mean 2.5e-10  spec_amp_fluct 7.5e-11  real_moments 1.1e-08
+    [dir 5 eps 0.001 sgn +1] solve 40.7s res 1.3e-12 drift 8.12e-05
+    [dir 5 eps 0.001 sgn -1] solve 42.0s res 1.2e-12 drift 8.11e-05
+    [dir 5 eps 0.0001 sgn +1] solve 42.3s res 3.6e-13 drift 8.11e-06
+    [dir 5 eps 0.0001 sgn -1] solve 40.6s res 3.8e-13 drift 8.11e-06
+    [dir 5 eps 1e-05 sgn +1] solve 20.8s res 1.0e-12 drift 8.11e-07
+    [dir 5 eps 1e-05 sgn -1] solve 21.4s res 1.0e-12 drift 8.11e-07
+    [dir 5 eps 1e-06 sgn +1] solve 21.4s res 3.6e-13 drift 8.11e-08
+    [dir 5 eps 1e-06 sgn -1] solve 21.0s res 3.4e-13 drift 8.11e-08
+      spec_shape: ift +3.7179e-03  eps0.001: +3.7181e-03 (4.9e-05)  eps0.0001: +3.7180e-03 (4.9e-07)  eps1e-05: +3.7179e-03 (4.4e-10)  eps1e-06: +3.7179e-03 (6.3e-09)
+      spec_aniso: ift +1.9104e-09  eps0.001: +1.9098e-09 (3.2e-04)  eps0.0001: +1.9104e-09 (3.2e-06)  eps1e-05: +1.9104e-09 (6.9e-10)  eps1e-06: +1.9104e-09 (2.9e-09)
+      spec_amp_mean: ift +3.5915e-03  eps0.001: +3.5915e-03 (1.4e-07)  eps0.0001: +3.5915e-03 (1.4e-09)  eps1e-05: +3.5915e-03 (5.3e-10)  eps1e-06: +3.5915e-03 (2.1e-09)
+      spec_amp_fluct: ift -3.5157e-03  eps0.001: -3.5157e-03 (5.9e-06)  eps0.0001: -3.5157e-03 (5.9e-08)  eps1e-05: -3.5157e-03 (1.3e-09)  eps1e-06: -3.5157e-03 (1.0e-09)
+      real_moments: ift -1.1435e-03  eps0.001: -1.1435e-03 (5.1e-05)  eps0.0001: -1.1435e-03 (5.1e-07)  eps1e-05: -1.1435e-03 (8.1e-08)  eps1e-06: -1.1435e-03 (3.0e-07)
+  dir 5: rel err  spec_shape 4.4e-10  spec_aniso 6.9e-10  spec_amp_mean 5.3e-10  spec_amp_fluct 1.0e-09  real_moments 8.1e-08
+    [dir 6 eps 0.001 sgn +1] solve 60.5s res 3.8e-13 drift 2.19e-04
+    [dir 6 eps 0.001 sgn -1] solve 68.3s res 3.3e-13 drift 2.19e-04
+    [dir 6 eps 0.0001 sgn +1] solve 48.3s res 3.7e-13 drift 2.19e-05
+    [dir 6 eps 0.0001 sgn -1] solve 47.8s res 3.5e-13 drift 2.19e-05
+    [dir 6 eps 1e-05 sgn +1] solve 21.1s res 6.9e-12 drift 2.19e-06
+    [dir 6 eps 1e-05 sgn -1] solve 22.3s res 6.9e-12 drift 2.19e-06
+    [dir 6 eps 1e-06 sgn +1] solve 21.5s res 3.8e-13 drift 2.19e-07
+    [dir 6 eps 1e-06 sgn -1] solve 20.5s res 3.6e-13 drift 2.19e-07
+      spec_shape: ift -3.4383e-03  eps0.001: -3.4370e-03 (3.6e-04)  eps0.0001: -3.4383e-03 (3.5e-06)  eps1e-05: -3.4383e-03 (1.1e-09)  eps1e-06: -3.4383e-03 (4.4e-10)
+      spec_aniso: ift +5.8186e-09  eps0.001: +5.8419e-09 (4.0e-03)  eps0.0001: +5.8188e-09 (3.9e-05)  eps1e-05: +5.8186e-09 (7.4e-10)  eps1e-06: +5.8186e-09 (1.9e-09)
+      spec_amp_mean: ift -9.8321e-03  eps0.001: -9.8322e-03 (7.8e-06)  eps0.0001: -9.8321e-03 (7.7e-08)  eps1e-05: -9.8321e-03 (2.3e-10)  eps1e-06: -9.8321e-03 (1.1e-09)
+      spec_amp_fluct: ift -1.7854e-02  eps0.001: -1.7853e-02 (6.3e-05)  eps0.0001: -1.7854e-02 (6.2e-07)  eps1e-05: -1.7854e-02 (5.0e-10)  eps1e-06: -1.7854e-02 (1.2e-09)
+      real_moments: ift -5.5219e-03  eps0.001: -5.5198e-03 (3.9e-04)  eps0.0001: -5.5219e-03 (3.8e-06)  eps1e-05: -5.5219e-03 (1.6e-08)  eps1e-06: -5.5219e-03 (7.7e-08)
+  dir 6: rel err  spec_shape 4.4e-10  spec_aniso 7.4e-10  spec_amp_mean 2.3e-10  spec_amp_fluct 5.0e-10  real_moments 1.6e-08
+    [dir 7 eps 0.001 sgn +1] solve 58.8s res 3.4e-13 drift 3.22e-04
+    [dir 7 eps 0.001 sgn -1] solve 63.7s res 3.7e-13 drift 3.22e-04
+    [dir 7 eps 0.0001 sgn +1] solve 40.3s res 3.6e-13 drift 3.22e-05
+    [dir 7 eps 0.0001 sgn -1] solve 42.3s res 3.8e-13 drift 3.22e-05
+    [dir 7 eps 1e-05 sgn +1] solve 42.1s res 4.0e-13 drift 3.22e-06
+    [dir 7 eps 1e-05 sgn -1] solve 40.6s res 3.6e-13 drift 3.22e-06
+    [dir 7 eps 1e-06 sgn +1] solve 19.0s res 3.8e-13 drift 3.22e-07
+    [dir 7 eps 1e-06 sgn -1] solve 18.1s res 3.6e-13 drift 3.22e-07
+      spec_shape: ift -7.0603e-04  eps0.001: -6.9408e-04 (1.7e-02)  eps0.0001: -7.0591e-04 (1.7e-04)  eps1e-05: -7.0603e-04 (1.7e-06)  eps1e-06: -7.0603e-04 (2.8e-08)
+      spec_aniso: ift +1.3864e-08  eps0.001: +1.3928e-08 (4.6e-03)  eps0.0001: +1.3865e-08 (4.5e-05)  eps1e-05: +1.3864e-08 (4.5e-07)  eps1e-06: +1.3864e-08 (6.4e-10)
+      spec_amp_mean: ift -1.2168e-02  eps0.001: -1.2168e-02 (1.3e-05)  eps0.0001: -1.2168e-02 (1.3e-07)  eps1e-05: -1.2168e-02 (1.4e-09)  eps1e-06: -1.2168e-02 (4.8e-10)
+      spec_amp_fluct: ift -2.5156e-02  eps0.001: -2.5153e-02 (1.4e-04)  eps0.0001: -2.5156e-02 (1.4e-06)  eps1e-05: -2.5156e-02 (1.4e-08)  eps1e-06: -2.5156e-02 (2.7e-09)
+      real_moments: ift -1.0857e-02  eps0.001: -1.0852e-02 (4.8e-04)  eps0.0001: -1.0857e-02 (4.6e-06)  eps1e-05: -1.0857e-02 (4.3e-08)  eps1e-06: -1.0857e-02 (2.5e-09)
+  dir 7: rel err  spec_shape 2.8e-08  spec_aniso 6.4e-10  spec_amp_mean 4.8e-10  spec_amp_fluct 2.7e-09  real_moments 2.5e-09
+    [dir 8 eps 0.001 sgn +1] solve 46.6s res 8.9e-12 drift 1.53e-04
+    [dir 8 eps 0.001 sgn -1] solve 41.3s res 9.2e-12 drift 1.53e-04
+    [dir 8 eps 0.0001 sgn +1] solve 45.5s res 3.5e-13 drift 1.53e-05
+    [dir 8 eps 0.0001 sgn -1] solve 50.6s res 3.7e-13 drift 1.53e-05
+    [dir 8 eps 1e-05 sgn +1] solve 22.8s res 2.6e-12 drift 1.53e-06
+    [dir 8 eps 1e-05 sgn -1] solve 19.6s res 2.7e-12 drift 1.53e-06
+    [dir 8 eps 1e-06 sgn +1] solve 20.5s res 4.0e-13 drift 1.53e-07
+    [dir 8 eps 1e-06 sgn -1] solve 17.7s res 3.6e-13 drift 1.53e-07
+      spec_shape: ift +3.5498e-04  eps0.001: +3.5407e-04 (2.6e-03)  eps0.0001: +3.5497e-04 (2.6e-05)  eps1e-05: +3.5498e-04 (4.5e-09)  eps1e-06: +3.5498e-04 (2.2e-08)
+      spec_aniso: ift -5.8817e-09  eps0.001: -5.8855e-09 (6.4e-04)  eps0.0001: -5.8818e-09 (6.4e-06)  eps1e-05: -5.8817e-09 (1.8e-10)  eps1e-06: -5.8817e-09 (3.4e-09)
+      spec_amp_mean: ift -3.3473e-03  eps0.001: -3.3473e-03 (1.6e-07)  eps0.0001: -3.3473e-03 (1.5e-09)  eps1e-05: -3.3473e-03 (3.7e-10)  eps1e-06: -3.3473e-03 (2.5e-09)
+      spec_amp_fluct: ift +4.0138e-03  eps0.001: +4.0136e-03 (4.9e-05)  eps0.0001: +4.0138e-03 (4.9e-07)  eps1e-05: +4.0138e-03 (1.8e-09)  eps1e-06: +4.0138e-03 (2.6e-08)
+      real_moments: ift +4.3736e-03  eps0.001: +4.3733e-03 (5.8e-05)  eps0.0001: +4.3736e-03 (5.7e-07)  eps1e-05: +4.3736e-03 (2.5e-08)  eps1e-06: +4.3736e-03 (8.7e-08)
+  dir 8: rel err  spec_shape 4.5e-09  spec_aniso 1.8e-10  spec_amp_mean 3.7e-10  spec_amp_fluct 1.8e-09  real_moments 2.5e-08
+    [dir 9 eps 0.001 sgn +1] solve 60.0s res 3.9e-13 drift 3.68e-04
+    [dir 9 eps 0.001 sgn -1] solve 54.0s res 3.9e-13 drift 3.67e-04
+    [dir 9 eps 0.0001 sgn +1] solve 34.6s res 4.0e-13 drift 3.67e-05
+    [dir 9 eps 0.0001 sgn -1] solve 35.7s res 4.1e-13 drift 3.67e-05
+    [dir 9 eps 1e-05 sgn +1] solve 39.3s res 3.4e-13 drift 3.67e-06
+    [dir 9 eps 1e-05 sgn -1] solve 36.4s res 3.8e-13 drift 3.67e-06
+    [dir 9 eps 1e-06 sgn +1] solve 18.1s res 4.6e-13 drift 3.67e-07
+    [dir 9 eps 1e-06 sgn -1] solve 17.4s res 4.4e-13 drift 3.67e-07
+      spec_shape: ift +5.8343e-04  eps0.001: +6.1364e-04 (4.9e-02)  eps0.0001: +5.8372e-04 (5.0e-04)  eps1e-05: +5.8343e-04 (5.0e-06)  eps1e-06: +5.8343e-04 (5.6e-09)
+      spec_aniso: ift +1.7909e-08  eps0.001: +1.8002e-08 (5.2e-03)  eps0.0001: +1.7910e-08 (5.1e-05)  eps1e-05: +1.7909e-08 (5.1e-07)  eps1e-06: +1.7909e-08 (3.9e-10)
+      spec_amp_mean: ift -1.1893e-02  eps0.001: -1.1893e-02 (1.4e-05)  eps0.0001: -1.1893e-02 (1.4e-07)  eps1e-05: -1.1893e-02 (1.4e-09)  eps1e-06: -1.1893e-02 (1.1e-09)
+      spec_amp_fluct: ift -1.5698e-02  eps0.001: -1.5693e-02 (3.4e-04)  eps0.0001: -1.5698e-02 (3.3e-06)  eps1e-05: -1.5698e-02 (3.3e-08)  eps1e-06: -1.5698e-02 (2.6e-09)
+      real_moments: ift -1.4186e-02  eps0.001: -1.4180e-02 (3.7e-04)  eps0.0001: -1.4186e-02 (3.5e-06)  eps1e-05: -1.4186e-02 (3.2e-08)  eps1e-06: -1.4186e-02 (6.8e-08)
+  dir 9: rel err  spec_shape 5.6e-09  spec_aniso 3.9e-10  spec_amp_mean 1.1e-09  spec_amp_fluct 2.6e-09  real_moments 3.2e-08
+
+D1 PASS: worst spectral rel err 6.41e-08 (tol 0.0001); real_moments worst 8.06e-08 (ok); zero modes ok; spectral orthogonality ok

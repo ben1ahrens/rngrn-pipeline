@@ -1,0 +1,13 @@
+guarded_run: START MemAvailable=15736MB oom_score_adj=500 -- .venv/bin/python -u scripts/diag_fft_coarse_grid.py
+=== base solve n=96 (L=185.01) ===
+  newton_stalled: relax 29s/54 chunks, newton 667s, res 2.93e-05, amp 0.1761
+=== base solve n=128 (L=185.01) ===
+  newton_stalled: relax 52s/85 chunks, newton 572s, res 4.73e-05, amp 0.1772
+=== base solve n=192 (L=185.01) ===
+  newton_stalled: relax 108s/187 chunks, newton 630s, res 3.41e-05, amp 0.1774
+=== base solve n=256 (L=185.01) ===
+  newton_stalled: relax 177s/271 chunks, newton 575s, res 1.48e-05, amp 0.1777
+convergent+patterned grids: []
+
+recommended training grid: None; wrote experiments/diag_fft/coarse_grid/results.json
+guarded_run: END rc=0 MemAvailable=15301MB

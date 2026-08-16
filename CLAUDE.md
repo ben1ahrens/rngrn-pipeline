@@ -69,8 +69,18 @@ and `docs/` for per-branch handoffs.
   > ```
   >
   > Costs ~84 KB, loads correctly, and the symlinks stay gitignored like the payloads.
-- **Do not commit on the user's behalf without asking**, unless the work was explicitly
-  scoped as "commit it".
+- **Committing and pushing on a prefixed branch is pre-authorised** — owner instruction,
+  2026-08-13. `git commit` and `git push -u origin <branch>` on a `feature/`, `fix/`,
+  `chore/` or `docs/` branch need no permission and no announcement beforehand. Say what
+  landed afterwards. This replaces the previous "do not commit without asking" rule.
+
+  Three gates are **untouched** by that authorisation, and none of them is a formality:
+  - **Never commit directly to `main`.** Unchanged — see the second bullet of this section.
+  - **Merging to `main` still requires the owner's validation of the results.** Passing
+    tests alone is not the bar (§3, `.claude/rules/pre-merge-checklist.md`). Standing
+    permission to *commit* is not permission to *integrate*.
+  - **`push --no-verify` stays deliberate**, taken only when the suite has just been run
+    green by hand, and recorded as such — the WSL2 SIGPIPE case, not a way past a red suite.
 - Substantial branches get a `docs/HANDOFF_<topic>.md` written for a **zero-context
   reader**: what changed, what is verified, what is not, and where to start. This is a
   house convention, not a nicety — it is how the two agents hand work to each other.
@@ -111,10 +121,10 @@ and `docs/` for per-branch handoffs.
   deleted. The account's Actions billing has lapsed, so runs are *skipped* and reported as
   failures that have nothing to do with the code. Do not diagnose those as code failures.
   Restoring CI = uncommenting the two triggers.
-- Current suite: **557 passed, 1 skipped**, all CPU, ~2 min 55 s to run (measured 2026-08-11 on
-  `fix/reference-solver-cfl`; the +6 are the reference-solver regressions of D-EVID-17). Keep them green. The count in
-  this line has been stale before — re-measure it rather than trusting it, and update it when
-  it moves.
+- The suite is all CPU and takes roughly 3 minutes. Keep it green. **Do not record a pass
+  count here** — every count this line has carried went stale within days (it said 557/1
+  while the tree was at 618/1). Measure it with `pytest -q` and report the number from that
+  run, with its date and branch, wherever the claim is being made.
 - **Run the suite with the sandbox DISABLED.** `payload.h5` is on the sandbox read-deny list,
   so a sandboxed run reports ~15 `PermissionError` failures and errors that look exactly like
   code faults and are not. Diagnosing those as code bugs wastes a session.
@@ -426,6 +436,12 @@ that: *"You do not need to ask me for all science. If unsure, do some research t
 decisions — defining or changing a metric, choosing a threshold or pass condition, picking
 an estimator, deciding what counts as a control. Do not block on the owner for these.
 
+*"Yourself" means the orchestrating session, not any agent that happens to hit the question.*
+A dispatched subagent returns a decision point upward rather than ruling on it (§11); the
+orchestrator is the one that decides it here and writes the entry. The point of this section
+is that the **owner** is not a bottleneck — not that the decision may be made anywhere, by
+anyone, in a context the register will never see.
+
 What replaces asking is **evidence plus a written record**, because this project is headed
 for a paper (§8, and `docs/PREREGISTRATION.md`). Every science decision you take must:
 
@@ -458,6 +474,46 @@ Spawning subagents inside a dynamic workflow is **allowed and encouraged**. Use 
   retrofits, relabels, new metric modules written against a clear spec, and plumbing all
   run fine on a cheaper tier with the effort dialled down. Measured here: a 13-unit wave at
   4 opus + 9 sonnet produced the same quality of result as all-opus, far cheaper.
+
+  The concrete routing, owner-set 2026-08-13. `superpowers:subagent-driven-development`
+  states the same policy in abstract tiers ("fast/cheap", "standard", "most capable"); this
+  table is what those resolve to here, and does not replace that section.
+
+  | Role | Model |
+  | --- | --- |
+  | Planning, design, orchestration, wave integration | `fable` |
+  | Implementation needing design judgement, broad codebase understanding, or risky multi-file integration | `opus` |
+  | Standard multi-file implementation from a clear spec | `sonnet` |
+  | Single-file edit with a complete spec; transcription; mapping; mechanical Explore | `haiku` |
+  | Final whole-branch review; firewall, evidence, numerics or security review | `opus` |
+  | Routine multi-file diff review; `merge-damage-hunter` | `sonnet` |
+  | Scoped re-review of a small fix diff | `haiku` |
+  | Fix-loop escalation (rounds 4–5) | one tier **above** the model that stalled |
+
+  This **supersedes** `CLAUDE.local.md`'s "judgement agents keep the default". That line was
+  written under an Opus session, where "the default" happened to mean the strong model. It
+  stops meaning that the moment the session runs on a planning tier — inheriting would then
+  route every firewall, evidence and numerics audit to the planner, the opposite of what the
+  line intended. Read the table, never the session default; the pins in `.claude/agents/`
+  make that the behaviour rather than the aspiration.
+- **Pass `model` explicitly on every dispatch that accepts one.** An omitted `model`
+  inherits the *session* model, so on a planning-tier session every unspecified subagent
+  silently becomes the planner and the table above evaporates. This is the single failure
+  mode of that table. (`subagent_type: "fork"` inherits the parent by construction and takes
+  no override — that is why this reads "that accepts one" rather than "always".) Dial
+  `effort` down before dialling `model` down.
+- **Delegation floor — do not orchestrate below the work.** Do it inline, with no subagent
+  and no workflow, when *all* of these hold: the change is ≤2 files; the location is already
+  known, needing no search; it adds no new test surface; and it is not on the firewall,
+  numerics, threshold or `docs/DECISIONS.md` surface. Doc edits, comment fixes, stale-number
+  updates and single-line corrections are always below the floor. Above it — ≥3 files, or an
+  unknown location, or a new test surface, or anything touching `losses/`, `eval/`,
+  `model.py`, `recover.py`, `train.py`, `validate.py`, `tests/test_firewall.py` — delegate.
+- **Wave floor.** A parallel wave needs ≥3 genuinely independent units to pay for itself;
+  below that, run them sequentially in one worktree, because every bullet in this section is
+  a fixed cost per wave. A wave whose units each run a trainer does **not** parallelise at
+  all — §7a's `flock` serialises them while holding every agent context open — so size those
+  at one. The simultaneous-execution ceiling is `min(16, cores - 2)`; beyond it agents queue.
 - **One unit, one worktree, one branch, one PR.** Create the worktrees *before* launching
   the wave — concurrent `git worktree add` contends on `.git/config`, and several agents in
   the first wave lost their upstream-tracking write to a lock collision.
@@ -471,9 +527,29 @@ Spawning subagents inside a dynamic workflow is **allowed and encouraged**. Use 
   discarded `model_seed` in the phase-A merge.
 - **`git stash` is repo-global, not per-worktree.** Two agents stashing concurrently will
   apply each other's changes. Do not use it in a parallel wave.
-- **Subagents cannot ask the owner.** Whatever a unit needs to decide, it decides under §10
-  and reports. A precisely diagnosed defect a unit could not fix is a better outcome than a
+- **Subagents cannot ask the owner, and do not rule on decision points either — they return
+  them to the orchestrator, which gives the verdict.** A unit still settles its own
+  implementation choices: naming, local structure, which helper to reuse, how to arrange a
+  test. What it does *not* settle alone is a **decision point** — anything that would earn a
+  `docs/DECISIONS.md` entry under §10 (defining or changing a metric, picking a threshold or
+  pass condition, choosing an estimator, deciding what counts as a control, marking something
+  UNCALIBRATED), plus conflicts between the plan and what it found, plan defects, and any cap
+  it would have exceeded. Those go back up with the evidence and the options; the orchestrator
+  rules, records it under §10, and hands the ruling down.
+
+  This deliberately overrides `superpowers:subagent-driven-development`'s "Rulings, not
+  stalls", which tells a unit to decide such things itself and keep going. That is the right
+  default for ordinary software work and the wrong one here: this repo is headed for a paper,
+  so a decision made inside a unit's context — and recorded only in that unit's ledger — is a
+  decision the register never sees. The orchestrator holds the context that makes the call
+  correct and is the only party that can keep the register whole.
+
+  Returning is not stalling. A unit reports and stops *that thread*; the orchestrator answers
+  and it resumes. A precisely diagnosed defect a unit could not fix is a better outcome than a
   green test that hides it — say which, explicitly.
+- **The orchestrator escalates to the owner only for the reserved class** (§10): weakening a
+  pre-registered pass condition in `docs/PREREGISTRATION.md`, and anything outside the
+  technical scope of the work. Everything else it rules on itself.
 - **A wave can die wholesale to an upstream outage.** Six phase-B units returned API 500s
   simultaneously. Check whether failures are server-side before diagnosing them as code.
 
@@ -493,7 +569,9 @@ drift, **this file wins and the other gets fixed**.
 - **Skills** (`.claude/skills/`) — `run-training` (§7a, §7b), `new-worktree` (§2, §11),
   `record-decision` (§10), `harvest-dataset` (§6, §6a).
 - **Rules** (`.claude/rules/`) — `pre-merge-checklist.md` and `reporting-numbers.md`, the
-  checklist forms of §3/§5/§8/§11 and §8 respectively.
+  checklist forms of §3/§5/§8/§11 and §8 respectively; and `orchestration.md`, the dispatch
+  form of §11 — which process chain governs, which skill fires when, and what a delegated
+  unit must be told. The routing table itself lives in §11, not there.
 - **Hook** (`.claude/hooks/guard_trainer.py`) — refuses any Bash command that launches
   `rngrn train`/`sweep`/`target-report` or a `scripts/exp*.py` experiment outside
   `scripts/guarded_run.sh`. §7a is the one rule worth enforcing mechanically, because the
@@ -502,3 +580,4 @@ drift, **this file wins and the other gets fixed**.
 
 @.claude/rules/pre-merge-checklist.md
 @.claude/rules/reporting-numbers.md
+@.claude/rules/orchestration.md

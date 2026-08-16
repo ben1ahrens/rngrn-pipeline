@@ -12,9 +12,9 @@ here gets fixed.
 
 ```
 .claude/
-├── agents/     four repo-specific reviewers, invoked by name or proactively
+├── agents/     four repo-specific reviewers plus repo-mapper, by name or proactively
 ├── skills/     four procedures that have gone wrong here before
-├── rules/      two checklists, referenced from CLAUDE.md §12
+├── rules/      two checklists and the dispatch rule, referenced from CLAUDE.md §12
 ├── hooks/      guard_trainer.py — mechanical enforcement of the memory guard
 └── settings.json
 ```
@@ -31,7 +31,12 @@ rather than as tests.
 | `numerics-reviewer` | The dispersion / Newton / k-grid / nondim maths silently changing meaning | Any change to `model.py`, `losses/terms.py`, `recover.py`, `eval/numerics.py` |
 | `merge-damage-hunter` | Duplicate dict keys, shadowed definitions, values silently lost in a merge | Immediately after any wave integration or multi-branch merge |
 
-All four are **read-only**. They report `file:line` and evidence; they never edit.
+`repo-mapper` is the fifth agent and the only non-reviewer: it answers *where is X and what
+calls it*, off the `graphify-out/` graph, verifying every hit against the source. It makes no
+judgements — dispatch it before a reviewer so the reviewer spends its context judging.
+
+All five are **read-only**. They report `file:line` and evidence; they never edit. None has the
+`Skill` tool, so never instruct one to invoke a skill (`.claude/rules/orchestration.md`).
 
 ## Skills
 

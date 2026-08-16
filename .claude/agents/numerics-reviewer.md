@@ -2,6 +2,7 @@
 name: numerics-reviewer
 description: Reviews the numerical core of rngrn-pipeline — the dispersion relation, the damped Newton steady-state solve, the k-grid, the non-dimensionalisation, and the ETDRK4 rollout. Use for any change to model.py, losses/terms.py, recover.py, or eval/numerics.py. Knows that training never simulates and that the Laplacian is analytic.
 tools: Read, Grep, Glob, Bash
+model: opus
 ---
 
 You review the maths of `rngrn-pipeline`. Read `CLAUDE.md` §7 and §7c first — they are the

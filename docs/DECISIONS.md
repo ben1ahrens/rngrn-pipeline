@@ -3175,3 +3175,48 @@ spread; noise schedule and magnitude pre-registered in this ledger before the ru
 enumeration-contract test in `test_losses.py`. CLAUDE.md §7c amended in the same change
 (training MAY now simulate — ignition-gated, off by default).
 
+
+---
+
+### D-PERF-2 — agent model routing is pinned in frontmatter, not left to inheritance; `repo-mapper` stays sonnet
+
+**Date:** 2026-08-13. **Status:** DECIDED (§10; owner-set routing, recorded here because it
+changes what a review costs and, for `repo-mapper`, reverses an existing pin).
+
+**The decision.** `CLAUDE.md` §11 now carries a role → model table and
+`.claude/rules/orchestration.md` its dispatch form. Four of the five agents in
+`.claude/agents/` pinned **no** `model:`, so they inherited the session model. With the session
+model moving to the planning tier (`fable`), every firewall, evidence and numerics audit would
+have silently run on the planner. Pinned instead: `firewall-auditor`, `evidence-auditor`,
+`numerics-reviewer` → `opus`; `merge-damage-hunter` → `sonnet`; `repo-mapper` **stays**
+`sonnet`.
+
+**Evidence.** Inheritance was verified against the frontmatter (only `repo-mapper` pinned a
+model). The tier assignments follow the owner's routing: a firewall breach does not crash — it
+produces a *better-looking result* — so those three take the top tier, while
+`merge-damage-hunter`'s own brief says "find it mechanically, not by eye" and
+`repo-mapper`'s says "You answer where is X and what calls it. Nothing else… Never edit."
+`CLAUDE.local.md` records the owner preference that mechanical Explore/mapping subagents run on
+a cheap model.
+
+**What was rejected.** Leaving the four unpinned and relying on the dispatcher to pass `model`
+per call — rejected because it fails silently and exactly on the highest-risk reviews.
+
+**`repo-mapper` was briefly dropped to `haiku` and reverted the same day, by owner decision.**
+The case for `haiku` was `CLAUDE.local.md`'s "mechanical Explore/mapping subagents run on a
+cheap model". The case against, which won: `superpowers:subagent-driven-development` warns the
+cheapest tier routinely takes 2-3x the turns on multi-step work and costs more overall, and
+`repo-mapper` does multi-step graph queries against `graphify-out/` with every hit verified
+against source — the multi-step case that warning names. Its existing `sonnet` pin was
+therefore deliberate, and is now recorded as such rather than resting on nobody having
+questioned it. **UNCALIBRATED:** no turn-count or cost measurement was taken on either side;
+the decision rests on the SDD guidance and the agent's own task shape, not on a measurement
+here. The `CLAUDE.local.md` line is narrowed to mean single-shot mechanical Explore, not this
+agent.
+
+**Also superseded:** `CLAUDE.local.md`'s "judgement agents keep the default". Written under an
+Opus session, "the default" meant the strong model; under a planning-tier session it would mean
+the planner. §11's table wins.
+
+**Where it lives:** `CLAUDE.md` §11, `.claude/rules/orchestration.md`, and the `model:` line in
+each of the five files under `.claude/agents/`.

@@ -105,7 +105,7 @@ FORBIDDEN = ["rd_models", "data.solver", "data.cache", "data.gate", "data.regist
              "exp05_pixel_minibatch", "exp06_residual_sweep", "exp07_long_training",
              "exp08_trivial_baseline", "exp09_anchor_and_ensemble",
              "exp10_cubic_dispersion", "exp11_robustness_baseline",
-             "exp12_spectral_amplitude"]
+             "exp12_spectral_amplitude", "measure_frame_bias"]
 
 
 def _imports(path):

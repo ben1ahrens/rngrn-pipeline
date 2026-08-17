@@ -1,0 +1,10 @@
+{
+  "dataset": "turing_labyrinth",
+  "sample": "sample_0000",
+  "ratio_mean_over_xstar": [
+    1.0682731713406233,
+    1.1927984875955793,
+    0.8105439219694152
+  ],
+  "kstar_obs": 0.2838781759764042
+}

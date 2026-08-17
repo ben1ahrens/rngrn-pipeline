@@ -58,7 +58,7 @@ because the baseline to beat was measured on exactly this sample:
 and are the ones R2/R4 are read against: `turing_frac`, `n_distinct_structures`, and
 `kstar_fft_rel_err`. **Not comparable, and never to be reported as an improvement over
 D5:** the α/δ plausibility columns (structural by §3.3), any spectral-target-derived
-quantity (single frame vs the R-frame average of §4.6), and `topology_consistency`
+quantity (single frame vs the N-frame average of §4.6), and `topology_consistency`
 unless computed over the same population as D5's (§3.4). Breadth — other samples, the
 `nc1` form, noise arms, held-out one-shot — is a later stage of the same design (§7)
 and is not on the first campaign's critical path.
@@ -429,16 +429,44 @@ ambiguity.
 - **Selection:** winner and gate-passers chosen on fitted-band loss only; held-out
   bands are consulted exactly once, by scoring code, at gate time.
 
-### 4.6 Data protocol (owner decision)
+### 4.6 Data protocol (owner decision; small-box extension accepted by the owner 2026-08-17)
 
-Adopt **R = 6 independent realization frames** of the *same* target system (same
-generator parameters, independent IC noise seeds, each run to steady state — a
-generator-side change only; `scripts/gen_tg3.py` already draws per-sample `sim_seed`s).
-Firewall-legal: all frames are observation-side. Payoff: a direct per-bin variance
-estimate for the spectral targets (replacing the single ~31%/bin patch-quadrant floor),
-inverse-variance weighting in `spec_shape`, a √R-tighter averaged target, and an honest
-per-bin answer to "is this fit below the estimation floor". R = 6 is a starting choice,
-UNCALIBRATED; the measured per-bin variance itself calibrates whether more are needed.
+**Training frames: few and large.** Adopt **N = 8 independent realization frames** of
+the *same* target system (same generator parameters, independent IC noise seeds, each
+run to steady state at 512², p = 8 — a generator-side change only;
+`scripts/gen_tg3.py` already draws per-sample `sim_seed`s), **split 6 train / 2
+held-out over realizations**. Firewall-legal: all frames are observation-side. The
+training 6 give a direct per-bin variance estimate for the spectral targets (replacing
+the single ~31%/bin patch-quadrant floor), inverse-variance weighting in `spec_shape`,
+and a √R-tighter averaged target. The held-out 2 are the **realization-consistency
+check**: the fitted model's spectra must match them as well as the trained
+realizations — an honest overfitting axis that spatial splits cannot provide (SPEC §1:
+a Turing pattern is statistically homogeneous, so within-frame splits carry no
+independent evidence; independent IC realizations do). Read honestly, a pass here says
+the fit captured the *system's statistics* rather than one realization's defect
+layout — it is not evidence of recovery, and does not upgrade R4's licensed sentence.
+The 6/2 split and N = 8 are starting choices, UNCALIBRATED; the measured per-bin
+variance calibrates both.
+
+**Validation frames: many and small, held out entirely.** Additionally generate the
+same target system at **small boxes, p ∈ {2, 3, 4}**, S seeds each (S UNCALIBRATED,
+starting at 8), 64²–128² (≥16 px/λ, above the measured 6 px/λ floor). These are
+**never trained on**: at p = 2–3 the fitted band holds only ~2–3 RAPS bins (bin width
+k*/p) and each realization snaps to a coarse mode lattice — the regime D-CANON-2
+measured as artifact-dominated (stripes largely a small-box artifact, vanishing at
+p ≥ 11). That box-dominance is exactly what makes them *validation* assets, two ways:
+
+1. **Cross-L transfer on the canonical target** (§3.5a's logic, previously testable
+   only on legacy `three_gene_multiL`): simulate the *recovered* model at the same
+   small boxes, no refit, and compare physical-k* invariance and the periods-per-box
+   slope against the generator's own held-out small-box realizations — the
+   mode-quantisation stress test that makes cross-L transfer non-vacuous.
+2. **Mode-selection distribution** (reported, never gated): across S seeds at small p
+   the generator produces a distribution over which lattice mode wins; the recovered
+   model, run identically, should reproduce it. This is sensitive to the dispersion
+   peak's shape and nonlinear saturation — but it is a **novel, unvalidated
+   estimator**, so it enters report-only and requires its own decision entry before it
+   could ever bind.
 
 **Transient-pair data is designed but deferred.** Two *steady-state* frames dt apart
 carry zero rate information; the informative protocol is a transient pair (one frame at
@@ -644,7 +672,7 @@ owner-decision class, not taken here.
 | `eval/lifted.py` (dispersion, verdicts, `rescale_mu`, `mu_critical`, `robustness_vs_mu`, `simulate_lifted`) | **Promoted from parked to gate — after the V0–V4 ladder**; GPU port required (§5.2–§5.3) |
 | `integrate_bdf1_newton_krylov` silent ETDRK4 fallback | **Removed/made loud** unconditionally (§5.2) |
 | Morphology scorer, robustness cloud, leak controls, L-transfer harness, firewall tests | Survive unchanged; L-transfer stays QSS (lifted L-transfer is future work) |
-| Data generator | Gains R = 6 realization-frame emission (owner decision, §4.6) |
+| Data generator | Gains multi-realization emission (N = 8 at 512²/p=8, 6/2 realization split) and held-out small-box sets (p ∈ {2,3,4} × S seeds) (owner decision, §4.6) |
 
 Firewall note: every new training-side component (solve-box logic, unrolled gradients,
 lifted audit) is recovery-side and touches only observation-derived quantities; the
@@ -671,12 +699,14 @@ the completeness test enforces this inside `src/rngrn/`.
   target-interpolation measurements (§4.2–§4.3). Hard gate: FD-faithfulness at
   tol 1e-4. Deliverable: the A/B report, the fidelity measurement, and the measured
   stall-rate distribution (which calibrates the §4.3 switch fraction).
-- **R4 — the campaign.** Full Phase I → cull → Phase II on the target with R-frame
-  targets (§4.6); guard-rail and spectral weights swept (all UNCALIBRATED at birth);
+- **R4 — the campaign.** Full Phase I → cull → Phase II on the target with the
+  N-frame training targets (§4.6); guard-rail and spectral weights swept (all UNCALIBRATED at birth);
   gate-passers through the §5.4 lifted gate with the §9.5 null ensemble. Deliverable:
   the redesign's row on the §1 comparable columns — Turing fraction, distinct sign
-  structures, k* error — plus the population-consistent `topology_consistency` (§3.4)
-  and the lifted-gate pass/null-pass fractions.
+  structures, k* error — plus the population-consistent `topology_consistency` (§3.4),
+  the lifted-gate pass/null-pass fractions, the held-out realization-consistency check
+  (§4.6), and — report-only — the small-box cross-L and mode-selection comparisons
+  (§4.6).
   **What R4 cannot say:** per `docs/PLAN_fourier_training.md` §1, work on this burned
   tuning sample supports **no recovery and no generalisation claim**. R4's licensed
   sentence class is "the redesign's objective changes the measured baseline statistics
@@ -702,8 +732,12 @@ by this document.
 3. **Hard bio-box reparameterization for α/δ** (changes prereg §3.4's α/δ component
    from measured outcome to structural truth — prereg-touching); **soft D-ratio prior**
    retained per the recorded bio_box decision. §3.3.
-4. **Data protocol**: R = 6 realization frames of the target system (generator
-   change); transient-pair arm designed, deferred. §4.6.
+4. **Data protocol** (small-box extension accepted by the owner 2026-08-17, pending
+   the same R0 ratification as the rest): N = 8 realization frames of the target
+   system at 512²/p=8, split 6 train / 2 held-out over realizations; plus held-out
+   small-box sets (p ∈ {2, 3, 4}, S seeds each) used only for cross-L transfer and the
+   report-only mode-selection distribution; transient-pair arm designed, deferred.
+   §4.6.
 5. **Linear terms demoted to guard-rail weight after ignition** — amends the SPEC §3
    "unchanged for the whole run" decision; baseline arm A0 preserved. §4.4.
 6. **Gate at μ_central vs band-wide** — recommend central + band report; revisit after
@@ -733,8 +767,9 @@ by this document.
 14. **Numbers introduced by this design, all UNCALIBRATED, with their calibration
     rules**: B = 512 and K = 16 (R2 throughput/RSS and distinct-structure counts,
     §4.5); the ~20% stall-switch fraction (R3 stall-rate distribution vs measured
-    gradient-error difference, §4.3); R = 6 frames (the measured per-bin variance,
-    §4.6); the ~10% guard-rail ratio and Phase-II budget/lr (first-campaign sweeps,
+    gradient-error difference, §4.3); N = 8 frames with the 6/2 realization split, and
+    S = 8 small-box seeds per p (the measured per-bin and per-mode variance, §4.6);
+    the ~10% guard-rail ratio and Phase-II budget/lr (first-campaign sweeps,
     §4.4–§4.5); `kstar_si`'s ε and temp (R2 sweeps; temp inherits the never-swept
     60.0, §4.4); the truncated-backprop segment length (R3 gradient-error curve,
     §4.2); the V-ladder tolerances not already derivable (V0 floor, V1 error

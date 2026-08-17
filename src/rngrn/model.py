@@ -190,6 +190,14 @@ class RNGRN(nn.Module):
                     raise ValueError(
                         f"param_boxes[{k!r}] must be a finite (low, high) with low < high, "
                         f"got {(low, high)!r}")
+                if low < 0:
+                    # alpha (production weight) and delta (decay rate) are strictly
+                    # positive throughout this codebase; a negative low would let the
+                    # sigmoid map into unphysical territory without ever raising (Task 13
+                    # review finding).
+                    raise ValueError(
+                        f"param_boxes[{k!r}] low must be >= 0 (alpha/delta are strictly "
+                        f"positive), got {low!r}")
         if param_boxes is not None and init == "low_basal":
             # Not implemented: _low_basal_raw_params draws raw theta targeting the softplus
             # parameterization (e.g. inv_softplus(loguniform(0.3, 1.5, N, N)) for alpha) --

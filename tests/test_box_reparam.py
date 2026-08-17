@@ -65,6 +65,30 @@ def test_unknown_box_key_is_rejected_loudly():
         raise AssertionError("param_boxes with a key other than alpha/delta should raise ValueError")
 
 
+def test_negative_low_is_rejected_loudly():
+    # alpha/delta are strictly positive throughout the codebase (production weight /
+    # decay rate); a negative low would silently let the sigmoid map produce unphysical
+    # values past 0 (review finding, closed here).
+    try:
+        RNGRN(N=3, form="competitive", seed=0, param_boxes={"alpha": (-1.0, 10.0)})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("param_boxes with a negative low should raise ValueError")
+
+
+def test_partial_box_leaves_the_unboxed_parameter_on_softplus():
+    # Only "alpha" supplied: alpha boxed, delta stays on legacy softplus -- and matches
+    # a fully-unboxed model parameter-by-parameter on the unboxed half.
+    m = RNGRN(N=3, form="competitive", seed=3, param_boxes={"alpha": (0.5, 10.0)})
+    legacy = RNGRN(N=3, form="competitive", seed=3)
+
+    alo, ahi = 0.5, 10.0
+    assert (m.alpha > alo).all() and (m.alpha < ahi).all()
+    assert torch.equal(m.theta_delta, legacy.theta_delta)
+    assert torch.equal(m.delta, legacy.delta)
+
+
 def test_param_boxes_not_implemented_for_low_basal_init():
     try:
         RNGRN(N=3, form="competitive", seed=0, init="low_basal", param_boxes=BOX)

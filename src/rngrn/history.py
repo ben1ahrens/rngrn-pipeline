@@ -68,6 +68,12 @@ DIAG_KEYS = ("total", "sig_max", "sig_max_pos", "kstar_model", "rel_err", "spec_
 
 HIST_DTYPE = np.float32   # a trajectory is plotted, not differentiated; see plotdata.py
 
+# Population-management events a batched run can emit mid-training (docs/REDESIGN_rngrn.md
+# §3.4/§4.5): a member igniting or de-igniting Turing instability, stalling, being culled by
+# the diversity filter, or dying (steady-state divergence, the pre-existing `record_death`).
+EVENT_KINDS = frozenset({"ignition", "deignition", "stall", "cull", "death"})
+EVENT_DTYPE = np.dtype([("step", np.int64), ("member", np.int64), ("kind", "U16")])
+
 
 def param_names(N: int) -> list:
     """Column names of one member's parameter trace, e.g. 'KA[0,1]', 'delta[2]'."""
@@ -129,6 +135,9 @@ class TrainingHistory:
         self._scalar_names = None
         self._rows: dict = {}            # (step, member) -> (scalar vec, param vec)
         self._deaths: dict = {}          # member -> step at which it was abandoned
+        self._events: list = []          # [(step, member, kind), ...]
+        self._invariant_names = None
+        self._invariants: dict = {}      # (step, member) -> invariant vec
 
     # ---- cadence --------------------------------------------------------------------
     def should_record(self, step: int) -> bool:
@@ -218,6 +227,37 @@ class TrainingHistory:
     def record_death(self, member: int, step: int):
         """A member whose steady state diverged and was abandoned at `step`."""
         self._deaths[int(member)] = int(step)
+        self.record_event(step, member, "death")
+
+    # ---- events & invariants ----------------------------------------------------------
+    def record_event(self, step: int, member: int, kind: str):
+        """A discrete population-management event: `kind` in `EVENT_KINDS`.
+
+        `record_death` delegates here (kind="death"), so the death log and the event log
+        never disagree about when a member was abandoned.
+        """
+        if kind not in EVENT_KINDS:
+            raise ValueError(f"unknown history event kind {kind!r}; must be one of "
+                              f"{sorted(EVENT_KINDS)}")
+        self._events.append((int(step), int(member), str(kind)))
+
+    def _invariant_column_names(self, invariants: dict) -> list:
+        """Freeze the invariant column order on the first record; fail loud if it changes."""
+        if self._invariant_names is None:
+            self._invariant_names = sorted(invariants)
+        elif sorted(invariants) != self._invariant_names:
+            raise ValueError(
+                f"training-history invariant keys changed mid-run: first record had "
+                f"{self._invariant_names}, this one has {sorted(invariants)}.")
+        return self._invariant_names
+
+    def record_invariants(self, step: int, member: int, invariants: dict):
+        """A named invariant row (spec §3.4: d_ratio, alpha/delta, beta/delta, D*k*^2/delta,
+        per-edge occupancy, ...) for one member at `step`. Keys are whatever the caller
+        computed; the column set is frozen on the first call, like the scalar columns."""
+        names = self._invariant_column_names(invariants)
+        vec = np.array([float(invariants[k]) for k in names], dtype=float)
+        self._invariants[(int(step), int(member))] = vec
 
     # ---- rendering ------------------------------------------------------------------
     def to_arrays(self) -> dict:
@@ -241,6 +281,24 @@ class TrainingHistory:
         deaths = np.full(B, np.nan)
         for b, s in self._deaths.items():
             deaths[b] = float(s)
+
+        events_arr = (np.array(self._events, dtype=EVENT_DTYPE) if self._events
+                      else np.zeros(0, dtype=EVENT_DTYPE))
+
+        if self._invariants:
+            inv_steps = sorted({s for s, _ in self._invariants})
+            Si, Qi = len(inv_steps), len(self._invariant_names)
+            isi = {s: i for i, s in enumerate(inv_steps)}
+            inv = np.full((Si, B, Qi), np.nan)
+            for (s, b), vec in self._invariants.items():
+                inv[isi[s], b, :] = vec
+            invariant_step = np.asarray(inv_steps, dtype=np.int64)
+            invariant_names = np.array(self._invariant_names)
+        else:
+            invariant_step = np.zeros(0, dtype=np.int64)
+            invariant_names = np.zeros(0, dtype=str)
+            inv = np.zeros((0, B, 0))
+
         return {
             "hist_step": np.asarray(steps, dtype=np.int64),
             "hist_member": np.arange(B, dtype=np.int64),
@@ -249,6 +307,10 @@ class TrainingHistory:
             "hist_param_names": np.array(self.param_names),
             "hist_params": parm.astype(HIST_DTYPE),
             "hist_death_step": deaths.astype(np.float64),
+            "events": events_arr,
+            "invariant_step": invariant_step,
+            "invariant_names": invariant_names,
+            "invariants": inv.astype(HIST_DTYPE),
         }
 
     def meta(self, best_member=None) -> dict:

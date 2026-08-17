@@ -43,6 +43,15 @@ def _softplus(x):
     return torch.nn.functional.softplus(x)
 
 
+def _box_sigmoid(x, low: float, high: float):
+    """low + (high-low)*sigmoid(x): hard-boxes x into (low, high) (Task 13,
+    docs/REDESIGN_rngrn.md 3.3). sigmoid saturates to exactly 0.0/1.0 in float64 well
+    before |x| overflows, so the boxed value rounds to exactly low/high at extreme raw
+    values -- "strictly inside the box" is a property of the init distribution, not of
+    this map universally (see tests/test_box_reparam.py)."""
+    return low + (high - low) * torch.sigmoid(x)
+
+
 def _reaction_prod(KA, KR, alpha, x, form: str, n_hill: int):
     """The production term prod_i(x) alone (Shea-Ackers occupancy for 'competitive', the
     activation*veto term for 'nc1') -- everything in `_reaction_raw` except `beta` and the
@@ -138,12 +147,20 @@ class RNGRN(nn.Module):
         beta >= 0 penalty this requires in the loss. None (default) is bit-identical to
         legacy RNGRN (free theta_beta, no pinning). Not implemented for init='low_basal' or
         for BatchedRNGRN (T16).
+    param_boxes : dict|None  Task 13 (docs/REDESIGN_rngrn.md 3.3): when given, maps the named
+        keys' raw theta through low + (high-low)*sigmoid(raw) instead of softplus, hard-boxing
+        the constrained value into [low, high]. Only "alpha"/"delta" are accepted -- D and s/g
+        are NOT boxed in this design (a silent extra key would be a silent behaviour change).
+        The model takes NUMBERS, not a file path; the caller loads configs/bio_box.yaml (T16).
+        None (default) is bit-identical to legacy RNGRN (softplus). Not implemented for
+        init='low_basal' or for BatchedRNGRN (T16).
     """
 
     def __init__(self, N: int, form: str = "competitive", n_hill: int = 2,
                  seed: int | None = None, dispersion_backend: str = "eig",
                  init: str = "default", kstar_obs: float | None = None,
-                 pin_xstar: Sequence[float] | None = None):  # Task 12, REDESIGN_rngrn.md 3.2
+                 pin_xstar: Sequence[float] | None = None,  # Task 12, REDESIGN_rngrn.md 3.2
+                 param_boxes: dict | None = None):  # Task 13, REDESIGN_rngrn.md 3.3
         super().__init__()
         assert form in ("competitive", "nc1"), form
         assert dispersion_backend in ("eig", "cubic"), dispersion_backend
@@ -159,11 +176,35 @@ class RNGRN(nn.Module):
             # ignore the pin. Loud refusal instead (Task 12, docs/REDESIGN_rngrn.md 3.2).
             raise NotImplementedError(
                 "pin_xstar is not implemented for init='low_basal'; use init='default'.")
+        if param_boxes is not None:
+            unknown = set(param_boxes) - {"alpha", "delta"}
+            if unknown:
+                # D and s/g are not boxed in this design (docs/REDESIGN_rngrn.md 3.3) -- a
+                # silently-accepted extra key would be a silent behaviour change, so refuse
+                # loudly rather than ignore it (Task 13).
+                raise ValueError(
+                    f"param_boxes only supports 'alpha'/'delta' keys "
+                    f"(docs/REDESIGN_rngrn.md 3.3); got unexpected key(s) {sorted(unknown)}")
+            for k, (low, high) in param_boxes.items():
+                if not (math.isfinite(low) and math.isfinite(high) and low < high):
+                    raise ValueError(
+                        f"param_boxes[{k!r}] must be a finite (low, high) with low < high, "
+                        f"got {(low, high)!r}")
+        if param_boxes is not None and init == "low_basal":
+            # Not implemented: _low_basal_raw_params draws raw theta targeting the softplus
+            # parameterization (e.g. inv_softplus(loguniform(0.3, 1.5, N, N)) for alpha) --
+            # the same raws would land at a DIFFERENT alpha/delta value under a box, silently
+            # defeating the "low-basal Jacobian diagonal" prior it exists to provide. Loud
+            # refusal instead (Task 13, docs/REDESIGN_rngrn.md 3.3).
+            raise NotImplementedError(
+                "param_boxes is not implemented for init='low_basal'; use init='default'.")
         self.N = int(N)
         self.form = form
         self.n_hill = int(n_hill)
         self.init = init
         self.pin_xstar = None if pin_xstar is None else tuple(float(v) for v in pin_xstar)
+        self.param_boxes = None if param_boxes is None else {
+            k: (float(low), float(high)) for k, (low, high) in param_boxes.items()}
         # "eig": torch.linalg.eigvals, any N, the reference. "cubic": exact closed-form
         # roots, N=3 ONLY, 162x faster on CUDA (see _sigma_max_cubic). Default stays "eig"
         # so nothing silently changes; set "cubic" for GPU runs.
@@ -243,9 +284,13 @@ class RNGRN(nn.Module):
     @property
     def KR(self):    return self.s * (1.0 - self.gate)
     @property
-    def alpha(self): return _softplus(self.theta_alpha)
+    def alpha(self):
+        box = self.param_boxes.get("alpha") if self.param_boxes else None
+        return _box_sigmoid(self.theta_alpha, *box) if box else _softplus(self.theta_alpha)
     @property
-    def delta(self): return _softplus(self.theta_delta)
+    def delta(self):
+        box = self.param_boxes.get("delta") if self.param_boxes else None
+        return _box_sigmoid(self.theta_delta, *box) if box else _softplus(self.theta_delta)
     @property
     def beta(self):
         if self.pin_xstar is None:
@@ -466,6 +511,13 @@ class BatchedRNGRN(nn.Module):
                 raise NotImplementedError(
                     f"BatchedRNGRN does not support pin_xstar members yet (T16); "
                     f"member {i} was constructed with pin_xstar set.")
+            if getattr(m, "param_boxes", None) is not None:
+                # Not implemented: same reasoning as pin_xstar above -- batching a per-member
+                # box needs box-aware stacking this class does not have yet (Task 13 scopes
+                # param_boxes to the serial model; T16 batches it).
+                raise NotImplementedError(
+                    f"BatchedRNGRN does not support param_boxes members yet (T16); "
+                    f"member {i} was constructed with param_boxes set.")
         m0 = models[0]
         for i, m in enumerate(models[1:], start=1):
             if (m.N, m.form, m.n_hill, m.dispersion_backend) != (

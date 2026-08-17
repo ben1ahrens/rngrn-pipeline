@@ -26,6 +26,7 @@ the raw-parameter init scales in __init__ (they set where recovery starts).
 """
 from __future__ import annotations
 import math
+from typing import Sequence
 import torch
 import torch.nn as nn
 
@@ -42,6 +43,28 @@ def _softplus(x):
     return torch.nn.functional.softplus(x)
 
 
+def _reaction_prod(KA, KR, alpha, x, form: str, n_hill: int):
+    """The production term prod_i(x) alone (Shea-Ackers occupancy for 'competitive', the
+    activation*veto term for 'nc1') -- everything in `_reaction_raw` except `beta` and the
+    linear decay. Factored out (Task 12, docs/REDESIGN_rngrn.md 3.2) so a pinned x* can
+    derive beta_i = delta_i*xstar_i - prod_i(xstar) without needing beta itself. Same
+    broadcasting contract as `_reaction_raw` (minus beta, delta).
+    """
+    xn = torch.clamp(x, min=0.0) ** n_hill
+    xj = xn.unsqueeze(-2)                                   # (..., 1, j)
+    KAx = KA * xj
+    KRx = KR * xj
+    if form == "competitive":
+        denom = 1.0 + (KAx + KRx).sum(dim=-1)              # (..., i)
+        return (alpha * KAx).sum(dim=-1) / denom
+    else:  # nc1: independent sites, additive activation * multiplicative repression veto
+        thetaA = KAx / (1.0 + KAx)
+        thetaR = KRx / (1.0 + KRx)
+        activation = (alpha * thetaA).sum(dim=-1)
+        veto = torch.prod(1.0 - thetaR, dim=-1)
+        return activation * veto
+
+
 def _reaction_raw(KA, KR, alpha, beta, delta, x, form: str, n_hill: int):
     """The pointwise reaction f(x), as a PURE function of the CONSTRAINED parameters.
 
@@ -56,19 +79,7 @@ def _reaction_raw(KA, KR, alpha, beta, delta, x, form: str, n_hill: int):
     parameters (e.g. per-pixel states against batched parameters) is NOT supported here --
     the caller must broadcast the parameters itself.
     """
-    xn = torch.clamp(x, min=0.0) ** n_hill
-    xj = xn.unsqueeze(-2)                                   # (..., 1, j)
-    KAx = KA * xj
-    KRx = KR * xj
-    if form == "competitive":
-        denom = 1.0 + (KAx + KRx).sum(dim=-1)              # (..., i)
-        prod = (alpha * KAx).sum(dim=-1) / denom
-    else:  # nc1: independent sites, additive activation * multiplicative repression veto
-        thetaA = KAx / (1.0 + KAx)
-        thetaR = KRx / (1.0 + KRx)
-        activation = (alpha * thetaA).sum(dim=-1)
-        veto = torch.prod(1.0 - thetaR, dim=-1)
-        prod = activation * veto
+    prod = _reaction_prod(KA, KR, alpha, x, form, n_hill)
     return beta + prod - delta * x
 
 
@@ -119,11 +130,20 @@ class RNGRN(nn.Module):
         RUNS THE OBJECTIVE (rad/length dimensional, rad/box nondim); it is used as-is, never
         rescaled by anything here (that is what keeps the fix L-free). Ignored when None
         (default) or when init='low_basal', which has its own D-ratio scheme.
+    pin_xstar : Sequence[float]|None  Task 12 (docs/REDESIGN_rngrn.md 3.2): when given, the
+        reaction is pinned to an EXACT fixed point at this x* -- no `theta_beta` parameter is
+        registered, and `beta` becomes the DERIVED quantity
+        beta_i = delta_i*xstar_i - prod_i(xstar), differentiable w.r.t. theta_delta and the
+        production parameters (theta_s/theta_g/theta_alpha). Use `beta_hinge()` for the
+        beta >= 0 penalty this requires in the loss. None (default) is bit-identical to
+        legacy RNGRN (free theta_beta, no pinning). Not implemented for init='low_basal' or
+        for BatchedRNGRN (T16).
     """
 
     def __init__(self, N: int, form: str = "competitive", n_hill: int = 2,
                  seed: int | None = None, dispersion_backend: str = "eig",
-                 init: str = "default", kstar_obs: float | None = None):
+                 init: str = "default", kstar_obs: float | None = None,
+                 pin_xstar: Sequence[float] | None = None):  # Task 12, REDESIGN_rngrn.md 3.2
         super().__init__()
         assert form in ("competitive", "nc1"), form
         assert dispersion_backend in ("eig", "cubic"), dispersion_backend
@@ -131,10 +151,19 @@ class RNGRN(nn.Module):
         if kstar_obs is not None and not (math.isfinite(kstar_obs) and kstar_obs > 0):
             raise ValueError(
                 f"kstar_obs must be a positive finite wavenumber, got {kstar_obs!r}")
+        if pin_xstar is not None and len(pin_xstar) != N:
+            raise ValueError(f"pin_xstar must have length N={N}, got {len(pin_xstar)}")
+        if pin_xstar is not None and init == "low_basal":
+            # Not implemented: the low_basal branch below returns early with its own
+            # theta_beta before pin_xstar could take effect, which would otherwise silently
+            # ignore the pin. Loud refusal instead (Task 12, docs/REDESIGN_rngrn.md 3.2).
+            raise NotImplementedError(
+                "pin_xstar is not implemented for init='low_basal'; use init='default'.")
         self.N = int(N)
         self.form = form
         self.n_hill = int(n_hill)
         self.init = init
+        self.pin_xstar = None if pin_xstar is None else tuple(float(v) for v in pin_xstar)
         # "eig": torch.linalg.eigvals, any N, the reference. "cubic": exact closed-form
         # roots, N=3 ONLY, 162x faster on CUDA (see _sigma_max_cubic). Default stays "eig"
         # so nothing silently changes; set "cubic" for GPU runs.
@@ -175,7 +204,9 @@ class RNGRN(nn.Module):
         self.theta_g     = nn.Parameter(randn(N, N) * 0.5)         # gate logit (sigmoid)
         self.theta_alpha = nn.Parameter(randn(N, N) * 0.5)         # production weight (softplus)
         self.theta_delta = nn.Parameter(randn(N) * 0.3)            # degradation (softplus)
-        self.theta_beta  = nn.Parameter(randn(N) * 0.3 - 1.0)      # basal (softplus)
+        if self.pin_xstar is None:
+            self.theta_beta = nn.Parameter(randn(N) * 0.3 - 1.0)   # basal (softplus)
+        # else: no free theta_beta -- see the `beta` property (Task 12, derived fixed point).
         theta_D = randn(N) * 0.5
         if kstar_obs is not None:
             # unit B4 (defect 2): shift so D = exp(theta_D) starts at median 1/kstar_obs**2
@@ -184,6 +215,9 @@ class RNGRN(nn.Module):
             # dimensional and non-dimensional paths -- no L is read here.
             theta_D = theta_D - 2.0 * math.log(kstar_obs)
         self.theta_D     = nn.Parameter(theta_D)                   # diffusion (exp)
+        if self.pin_xstar is not None:
+            self.register_buffer(
+                "_xstar", torch.tensor(self.pin_xstar, dtype=torch.float64))
 
     # ---- device / dtype ------------------------------------------------------------
     @property
@@ -213,9 +247,23 @@ class RNGRN(nn.Module):
     @property
     def delta(self): return _softplus(self.theta_delta)
     @property
-    def beta(self):  return _softplus(self.theta_beta)
+    def beta(self):
+        if self.pin_xstar is None:
+            return _softplus(self.theta_beta)
+        # DERIVED beta: solved so that f(x*) == 0 exactly (Task 12, docs/REDESIGN_rngrn.md
+        # 3.2). Autograd-visible through delta (theta_delta) and through prod's dependence
+        # on theta_s/theta_g/theta_alpha -- no theta_beta parameter exists in this branch.
+        prod = _reaction_prod(self.KA, self.KR, self.alpha, self._xstar,
+                              self.form, self.n_hill)
+        return self.delta * self._xstar - prod
     @property
     def D(self):     return torch.exp(self.theta_D)
+
+    def beta_hinge(self) -> torch.Tensor:
+        """softplus(-beta).sum(): the >=0 penalty a pinned, derived beta needs in the loss
+        (Task 12, docs/REDESIGN_rngrn.md 3.2). ~0 while every beta_i is comfortably positive,
+        growing as any component goes negative."""
+        return torch.nn.functional.softplus(-self.beta).sum()
 
     # ---- the pointwise reaction f(x) -------------------------------------------------
     def reaction(self, x: torch.Tensor) -> torch.Tensor:
@@ -409,6 +457,15 @@ class BatchedRNGRN(nn.Module):
         super().__init__()
         if not models:
             raise ValueError("BatchedRNGRN needs at least one member model")
+        for i, m in enumerate(models):
+            if getattr(m, "pin_xstar", None) is not None:
+                # Not implemented: a pinned member has no theta_beta to stack, and derived
+                # beta needs a per-member x* buffer this class does not batch yet. Loud
+                # refusal rather than a silent AttributeError or a silent divergence
+                # (Task 12 scopes pin_xstar to the serial model; T16 batches it).
+                raise NotImplementedError(
+                    f"BatchedRNGRN does not support pin_xstar members yet (T16); "
+                    f"member {i} was constructed with pin_xstar set.")
         m0 = models[0]
         for i, m in enumerate(models[1:], start=1):
             if (m.N, m.form, m.n_hill, m.dispersion_backend) != (

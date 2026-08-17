@@ -3,8 +3,17 @@
 Top-level, outside the firewall (`CLAUDE.md` §5): imports no `data/`, no `scoring/`, no
 answer key, and reads exactly the dict shape `history.py::TrainingHistory.to_arrays()`
 produces — never a run directory, never ground truth. Its import surface is deliberately
-narrow: numpy, matplotlib, and `history.DIAG_KEYS` for the two scalar-column names it plots
-by name.
+narrow: matplotlib, and `history.DIAG_KEYS` for `"total"`, the one column it plots that
+comes from there. The other named column it plots, `"L_spec_shape"`, is not in
+`DIAG_KEYS` — it is one of the five `"L_<key>"` spectral-term columns
+`losses/total.py::_apply_spectral` writes, present in `hist_scalars` whenever
+`use_spectral=True` (NaN before ignition, real once ignited).
+
+Backend note: `matplotlib.use("Agg")` runs at import unless the backend is already Agg —
+this DOES override a caller's non-Agg backend (e.g. a notebook's inline/widget backend) if
+`viz` is imported after that backend was set. It is unconditional, not gated on a TTY or
+env check; a caller that needs its own interactive backend must import and configure it
+before importing `viz`.
 
 An empty or legacy-only dict (missing the Task-9 `events`/`invariant_*` keys, or `{}` for a
 history that recorded nothing) draws a figure with an "empty" annotation rather than
@@ -24,7 +33,7 @@ import matplotlib.pyplot as plt                                    # noqa: E402
 from .history import DIAG_KEYS                                     # noqa: E402
 
 TOTAL_LOSS_KEY = DIAG_KEYS[0]        # "total"     -- losses/total.py's combined loss
-SIG_MAX_POS_KEY = DIAG_KEYS[2]       # "sig_max_pos" -- losses.spectral.is_ignited's diagnostic
+SPEC_SHAPE_KEY = "L_spec_shape"      # losses/total.py::_apply_spectral's shape term
 
 _MAX_LEGEND_MEMBERS = 12             # more than this and a per-member legend is just noise
 
@@ -123,11 +132,15 @@ def event_timeline(arrays: dict, out_png: str) -> str:
 
 
 def spectral_trace(arrays: dict, floor: float, out_png: str) -> str:
-    """Per-member `sig_max_pos` (`history.DIAG_KEYS[2]`, the growth-rate diagnostic
-    `losses.spectral.is_ignited` compares against its ignition margin) vs step, with
-    `floor` drawn as a horizontal reference line."""
+    """Per-member `"L_spec_shape"` (the spectral-shape loss term
+    `losses/total.py::_apply_spectral` writes whenever `use_spectral=True` — NaN before
+    ignition, real once ignited) vs step, with `floor` drawn as a horizontal reference line:
+    the plan's D3 ~31%/bin spectral-distance estimation floor. When the run never used the
+    spectral terms (`"L_spec_shape"` absent from `hist_scalar_names`), draws the same
+    "no spectral diagnostic recorded" empty figure as every other function here — it does
+    NOT fall back to a different series."""
     fig, ax = plt.subplots()
-    step, values = _scalar_column(arrays, SIG_MAX_POS_KEY)
+    step, values = _scalar_column(arrays, SPEC_SHAPE_KEY)
     if step is None:
         _empty_axis(ax, "no spectral diagnostic recorded")
     else:
@@ -136,7 +149,7 @@ def spectral_trace(arrays: dict, floor: float, out_png: str) -> str:
             ax.plot(step, values[:, b], label=f"member {b}")
         ax.axhline(float(floor), color="k", linestyle="--", label="floor")
         ax.set_xlabel("step")
-        ax.set_ylabel(SIG_MAX_POS_KEY)
+        ax.set_ylabel(SPEC_SHAPE_KEY)
         if B <= _MAX_LEGEND_MEMBERS:
             ax.legend(fontsize="small")
     ax.set_title("spectral trace")

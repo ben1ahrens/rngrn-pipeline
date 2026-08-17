@@ -54,11 +54,31 @@ are tracked by EIGENVECTOR OVERLAP between adjacent mu (`match_by_overlap`, Hung
 assignment on |v_i^H v_j|), never by sorting real parts -- branch crossings are exactly what
 the re-entrant mu-band is made of, and Re-sorting silently swaps identities through one. See
 `v1_continuation` for the two aggregation choices it makes and what it reports about them.
+
+V2 -- temporal, 0-D (§5.3): the N + 2N^2 dimensional WELL-MIXED lifted ODE (the lifted PDE
+with the diffusion term dropped) against a trusted stiff reference, scipy Radau at
+rtol 1e-10 / atol 1e-12. Two claims, one function each:
+  (i)  `v2_qss_limit` -- the lifted trajectory converges to the QSS N-dim ODE trajectory as
+       mu -> 0, at empirical order ~1 in mu. BOTH sides are integrated by the same Radau
+       reference, so this measures the LIFT and not a stepper.
+  (ii) `v2_temporal` -- the Strang stepper `simulate_lifted` uses reproduces that reference
+       under dt-halving at observed order ~2 where dt <~ mu, with a sup-norm error at the
+       horizon below 0.1 x pattern_floor. The 0-D stepper calls the SAME exact gate substep
+       (`lifted.gate_step_exact`) and the same gate-to-production map
+       (`lifted._reaction_from_gates_np`) that `simulate_lifted` calls, on 1x1 grids, so what
+       V2 measures is the production stepper and not a 0-D re-implementation of it. The only
+       substitution is the x substep: ETDRK4-on-rfft becomes plain RK4, because in 0-D there
+       is no Laplacian to treat exponentially (CLAUDE.md §7c).
+  ORDER DEGRADES FOR dt >> mu BY CONSTRUCTION and that is not a failure: the exact gate
+  substep buys unconditional STABILITY at any dt, not second-order accuracy. V2's order claim
+  is scoped to dt <~ mu and `dt_over_mu_max` is returned so a reader can see the scope was
+  respected.
 """
 from __future__ import annotations
 
 import numpy as np
 import torch
+from scipy.integrate import solve_ivp
 from scipy.optimize import linear_sum_assignment
 
 from ..losses.terms import steady_state
@@ -472,3 +492,343 @@ def _n_resort_mismatches(w_a, w_b, pair):
     resort = np.empty_like(order_a)
     np.put_along_axis(resort, order_a, order_b, axis=1)
     return int((pair != resort).any(axis=1).sum())
+
+
+# ======================================================================================
+# V2 — the 0-D (well-mixed) lifted ODE: Radau reference, Strang order
+# ======================================================================================
+# THE REFERENCE. scipy Radau (3-stage RadauIIA, L-stable, fully implicit) at rtol 1e-10 /
+# atol 1e-12, the tolerance docs/REDESIGN_rngrn.md §5.3 V2 names. It is given an ANALYTIC
+# Jacobian, by autodiff through `lifted.lifted_rhs_torch` (`_lifted_jac_0d`) rather than
+# hand-derived, matching eval/lifted.py's own contract; without it Radau finite-differences a
+# 21x21 Jacobian and both the cost and the Newton convergence at small mu degrade.
+# WHETHER THE REFERENCE IS ACTUALLY RESOLVING THE STIFFNESS IS MEASURED, NOT ASSUMED: every V2
+# call also integrates at a TIGHTER tolerance (1e-12/1e-14) and reports
+# `radau_self_err` = sup |reference - tighter|, and `radau_ok` requires that to sit at least
+# 1/V2_RADAU_MARGIN below the smallest Strang error the reference is being used to judge -- so a
+# reference too coarse to judge its subject fails LOUDLY instead of silently setting the floor.
+# THE COMPARATOR MUST BE THE TIGHTER SOLVE, NOT A LOOSER ONE. Measured while building this:
+# comparing against rtol 1e-8 instead bounds the 1e-8 solution's error, which is ~100x the
+# reference's, so it over-states `radau_self_err` by ~2 orders and rejects references that are
+# in fact perfectly adequate. |ref - tighter| bounds the REFERENCE's error, which is the
+# quantity `radau_ok` is about.
+V2_RADAU_RTOL, V2_RADAU_ATOL = 1e-10, 1e-12
+V2_RADAU_CHECK_RTOL, V2_RADAU_CHECK_ATOL = 1e-12, 1e-14
+V2_RADAU_MARGIN = 0.1
+
+# Output grid: 20 equal intervals on [0, T]. Errors are compared at these times only, and the
+# grid is INDEPENDENT of dt, so every dt in a halving triplet is judged at exactly the same
+# times (the alternative -- comparing at each stepper's own times -- would fold an
+# interpolation error into the order estimate).
+V2_N_OUT = 20
+
+# The initial condition, deliberately ON the slow manifold: x0 = V2_X0_SCALE * x*, gates at
+# their QSS occupancy FOR x0 (`lifted.lifted_state`). There is therefore no initial fast layer
+# of width mu, and the gate dynamics that remain are the O(mu) lag as x relaxes back toward x*
+# -- which is exactly the regime `simulate_lifted` runs in (it starts the gates at
+# gates_qss(x*) with x perturbed off x*). A layer-laden start (e.g. G = 0) would make the
+# sup-norm error report the layer rather than the trajectory.
+V2_X0_SCALE = 1.5
+
+
+def _lifted_rhs_0d(z, mu, p):
+    """The 0-D lifted RHS in numpy -- the same vector field as `lifted.lifted_rhs_torch`
+    (which is already the non-spatial RHS; there is no diffusion term in it to drop).
+
+    WHY A MIRROR EXISTS AT ALL. Radau makes tens of thousands of function evaluations per
+    solve and the torch version measures ~45 us per call, i.e. minutes per V2 case. This is a
+    transcription for speed, not new algebra, and it is PINNED to the torch original by
+    `v2_rhs_mirror_error` /
+    tests/test_lift_ladder.py::test_v2_numpy_rhs_mirrors_lifted_rhs_torch (max relative
+    deviation over random states and mu, both forms). `p` is `lifted._np_params(model)`,
+    hoisted out of the inner loop.
+    """
+    N = p["N"]
+    x = z[:N]
+    GA = z[N:N + N * N].reshape(N, N)
+    GR = z[N + N * N:].reshape(N, N)
+    xn = np.clip(x, 0.0, None) ** p["n_hill"]
+    ua = p["KA"] * xn[None, :]
+    ur = p["KR"] * xn[None, :]
+    if p["form"] == "competitive":
+        free = 1.0 - GA.sum(1, keepdims=True) - GR.sum(1, keepdims=True)
+        dGA = (ua * free - GA) / mu
+        dGR = (ur * free - GR) / mu
+        prod = (p["alpha"] * GA).sum(1)
+    else:
+        dGA = (ua * (1.0 - GA) - GA) / mu
+        dGR = (ur * (1.0 - GR) - GR) / mu
+        prod = (p["alpha"] * GA).sum(1) * np.prod(1.0 - GR, axis=1)
+    dx = p["beta"] + prod - p["delta"] * x
+    return np.concatenate([dx, dGA.ravel(), dGR.ravel()])
+
+
+def _lifted_jac_0d(model, z, mu):
+    """d f_lift / d z at an ARBITRARY z, by autodiff through `lifted.lifted_rhs_torch`.
+
+    `lifted.lifted_jacobian` does the same thing but only at the QSS fixed point; Radau needs
+    it along the trajectory. Autodiff, never hand-derived (eval/lifted.py's contract). Called
+    once per Radau Jacobian update (tens to hundreds of times per solve), so the torch cost is
+    irrelevant here -- unlike in the RHS, which is why only the RHS has a numpy mirror.
+    """
+    zt = torch.as_tensor(np.asarray(z, float), device=model.device, dtype=model.dtype)
+    J = torch.autograd.functional.jacobian(
+        lambda zz: lifted.lifted_rhs_torch(model, zz, mu), zt, create_graph=False,
+        vectorize=True)
+    return J.detach().cpu().numpy()
+
+
+def _qss_rhs_0d(model, x, p):
+    """The 0-D QSS (reduced, N-dim) RHS, assembled from eval/lifted.py's own numpy pieces:
+    beta + production_from_gates(gates_qss(x)) - delta * x. V0 measures exactly this against
+    `model.reaction` (`max_gate_qss_err`, ~1e-16), so it is the same vector field."""
+    GA, GR = lifted.gates_qss(model, x)
+    return (p["beta"] + lifted.production_from_gates(model, GA, GR)
+            - p["delta"] * np.asarray(x, float))
+
+
+def _qss_jac_0d(model, x):
+    """The reduced N x N Jacobian at an arbitrary x, via `model.jacobian` (autodiff)."""
+    xt = torch.as_tensor(np.asarray(x, float), device=model.device, dtype=model.dtype)
+    return model.jacobian(xt, create_graph=False).detach().cpu().numpy()
+
+
+def _radau(fun, y0, T, t_out, jac, rtol, atol):
+    """solve_ivp(method="Radau") on [0, T], sampled at `t_out`. Returns (y (n_out+1, dim), sol).
+    Raises on failure rather than returning a partial trajectory (CLAUDE.md §4, fail loud)."""
+    sol = solve_ivp(fun, (0.0, float(T)), np.asarray(y0, float), method="Radau",
+                    t_eval=np.asarray(t_out, float), jac=jac, rtol=rtol, atol=atol)
+    if not sol.success:
+        raise RuntimeError(f"V2 Radau reference failed: {sol.message!r} "
+                           f"(rtol={rtol}, atol={atol}, T={T}, nfev={sol.nfev})")
+    return sol.y.T.copy(), sol
+
+
+def v2_initial_state(model, xstar=None):
+    """(x0, z0) for V2: x0 = V2_X0_SCALE * x*, gates at gates_qss(x0). See V2_X0_SCALE."""
+    if xstar is None:
+        xs, converged = steady_state(model)
+        if not converged:
+            raise RuntimeError("v2_initial_state: model has no converged steady state -- "
+                               "draw_models should already have filtered this out")
+        xstar = xs.detach().cpu().numpy()
+    x0 = V2_X0_SCALE * np.asarray(xstar, float).reshape(model.N)
+    return x0, lifted.lifted_state(model, x0)
+
+
+def _rk4_reaction(X, prod, beta, delta, h):
+    """One plain RK4 step of the 0-D reaction dx/dt = beta + prod - delta*x with the gates
+    (hence `prod`) FROZEN -- the x half of the Strang step. Frozen gates make the field affine,
+    so `prod` is evaluated once per step; this is RK4 on that field, nothing else."""
+    c = beta + prod
+    f = lambda Y: c - delta * Y
+    k1 = f(X)
+    k2 = f(X + 0.5 * h * k1)
+    k3 = f(X + 0.5 * h * k2)
+    k4 = f(X + h * k3)
+    return X + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+
+def strang_trajectory_0d(model, z0, mu, T, dt, p=None, n_out=V2_N_OUT):
+    """The 0-D Strang trajectory at `t_out = linspace(0, T, n_out+1)`, as (n_out+1, dim).
+
+    ONE STEP, identical in structure to `lifted.simulate_lifted`: gates dt/2 EXACT at frozen x
+    (`lifted.gate_step_exact`) -> x over dt with the gates frozen -> gates dt/2 exact. The
+    fields are carried as 1x1 spatial grids precisely so the production stepper's own helpers
+    (`gate_step_exact`, `_reaction_from_gates_np`) are called VERBATIM; the only substitution is
+    ETDRK4 -> RK4 for the x substep, there being no Laplacian in 0-D (CLAUDE.md §7c).
+
+    dt IS SNAPPED so that T is hit exactly and every output time is a step boundary:
+    `steps_per_out = round(T/dt/n_out)`, `n_steps = steps_per_out * n_out`,
+    `dt_used = T/n_steps`. The snapped value is returned and it is the one `v2_temporal` fits
+    the order against, so an inexact halving cannot bias the slope.
+
+    Returns (traj, dt_used, n_steps).
+    """
+    if p is None:
+        p = lifted._np_params(model)
+    N = p["N"]
+    if dt <= 0.0 or T <= 0.0:
+        raise ValueError(f"strang_trajectory_0d needs dt > 0 and T > 0; got dt={dt}, T={T}")
+    steps_per_out = max(1, int(round(T / dt / n_out)))
+    n_steps = steps_per_out * n_out
+    h = float(T) / n_steps
+
+    x, GA, GR = lifted.unpack(z0, N)
+    X = x[:, None, None].copy()
+    GA = GA[:, :, None, None].copy()
+    GR = GR[:, :, None, None].copy()
+    beta = p["beta"][:, None, None]
+    delta = p["delta"][:, None, None]
+
+    traj = np.empty((n_out + 1, lifted.state_dim(N)))
+    traj[0] = np.asarray(z0, float)
+    for s in range(n_steps):
+        GA, GR = lifted.gate_step_exact(model, X, GA, GR, 0.5 * h, mu)
+        X = _rk4_reaction(X, lifted._reaction_from_gates_np(model, GA, GR), beta, delta, h)
+        GA, GR = lifted.gate_step_exact(model, X, GA, GR, 0.5 * h, mu)
+        if (s + 1) % steps_per_out == 0:
+            traj[(s + 1) // steps_per_out] = np.concatenate(
+                [X.ravel(), GA.reshape(-1), GR.reshape(-1)])
+    if not np.all(np.isfinite(traj)):
+        raise RuntimeError(f"strang_trajectory_0d blew up at mu={mu}, dt={h}, T={T} "
+                           f"(dt/mu = {h / mu:.3g}) -- non-finite state.")
+    return traj, h, n_steps
+
+
+def v2_temporal(model, mu: float, T: float, dts: list[float]) -> dict:
+    """V2 rung (ii): the 0-D Strang stepper against the Radau reference, and its ORDER.
+
+    `err(dt)` is the sup-norm over BOTH the output times and all N + 2N^2 components of
+    |z_strang - z_radau| -- a floor measurement over the whole trajectory, like V0's and V1's,
+    not a spot check at the horizon. `strang_order` is the mean over consecutive (coarse, fine)
+    pairs of `log(err_c/err_f) / log(dt_c/dt_f)`; that reduces to the briefed
+    `log2(err(dt)/err(dt/2))` for an exact halving and stays correct when
+    `strang_trajectory_0d` snaps dt to divide T (see its docstring).
+
+    `sup_err_at_horizon` is the FINEST dt's sup-norm error over all components at t = T. It is
+    the quantity §5.3 V2 bars at 0.1 x pattern_floor; taking the max over all N + 2N^2
+    components rather than over x alone is the conservative reading of "sup-norm", and
+    `sup_err_x_at_horizon` reports the x-only value beside it since pattern_floor is an
+    x-amplitude.
+
+    SCOPE. The order-2 claim holds where dt <~ mu. `dt_over_mu_max` reports the coarsest dt/mu
+    actually used so a reader can check the scope was respected; at dt >> mu the exact gate
+    substep still keeps the integration STABLE (that is what it is for) but the splitting order
+    drops, which is a known property of the scheme and not a defect.
+
+    Returns strang_order, strang_order_pairs, sup_err_at_horizon, sup_err_x_at_horizon,
+    sup_err (dict dt_used -> err), n_steps (dict dt_used -> steps), dts_used, dt_over_mu_max,
+    radau_ok, radau_self_err, radau_ref_margin, radau_nfev, radau_njev, radau_nlu, mu, T.
+    """
+    dts = sorted(float(d) for d in dts)[::-1]          # coarse -> fine
+    if len(dts) < 2:
+        raise ValueError(f"v2_temporal needs >=2 dt values to fit an order; got {len(dts)}")
+    if dts[-1] <= 0.0:
+        raise ValueError(f"v2_temporal needs strictly positive dt; got {dts}")
+
+    p = lifted._np_params(model)
+    _, z0 = v2_initial_state(model)
+    t_out = np.linspace(0.0, float(T), V2_N_OUT + 1)
+    fun = lambda t, z: _lifted_rhs_0d(z, mu, p)
+    jac = lambda t, z: _lifted_jac_0d(model, z, mu)
+
+    ref, sol = _radau(fun, z0, T, t_out, jac, V2_RADAU_RTOL, V2_RADAU_ATOL)
+    tighter, _ = _radau(fun, z0, T, t_out, jac, V2_RADAU_CHECK_RTOL, V2_RADAU_CHECK_ATOL)
+    radau_self_err = float(np.max(np.abs(ref - tighter)))
+
+    errs, hs, nsteps, horizon, horizon_x = [], [], [], [], []
+    for dt in dts:
+        traj, h, ns = strang_trajectory_0d(model, z0, mu, T, dt, p=p)
+        d = np.abs(traj - ref)
+        errs.append(float(d.max()))
+        horizon.append(float(d[-1].max()))
+        horizon_x.append(float(d[-1, :model.N].max()))
+        hs.append(h)
+        nsteps.append(ns)
+
+    if not all(e > 0.0 for e in errs):
+        raise RuntimeError(
+            "v2_temporal: a Strang error is exactly 0, so its log-log slope is undefined "
+            f"(errs={errs}). Round-off has swallowed the truncation error -- raise T or "
+            "coarsen dt rather than reading the returned order.")
+    pairs = [float(np.log(errs[i] / errs[i + 1]) / np.log(hs[i] / hs[i + 1]))
+             for i in range(len(hs) - 1)]
+
+    radau_ok = bool(sol.success and np.all(np.isfinite(ref))
+                    and radau_self_err <= V2_RADAU_MARGIN * min(errs))
+    return dict(
+        strang_order=float(np.mean(pairs)), strang_order_pairs=pairs,
+        sup_err_at_horizon=horizon[-1], sup_err_x_at_horizon=horizon_x[-1],
+        sup_err={h: e for h, e in zip(hs, errs)},
+        n_steps={h: n for h, n in zip(hs, nsteps)},
+        dts_used=hs, dt_over_mu_max=float(max(hs) / mu),
+        radau_ok=radau_ok, radau_self_err=radau_self_err,
+        radau_ref_margin=(float(min(errs) / radau_self_err) if radau_self_err > 0.0
+                          else float("inf")),
+        radau_nfev=int(sol.nfev), radau_njev=int(sol.njev), radau_nlu=int(sol.nlu),
+        mu=float(mu), T=float(T))
+
+
+def v2_qss_limit(model, mus, T: float = 5.0) -> dict:
+    """V2 rung (i): the lifted trajectory converges to the QSS N-dim trajectory as mu -> 0.
+
+    BOTH sides are integrated by the SAME Radau reference (the lifted N + 2N^2 dim system at
+    each mu, the reduced N-dim system once), so the measured gap is a property of the LIFT and
+    carries no stepper error. The initial condition is on the slow manifold for both
+    (x0 = 1.5 x*, gates at gates_qss(x0)), so there is no initial layer and the gap is the
+    O(mu) tracking lag -- the quantity the order claim is about.
+
+    `qss_gap[mu]` is the sup-norm over output times and the N x-components of
+    |x_lift - x_qss|. Only the x block is compared: the gate block's mu -> 0 counterpart is the
+    ALGEBRAIC QSS relation, which V0 already checks (`max_gate_qss_err`), not a trajectory.
+    `qss_order` is the least-squares slope of log gap against log mu -- a MEASUREMENT (§5.3:
+    absolute error constants UNCALIBRATED), reported here, not enforced.
+
+    Returns qss_order, qss_gap (dict mu -> sup err), qss_gap_rel (the same divided by
+    max|x_qss|), radau_ok, radau_nfev (dict mu -> nfev, the QSS solve under key 0.0), T.
+    """
+    mus = np.sort(np.asarray(mus, float))
+    if len(mus) < 2:
+        raise ValueError(f"v2_qss_limit needs >=2 mu values to fit a log-log slope; "
+                         f"got {len(mus)}")
+    if np.any(mus <= 0.0):
+        raise ValueError(f"v2_qss_limit needs strictly positive mu; got {mus.tolist()}")
+
+    p = lifted._np_params(model)
+    N = model.N
+    x0, z0 = v2_initial_state(model)
+    t_out = np.linspace(0.0, float(T), V2_N_OUT + 1)
+
+    xq, solq = _radau(lambda t, x: _qss_rhs_0d(model, x, p), x0, T, t_out,
+                      lambda t, x: _qss_jac_0d(model, x),
+                      V2_RADAU_RTOL, V2_RADAU_ATOL)
+    scale = max(float(np.max(np.abs(xq))), 1e-300)
+
+    gaps = {}
+    nfev = {0.0: int(solq.nfev)}
+    ok = bool(solq.success)
+    for mu in mus:
+        zl, soll = _radau(lambda t, z: _lifted_rhs_0d(z, float(mu), p), z0, T, t_out,
+                          lambda t, z: _lifted_jac_0d(model, z, float(mu)),
+                          V2_RADAU_RTOL, V2_RADAU_ATOL)
+        gaps[float(mu)] = float(np.max(np.abs(zl[:, :N] - xq)))
+        nfev[float(mu)] = int(soll.nfev)
+        ok = ok and bool(soll.success) and bool(np.all(np.isfinite(zl)))
+
+    g = np.array([gaps[float(m)] for m in mus])
+    if not np.all(g > 0.0):
+        raise RuntimeError(
+            f"v2_qss_limit: a lifted-vs-QSS gap is exactly 0, so its log-log slope is "
+            f"undefined (gaps={gaps}). Raise T rather than reading the returned order.")
+    return dict(qss_order=float(np.polyfit(np.log(mus), np.log(g), 1)[0]),
+                qss_gap=gaps, qss_gap_rel={k: v / scale for k, v in gaps.items()},
+                radau_ok=ok, radau_nfev=nfev, T=float(T))
+
+
+def v2_rhs_mirror_error(model, mus=(1e-6, 1e-3, 1.0), n_states: int = 25,
+                        seed: int = 0) -> float:
+    """Max RELATIVE deviation of `_lifted_rhs_0d` from `lifted.lifted_rhs_torch`.
+
+    The numpy mirror exists only for Radau's speed (see `_lifted_rhs_0d`); this is what pins it
+    to the torch original rather than trusting the transcription. RELATIVE because the gate
+    rows carry a 1/mu factor, so an absolute deviation is not comparable across the mu range.
+    States are the QSS state at a random x with the gate block randomly rescaled, so both the
+    `free`/`1-G` gate normalisations and the production terms are exercised away from the
+    fixed point.
+    """
+    p = lifted._np_params(model)
+    rng = np.random.default_rng(seed)
+    worst = 0.0
+    for _ in range(int(n_states)):
+        x = rng.uniform(0.05, 2.0, model.N)
+        z = lifted.lifted_state(model, x)
+        z[model.N:] *= rng.uniform(0.5, 1.5, z.size - model.N)
+        zt = torch.as_tensor(z, device=model.device, dtype=model.dtype)
+        for mu in mus:
+            with torch.no_grad():
+                b = lifted.lifted_rhs_torch(model, zt, float(mu)).cpu().numpy()
+            a = _lifted_rhs_0d(z, float(mu), p)
+            worst = max(worst, float(np.max(np.abs(a - b)))
+                        / max(float(np.max(np.abs(b))), 1e-300))
+    return worst

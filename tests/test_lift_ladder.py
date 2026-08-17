@@ -1,5 +1,8 @@
-"""test_lift_ladder.py — V0 of the lift-validation ladder: algebraic invariants of the
-lifted system (eval/ladder.py), at N=3, both regulation forms, over >=20 generator draws.
+"""test_lift_ladder.py — the lift-validation ladder (eval/ladder.py), at N=3 and both
+regulation forms: V0 algebraic invariants over >=20 generator draws, V1 eigenvalue
+continuation, V2 the 0-D lifted ODE against a Radau reference. One section per rung, in order.
+
+V0 — algebraic invariants of the lifted system.
 
 docs/REDESIGN_rngrn.md §5.3 V0 says V0 MEASURES the achievable floor and records it rather
 than asserting an inherited one. The original draft of this test asserted the single-model
@@ -257,3 +260,117 @@ def test_v1_reports_the_measured_orders_and_errors(form):
     assert out["frac_k_separated"] > 0.5
     for mu, e in expected_err.items():
         assert 0.1 * e <= out["max_slow_err"][mu] <= 10.0 * e, (mu, out["max_slow_err"][mu])
+
+
+# ======================================================================================
+# V2 — temporal, 0-D: the 21-dim well-mixed lifted ODE against a stiff Radau reference
+# ======================================================================================
+# THE HORIZON IS SHORTENED AT SMALL mu, AND HERE IS THE ARITHMETIC. The brief's test used
+# T = 5.0 at every mu. At mu = 1e-5 the finest requested step is dt = mu/8 = 1.25e-6, so
+# T = 5.0 is 4e6 Strang steps for ONE dt and 7e6 for the halving triplet -- at the measured
+# ~120 us/step that is ~14 minutes for a single test case. The order measurement needs
+# ENOUGH STEPS for the dt^2 term to dominate, not a long horizon, so the horizon is capped at
+# 1000 gate relaxation times:
+#
+#     T(mu) = min(5.0, 1000 * mu)
+#
+# which leaves >= 8000 steps at the finest dt in every case (T/(mu/8) = 8000 when the cap
+# binds, 4000 at mu = 1e-2 where the 5.0 rollout horizon binds instead). The gate transient
+# has width ~mu, so 1000 gate times resolves it and then some. This is a COST adjustment to
+# the brief, not a bar adjustment: the order band (2.0 +- 0.5) and the sup-norm bar (1e-4)
+# are exactly as briefed. Recorded in task-4-report.md.
+V2_ROLLOUT_HORIZON = 5.0
+V2_GATE_TIMES = 1000.0
+
+
+def _v2_horizon(mu):
+    return min(V2_ROLLOUT_HORIZON, V2_GATE_TIMES * mu)
+
+
+# mu = 1e-3 is mu_gate, the owner's evaluation point for the lifted gate (owner decision,
+# 2026-08-17), added alongside the spec's mu_central = 7.2e-4; both are reported.
+@pytest.mark.parametrize("mu", [1e-5, 7.2e-4, 1e-3, 1e-2])
+def test_v2_strang_matches_radau_and_shows_order_two(mu):
+    m = ladder.draw_models(n=1, form="competitive", seed=11)[0]
+    out = ladder.v2_temporal(m, mu=mu, T=_v2_horizon(mu), dts=[mu / 2, mu / 4, mu / 8])
+    assert out["radau_ok"], out
+    assert abs(out["strang_order"] - 2.0) < 0.5, out          # dt <~ mu regime
+    # <= 0.1 x pattern_floor with the x*-free 0-D floor, REDESIGN §5.3 V2: pattern_floor =
+    # max(1e-3, 0.02*|x*_0|) and the ABSOLUTE arm (1e-3) is the x*-free one, so 0.1 x it is
+    # 1e-4.
+    assert out["sup_err_at_horizon"] < 1e-4, out
+
+
+@pytest.mark.parametrize("form", ["competitive", "nc1"])
+def test_v2_numpy_rhs_mirrors_lifted_rhs_torch(form):
+    """The Radau reference needs a numpy RHS (a torch call per function evaluation is ~45 us
+    and Radau makes tens of thousands). `ladder._lifted_rhs_0d` is that mirror, and this
+    pins it to eval/lifted.py::lifted_rhs_torch -- the authority -- rather than trusting that
+    the two transcriptions agree."""
+    m = ladder.draw_models(n=1, form=form, seed=11)[0]
+    assert ladder.v2_rhs_mirror_error(m, mus=[1e-6, 1e-3, 1.0], n_states=25) < 1e-14
+
+
+@pytest.mark.parametrize("form", ["competitive", "nc1"])
+def test_v2_lifted_trajectories_converge_to_qss_at_first_order(form):
+    """Part (i) of REDESIGN §5.3 V2: the lifted trajectory converges to the QSS 3-dim ODE
+    trajectory as mu -> 0. Both sides integrated by the SAME Radau reference, so this measures
+    the lift and not a stepper. Order in mu is a MEASUREMENT (§5.3: "absolute error constants
+    UNCALIBRATED"), so the band is loose and exists to catch a regression."""
+    m = ladder.draw_models(n=1, form=form, seed=11)[0]
+    out = ladder.v2_qss_limit(m, mus=[1e-6, 1e-5, 1e-4], T=5.0)
+    assert out["radau_ok"], out
+    assert abs(out["qss_order"] - 1.0) < 0.35, out
+    assert out["qss_gap"][1e-6] < out["qss_gap"][1e-4], out
+
+
+def test_v2_strang_order_degrades_for_dt_much_larger_than_mu():
+    """THE KNOWN COUPLING TRAP, pinned so it is documented rather than discovered later.
+
+    `lifted.gate_step_exact` buys unconditional STABILITY at any dt -- that is what it is for
+    (eval/lifted.py's §"THE STIFFNESS" comment) -- but NOT second-order accuracy once dt >> mu:
+    the Strang splitting error is controlled by commutators carrying the 1/mu gate rate, so the
+    observed order falls away from 2 exactly where the exact substep is doing the most work.
+    Measured on this branch, 2026-08-17, competitive seed 11 at mu = 1e-3 with
+    dt/mu in {8, 4, 2}: order 1.49 (pairs 1.33, 1.65), against 1.99 at dt/mu <= 0.5.
+
+    The run still COMPLETES (no blow-up) -- which is the stability half of the claim -- and
+    `dt_over_mu_max` is what tells a reader which regime a V2 number came from.
+    """
+    m = ladder.draw_models(n=1, form="competitive", seed=11)[0]
+    mu = 1e-3
+    out = ladder.v2_temporal(m, mu=mu, T=1.0, dts=[8 * mu, 4 * mu, 2 * mu])
+    assert out["radau_ok"], out
+    assert out["dt_over_mu_max"] > 4.0, out
+    assert out["strang_order"] < 1.75, out          # materially below the dt <~ mu order 2
+
+
+def test_v2_reports_the_measured_orders_and_errors():
+    """V2's absolute error constants are MEASUREMENTS (docs/REDESIGN_rngrn.md §5.3: "measured
+    and recorded, not invented"), so this records them rather than asserting an inherited bar.
+    Measured on this branch, 2026-08-17, draw_models(n=1, form="competitive", seed=11)[0],
+    dts = [mu/2, mu/4, mu/8], T = _v2_horizon(mu):
+
+      mu      T      order   sup_err(mu/2, mu/4, mu/8)          sup_err_at_horizon  radau margin
+      1e-2    5.0    1.994   6.93e-4, 1.74e-4, 4.36e-5          4.36e-5             2.0e6
+      1e-3    1.0    1.995   8.50e-6, 2.14e-6, 5.35e-7          5.35e-7             4.0e4
+      7.2e-4  0.72   1.995   4.41e-6, 1.11e-6, 2.77e-7          2.77e-7             1.9e4
+      1e-5    0.01   1.994   4.61e-9, 1.16e-9, 2.90e-10         2.81e-10            1.0e4
+
+    The band below is a factor of 10 on the error -- it exists to catch a REGRESSION in the
+    stepper, not to pin a physical constant. mu = 1e-2 is the binding case for the 1e-4 bar
+    (4.36e-5, a factor 2.3 of margin) because it is the only mu where the 5.0 rollout horizon
+    binds instead of the 1000-gate-time cap.
+    """
+    expected = {1e-2: 4.36e-5, 1e-3: 5.35e-7, 7.2e-4: 2.77e-7, 1e-5: 2.81e-10}
+    m = ladder.draw_models(n=1, form="competitive", seed=11)[0]
+    for mu, e in expected.items():
+        out = ladder.v2_temporal(m, mu=mu, T=_v2_horizon(mu), dts=[mu / 2, mu / 4, mu / 8])
+        assert 0.1 * e <= out["sup_err_at_horizon"] <= 10.0 * e, (mu, out)
+        assert out["dt_over_mu_max"] <= 1.0, (mu, out)   # the dt <~ mu scope of the order claim
+
+
+def test_v2_temporal_requires_at_least_two_dt_values():
+    m = ladder.draw_models(n=1, form="competitive", seed=11)[0]
+    with pytest.raises(ValueError, match=">=2 dt values"):
+        ladder.v2_temporal(m, mu=1e-3, T=1.0, dts=[1e-4])

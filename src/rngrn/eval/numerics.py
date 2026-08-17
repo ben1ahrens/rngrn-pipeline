@@ -188,7 +188,7 @@ def integrate_etdrk4_rfft(X0, D, reaction_np, n, L, dt, nsteps):
     return np.fft.irfft2(v, s=(n, n), axes=(1, 2)), False
 
 
-def integrate_bdf1_newton_krylov(*args, **kwargs):
+def integrate_bdf1_newton_krylov(X0, D, reaction_np, n, L, dt, nsteps):
     """STUB — deliberately loud. docs/REDESIGN_rngrn.md §5.2 removed the silent
     ETDRK4 fallback (a result labelled bdf1 that was not bdf1). Implemented at the
     gate milestone (R4 plan) as the 128² cross-check integrator."""

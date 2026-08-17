@@ -321,11 +321,15 @@ def gates_qss_arrays(KA, KR, x, form, n_hill):
     return ua / (1.0 + ua), ur / (1.0 + ur)
 
 
-def lifted_jacobian_batch(KA, KR, alpha, beta, delta, xstar, form, n_hill):
+def lifted_jacobian_batch(KA, KR, alpha, beta, delta, xstar, form, n_hill, device=None):
     """(B, dim, dim) lifted Jacobians at mu = 1, by vmapped autodiff (never hand-derived).
     All inputs numpy: KA/KR/alpha (B,N,N), beta/delta/xstar (B,N). Rescale the gate rows by
-    1/mu (`rescale_mu`) for any other mu. Returns (J1, N)."""
-    t = lambda a: torch.as_tensor(np.asarray(a, float), dtype=torch.float64)
+    1/mu (`rescale_mu`) for any other mu. Returns (J1, N).
+
+    `device`: where the vmapped jacrev runs. None (default) is CPU, preserving prior
+    behaviour.
+    """
+    t = lambda a: torch.as_tensor(np.asarray(a, float), dtype=torch.float64, device=device)
     bt = t(beta)
     B = bt.shape[0]
     GA, GR = gates_qss_arrays(KA, KR, xstar, form, n_hill)
@@ -424,26 +428,36 @@ def draw_param_cloud(model, sigma_log, rng, n_samples):
                 delta=delta[None] * f(delta.shape), D=D[None] * f(D.shape))
 
 
-def cloud_xstar(model, cloud):
+def cloud_xstar(model, cloud, device=None):
     """x*, convergence flag and the batched model for every draw, by the batched Newton
     (losses.terms.steady_state_batched). The model is returned so the caller can also take
     the REDUCED (QSS) Jacobian of the same draws — that is the mu -> 0 baseline every
-    finite-mu volume is read against."""
+    finite-mu volume is read against.
+
+    `device`: where the batched model and Newton solve live. None (default) is CPU,
+    preserving prior behaviour. The returned x*/convergence arrays are always numpy
+    (`.detach().cpu().numpy()`), regardless of `device`.
+    """
     from ..losses.terms import steady_state_batched
     from ..model import BatchedRNGRN, RNGRN
 
     B = cloud["beta"].shape[0]
     proto = RNGRN(N=model.N, form=model.form, n_hill=model.n_hill, seed=0)
     bm = BatchedRNGRN([proto] * B)
+    if device is not None:
+        bm = bm.to(device)
     s = cloud["KA"] + cloud["KR"]
-    inv_sp = lambda a: torch.log(torch.expm1(torch.as_tensor(a, dtype=torch.float64)))
+    inv_sp = lambda a: torch.log(torch.expm1(torch.as_tensor(a, dtype=torch.float64,
+                                                              device=device)))
     with torch.no_grad():
         bm.theta_alpha.copy_(inv_sp(cloud["alpha"]))
         bm.theta_delta.copy_(inv_sp(cloud["delta"]))
         bm.theta_beta.copy_(inv_sp(cloud["beta"]))
-        bm.theta_D.copy_(torch.log(torch.as_tensor(cloud["D"], dtype=torch.float64)))
+        bm.theta_D.copy_(torch.log(torch.as_tensor(cloud["D"], dtype=torch.float64,
+                                                    device=device)))
         bm.theta_s.copy_(inv_sp(s))
-        bm.theta_g.copy_(torch.logit(torch.as_tensor(cloud["KA"] / s, dtype=torch.float64)))
+        bm.theta_g.copy_(torch.logit(torch.as_tensor(cloud["KA"] / s, dtype=torch.float64,
+                                                      device=device)))
     xs, conv = steady_state_batched(bm)
     return xs.detach().cpu().numpy(), np.asarray(conv.cpu().numpy(), bool), bm
 
@@ -578,9 +592,15 @@ def robustness_vs_mu(model, mus, sigma_log=0.10, n_samples=200, seed=0,
 # it empirically by halving dt.
 
 
-def gate_step_exact(model, X, GA, GR, dt, mu):
-    """Advance the gates EXACTLY over dt at frozen x. X: (N,n,n), GA/GR: (N,N,n,n)."""
-    p = _np_params(model)
+def gate_step_exact(model, X, GA, GR, dt, mu, params=None):
+    """Advance the gates EXACTLY over dt at frozen x. X: (N,n,n), GA/GR: (N,N,n,n).
+
+    `params`: a pre-computed `_np_params(model)` dict, for a caller (e.g. `simulate_lifted`)
+    that calls this every half-step and would otherwise re-derive all seven numpy copies of
+    unchanging model parameters up to 200k times. None (default) derives them here, as
+    before.
+    """
+    p = params if params is not None else _np_params(model)
     xn = np.clip(X, 0.0, None) ** p["n_hill"]                        # (N,n,n) over j
     ua = p["KA"][:, :, None, None] * xn[None]                        # (i,j,n,n)
     ur = p["KR"][:, :, None, None] * xn[None]
@@ -607,8 +627,10 @@ def gate_step_exact(model, X, GA, GR, dt, mu):
     return GAn, GRn
 
 
-def _reaction_from_gates_np(model, GA, GR):
-    p = _np_params(model)
+def _reaction_from_gates_np(model, GA, GR, params=None):
+    """`params`: a pre-computed `_np_params(model)` dict (see `gate_step_exact`); None
+    derives them here, as before."""
+    p = params if params is not None else _np_params(model)
     if p["form"] == "competitive":
         return np.einsum("ij,ijxy->ixy", p["alpha"], GA)
     return (np.einsum("ij,ijxy->ixy", p["alpha"], GA)
@@ -645,8 +667,8 @@ def simulate_lifted(model, L, mu, n=64, T=None, dt=None, seed=0, noise=1e-2, xst
     xs_t = torch.tensor(xstar, device=model.device, dtype=model.dtype)
     Jn = model.jacobian(xs_t, create_graph=False).detach().cpu().numpy()
     kg = np.linspace(1e-3, 2 * np.pi * (n // 2) / L, 2000)
-    sigd = np.array([np.max(np.real(np.linalg.eigvals(Jn - kk ** 2 * np.diag(D))))
-                     for kk in kg])
+    M = Jn[None, :, :] - kg[:, None, None] ** 2 * np.diag(D)[None, :, :]
+    sigd = np.linalg.eigvals(M).real.max(axis=1)
     sig_max = float(sigd.max())
     horizon_rate = max(abs(sig_max), 1e-12)
     jac_rate = float(np.max(np.abs(np.linalg.eigvals(Jn))))
@@ -669,18 +691,20 @@ def simulate_lifted(model, L, mu, n=64, T=None, dt=None, seed=0, noise=1e-2, xst
     gates = [GA, GR]           # closed over by reaction_np, rebound each step
 
     def reaction_np(Xr):
-        return beta + _reaction_from_gates_np(model, gates[0], gates[1]) - delta * Xr
+        return beta + _reaction_from_gates_np(model, gates[0], gates[1], params=p) - delta * Xr
 
     t0 = time.perf_counter()
     blew_up = False
     done = 0
     for step in range(nsteps):
-        gates[0], gates[1] = gate_step_exact(model, X, gates[0], gates[1], 0.5 * dt, mu)
+        gates[0], gates[1] = gate_step_exact(model, X, gates[0], gates[1], 0.5 * dt, mu,
+                                             params=p)
         X, blew_up = integrate_etdrk4_rfft(X, D, reaction_np, n, L, dt, 1)
         if blew_up or not np.all(np.isfinite(X)):
             blew_up = True
             break
-        gates[0], gates[1] = gate_step_exact(model, X, gates[0], gates[1], 0.5 * dt, mu)
+        gates[0], gates[1] = gate_step_exact(model, X, gates[0], gates[1], 0.5 * dt, mu,
+                                             params=p)
         done = step + 1
         if record_every and (step % record_every == 0):
             frames.append(X.copy())

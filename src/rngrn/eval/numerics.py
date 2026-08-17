@@ -20,7 +20,10 @@ Three integrators behind one interface, selected by SolverConfig.integrator:
                         the morphology rollout; `etdrk4` stays the untouched reference.
 
   bdf1_newton_krylov  : implicit Euler with a Newton-Krylov nonlinear solve (the
-                        validation-plan alternative). Structured stub.
+                        validation-plan alternative). NOT IMPLEMENTED — raises
+                        NotImplementedError rather than silently running etdrk4 under a
+                        different name (a run recorded with this integrator string must
+                        actually have used it).
 
 Each integrator advances the reaction-diffusion PDE d x/dt = D lap(x) + f(X), where
 `reaction_np(X)` is supplied by the caller (rollout.py builds it from the model).
@@ -189,13 +192,21 @@ def integrate_etdrk4_rfft(X0, D, reaction_np, n, L, dt, nsteps):
 
 
 def integrate_bdf1_newton_krylov(X0, D, reaction_np, n, L, dt, nsteps):
-    """Implicit-Euler (BDF1) with a Newton-Krylov nonlinear solve. STUB.
+    """Implicit-Euler (BDF1) with a Newton-Krylov nonlinear solve. NOT IMPLEMENTED.
 
     TODO(claude-code): each step solve X^{n+1} - dt(D lap + f)(X^{n+1}) = X^n with
     scipy.optimize.newton_krylov (diffusion applied spectrally inside the residual).
-    Falls back to ETDRK4 so the pipeline stays runnable.
+
+    Fails loud rather than silently running ETDRK4 under this name: a caller that selects
+    'bdf1_newton_krylov' records that string as `integrator` in the run index, and a run
+    that actually executed ETDRK4 under that label would be provenance that claims an
+    integrator which never ran.
     """
-    return integrate_etdrk4(X0, D, reaction_np, n, L, dt, nsteps)
+    raise NotImplementedError(
+        "integrate_bdf1_newton_krylov is not implemented — it previously fell back "
+        "silently to integrate_etdrk4, which left the run index recording "
+        "integrator='bdf1_newton_krylov' for a run that actually used ETDRK4. Use "
+        "integrator='etdrk4' or 'etdrk4_rfft' until the Newton-Krylov solve is written.")
 
 
 INTEGRATORS = dict(

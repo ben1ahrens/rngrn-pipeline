@@ -66,7 +66,8 @@ def turing_ok(J, D, kgrid=None, tol=1e-9):
     if kpos.size == 0:
         raise ValueError("turing_ok needs at least one k > 0 in kgrid; the k=0 mode is the "
                          "uniform mode and can never be the structured instability.")
-    sig = np.array([np.max(np.real(np.linalg.eigvals(J - k**2 * np.diag(D)))) for k in kpos])
+    M = J[None, :, :] - kpos[:, None, None] ** 2 * np.diag(D)[None, :, :]
+    sig = np.linalg.eigvals(M).real.max(axis=1)
 
     tr0 = float(np.trace(J))
     stable_uniform = sig0 < 0.0                    # STRICT
@@ -90,7 +91,7 @@ def linear_stability(model, xstar, D=None):
     `eval.lgen_eval.physical_model_from_checkpoint`, which does the conversion. None keeps
     `model.D`, correct on the dimensional path where the two coincide (D-EVID-14).
     """
-    xs_t = torch.as_tensor(np.asarray(xstar, float))
+    xs_t = torch.as_tensor(np.asarray(xstar, float), device=model.device, dtype=model.dtype)
     J = model.jacobian(xs_t, create_graph=False).detach().cpu().numpy()
     if D is None:
         D = model.D.detach().cpu().numpy()
@@ -188,7 +189,7 @@ def _model_JD(model, xstar=None, D=None):
         from ..losses.terms import steady_state
         xs, _ = steady_state(model)
     else:
-        xs = torch.as_tensor(np.asarray(xstar, float))
+        xs = torch.as_tensor(np.asarray(xstar, float), device=model.device, dtype=model.dtype)
     J = model.jacobian(xs, create_graph=False).detach().cpu().numpy()
     if D is None:
         D = model.D.detach().cpu().numpy()

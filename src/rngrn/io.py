@@ -61,10 +61,13 @@ def save_checkpoint(rdir: str, model, extra: dict | None = None):
     torch.save(payload, os.path.join(rdir, "checkpoints", "model.pt"))
 
 
-def load_checkpoint(rdir: str):
+def load_checkpoint(rdir: str, map_location="cpu"):
+    """Load a checkpoint. `map_location` defaults to 'cpu' so a checkpoint saved on a CUDA
+    host still loads on a CPU-only one; pass e.g. 'cuda' or a torch.device to override."""
     import torch
     from .model import RNGRN
-    payload = torch.load(os.path.join(rdir, "checkpoints", "model.pt"), weights_only=False)
+    payload = torch.load(os.path.join(rdir, "checkpoints", "model.pt"), weights_only=False,
+                         map_location=map_location)
     model = RNGRN(N=payload["N"], form=payload["form"], n_hill=payload["n_hill"],
                   dispersion_backend=payload.get("dispersion_backend", "eig"))
     model.load_state_dict(payload["state_dict"])

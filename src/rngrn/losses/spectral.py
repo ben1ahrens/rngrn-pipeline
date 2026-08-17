@@ -411,21 +411,219 @@ def is_ignited(parts: dict, margin: float) -> bool:
 
 
 # --------------------------------------------------------------------------------------
+# BATCHED twins — B independent restarts, one stack of tensor ops
+# --------------------------------------------------------------------------------------
+# Each function below is its serial namesake with a leading member axis: `u_star` is
+# (b, N, n, n) rather than (N, n, n), the returned term is a (b,) tensor rather than a 0-d
+# one, and each `parts` entry is a (b,) numpy array under the SAME key the serial path uses.
+# The arithmetic is unchanged term for term; only the reduction axes gain a leading b, so
+# per-member values agree with the serial ones to floating-point associativity.
+#
+# THE FAIL-LOUD GUARDS ARE UNCHANGED IN SEVERITY. A non-positive mean or std still RAISES
+# rather than degrading to a NaN — the serial contract — and a raise here loses the whole
+# batch. That is the same reach a serial raise has: neither `recover`'s Adam loop nor
+# `losses/total` catches anything but `SteadyStateError`, so a serial breach also aborts the
+# entire `recover()` call. The message names the offending GLOBAL member ids.
+
+def _members_label(members, rows) -> str:
+    """Human-readable member ids for a fail-loud message; falls back to stack rows."""
+    if members is None:
+        return f"stack row(s) {list(rows)}"
+    return f"batch member(s) {[int(members[r]) for r in rows]}"
+
+
+def raps_torch_batched(fields: torch.Tensor, L: float) -> tuple[np.ndarray, torch.Tensor]:
+    """`raps_torch` over a (b, H, W) stack. Returns (k_centers, power (b, n_bins)).
+
+    Shares `_raps_bins`' cached F-D6-1 binning, so the batched and serial forms cannot drift
+    on bin edges. The scatter accumulates along the bin axis of a (b, n_bins) buffer instead
+    of a (n_bins,) one; on CUDA `scatter_add_` uses atomics and is therefore not
+    bit-reproducible in EITHER form, batched or serial."""
+    if fields.shape[-2] != fields.shape[-1]:
+        raise ValueError(f"raps_torch_batched: fields must be square, got "
+                         f"{tuple(fields.shape)}")
+    b, n = fields.shape[0], fields.shape[-1]
+    idx, counts, k_centers = _raps_bins(n, L, fields.device, fields.dtype)
+    f = fields - fields.mean(dim=(-2, -1), keepdim=True)
+    P = torch.abs(torch.fft.fft2(f)) ** 2
+    power = torch.zeros(b, k_centers.shape[0], dtype=fields.dtype, device=fields.device)
+    power = power.scatter_add_(1, idx.unsqueeze(0).expand(b, -1), P.reshape(b, -1))
+    power = power / counts
+    power = power.clone()
+    power[:, 0] = 0.0
+    return k_centers, power
+
+
+def spectral_block_torch_batched(fields: torch.Tensor, nblk: int = 24) -> torch.Tensor:
+    """`spectral_block_torch` over a (b, H, W) stack. Returns (b, nblk, nblk).
+
+    Same arithmetic and same ORDER (normalise by the CENTRAL BLOCK's own power, then log1p,
+    then sum-normalise); every reduction stops at the leading member axis."""
+    f = fields - fields.mean(dim=(-2, -1), keepdim=True)
+    P = torch.abs(torch.fft.fftshift(torch.fft.fft2(f), dim=(-2, -1))) ** 2
+    H, W = P.shape[-2], P.shape[-1]
+    top, left = H // 2 - nblk // 2, W // 2 - nblk // 2
+    block = P[..., top:top + nblk, left:left + nblk]
+    total = block.sum(dim=(-2, -1), keepdim=True)
+    block = torch.log1p(block / total)
+    return block / block.sum(dim=(-2, -1), keepdim=True)
+
+
+def spec_shape_batched(u_star: torch.Tensor, targets: dict, cfg: SpectralConfig,
+                       members=None) -> tuple[torch.Tensor, dict]:
+    """`spec_shape` over a (b, N, n, n) stack. Returns ((b,), parts of (b,) arrays)."""
+    k_centers, power = raps_torch_batched(u_star[:, 0], targets["L"])
+    if k_centers.shape != targets["k_centers"].shape:
+        raise ValueError(
+            "u_star's spatial grid does not match the observed frame's grid — RAPS bin "
+            f"counts differ ({k_centers.shape[0]} vs {targets['k_centers'].shape[0]})")
+    band_power = power.index_select(1, targets["band_idx"].to(power.device))
+    norm = band_power.sum(dim=-1, keepdim=True)
+    bad = ~torch.isfinite(norm.reshape(-1)) | (norm.reshape(-1) <= 0.0)
+    if bool(bad.any()):
+        rows = torch.nonzero(bad).reshape(-1).tolist()
+        raise ValueError(
+            f"spec_shape_batched: u_star channel 0 carries no finite power in B_train for "
+            f"{_members_label(members, rows)} — the solved pattern has no spectral content "
+            "in the fitting band; this should have been caught by the pattern_floor gate.")
+    s = band_power / norm
+    t = targets["raps_band_target"].to(s.device).unsqueeze(0)
+    val = ((torch.log(s + 1e-300) - torch.log(t + 1e-300)) ** 2).sum(dim=-1)
+    return val, dict(spec_shape_raw=val.detach().cpu().numpy())
+
+
+def spec_aniso_batched(u_star: torch.Tensor, targets: dict, cfg: SpectralConfig,
+                       members=None) -> tuple[torch.Tensor, dict]:
+    """`spec_aniso` over a (b, N, n, n) stack. SQUARED form, as serially."""
+    blk = spectral_block_torch_batched(u_star[:, 0], cfg.nblk)
+    tgt = targets["block_target"].to(blk.device).unsqueeze(0)
+    val = ((blk - tgt) ** 2).mean(dim=(-2, -1))
+    return val, dict(spec_aniso_raw=val.detach().cpu().numpy())
+
+
+def spec_amp_mean_batched(u_star: torch.Tensor, targets: dict, cfg: SpectralConfig,
+                          members=None) -> tuple[torch.Tensor, dict]:
+    """`spec_amp_mean` over a (b, N, n, n) stack, summed over `cfg.channels`."""
+    total = u_star.new_zeros(u_star.shape[0])
+    parts: dict = {}
+    for c in cfg.channels:
+        m = u_star[:, c].mean(dim=(-2, -1))
+        bad = ~torch.isfinite(m) | (m <= 0.0)
+        if bool(bad.any()):
+            rows = torch.nonzero(bad).reshape(-1).tolist()
+            raise ValueError(
+                f"spec_amp_mean_batched: u_star channel {c} has a non-positive/non-finite "
+                f"mean for {_members_label(members, rows)} — the solved pattern left the "
+                "physical regime.")
+        term = (torch.log(m) - targets["log_mean"][c]) ** 2
+        total = total + term
+        parts[f"spec_amp_mean_c{c}"] = term.detach().cpu().numpy()
+    return total, parts
+
+
+def spec_amp_fluct_batched(u_star: torch.Tensor, targets: dict, cfg: SpectralConfig,
+                           members=None) -> tuple[torch.Tensor, dict]:
+    """`spec_amp_fluct` over a (b, N, n, n) stack, summed over `cfg.channels`."""
+    total = u_star.new_zeros(u_star.shape[0])
+    parts: dict = {}
+    for c in cfg.channels:
+        s = u_star[:, c].reshape(u_star.shape[0], -1).std(dim=-1)
+        bad = ~torch.isfinite(s) | (s <= 0.0)
+        if bool(bad.any()):
+            rows = torch.nonzero(bad).reshape(-1).tolist()
+            raise ValueError(
+                f"spec_amp_fluct_batched: u_star channel {c} has a non-positive/non-finite "
+                f"std for {_members_label(members, rows)} — flat or invalid channel reached "
+                "the spectral terms.")
+        term = (torch.log(s) - targets["log_std"][c]) ** 2
+        total = total + term
+        parts[f"spec_amp_fluct_c{c}"] = term.detach().cpu().numpy()
+    return total, parts
+
+
+def real_moments_batched(u_star: torch.Tensor, targets: dict, cfg: SpectralConfig,
+                         members=None) -> tuple[torch.Tensor, dict]:
+    """`real_moments` over a (b, N, n, n) stack, summed over `cfg.channels`."""
+    total = u_star.new_zeros(u_star.shape[0])
+    parts: dict = {}
+    for c in cfg.channels:
+        v = u_star[:, c] - u_star[:, c].mean(dim=(-2, -1), keepdim=True)
+        skew = (v ** 3).mean(dim=(-2, -1)) / (
+            (v ** 2).mean(dim=(-2, -1)).clamp_min(1e-300) ** 1.5)
+        term = (skew - targets["skew"][c]) ** 2
+        total = total + term
+        parts[f"real_moments_c{c}"] = term.detach().cpu().numpy()
+    return total, parts
+
+
+_TERM_FNS_BATCHED = dict(spec_shape=spec_shape_batched, spec_aniso=spec_aniso_batched,
+                         spec_amp_mean=spec_amp_mean_batched,
+                         spec_amp_fluct=spec_amp_fluct_batched,
+                         real_moments=real_moments_batched)
+if tuple(_TERM_FNS_BATCHED) != SPECTRAL_TERM_KEYS:
+    # Import-time, because a drift here would show up as a silently missing term rather
+    # than an error: `losses/total.py` keys its NaN placeholders off SPECTRAL_TERM_KEYS.
+    raise RuntimeError(
+        f"batched spectral term table {tuple(_TERM_FNS_BATCHED)} does not match the serial "
+        f"one {SPECTRAL_TERM_KEYS} — the two must stay in lockstep, in the same order")
+
+
+def spectral_terms_batched(u_star: torch.Tensor, targets: dict, cfg: SpectralConfig,
+                           members=None) -> tuple[dict, dict]:
+    """`spectral_terms` over a (b, N, n, n) stack. Returns (term_vals of (b,) tensors,
+    parts of (b,) numpy arrays). `members` labels the stack's rows with their global batch
+    member ids, for fail-loud messages only."""
+    term_vals: dict = {}
+    parts: dict = {}
+    for name, fn in _TERM_FNS_BATCHED.items():
+        val, p = fn(u_star, targets, cfg, members=members)
+        term_vals[name] = val
+        parts.update(p)
+    return term_vals, parts
+
+
+def is_ignited_batched(parts: dict, margin: float) -> np.ndarray:
+    """Per-member `is_ignited`: a (B,) bool array from the (B,) batched hinge diagnostics.
+
+    COSTS NO EXTRA SYNC. `losses.terms.turing_hinges_split_batched` already materialises
+    `sig_max_pos` on the host as a numpy array, and `compute_terms_batched` already
+    materialises `ss_converged`; the ignition decision is therefore taken on quantities that
+    have crossed the device boundary anyway. Selecting the ignited subset needs an integer
+    index list, which is the one host-side quantity the batched solver cannot avoid.
+
+    Raises KeyError if `sig_max_pos` is absent, for the same reason the serial function does:
+    that means `split_hinges=False`, a misconfiguration for the spectral path, not a silent
+    "not ignited"."""
+    if "sig_max_pos" not in parts:
+        raise KeyError(
+            "is_ignited_batched requires parts['sig_max_pos'] (from "
+            "losses.terms.turing_hinges_split_batched, via losses.total.compute_terms_batched "
+            "with split_hinges=True). Its absence means split hinges are off for this run — a "
+            "misconfiguration, not a silent 'not ignited'.")
+    conv = np.asarray(parts["ss_converged"], dtype=bool)
+    return conv & (np.asarray(parts["sig_max_pos"], dtype=float) > margin)
+
+
+# --------------------------------------------------------------------------------------
 # wiring context (unit U4, losses/total.py::compute_terms)
 # --------------------------------------------------------------------------------------
 @dataclass(frozen=True)
 class SpectralContext:
-    """What `losses.total.compute_terms` needs to attempt the spectral terms for ONE
-    restart. Built by `recover.py`: `targets`/`cfg` are constructed ONCE per `recover()`
-    call (the observed frame does not change across restarts); `solver` is PER-RESTART
-    (`forward.PatternSolver` owns per-restart warm-start state, so it cannot be shared
-    across restarts or with the batched path — see the batched refusal in
-    `losses/total.py::compute_terms_batched`).
+    """What `losses.total` needs to attempt the spectral terms. Built by `recover.py`:
+    `targets`/`cfg` are constructed ONCE per `recover()` call (the observed frame does not
+    change across restarts); `solver` owns the warm-start state and is therefore per-run.
 
     `solver` is typed `object` rather than imported from `forward.py` to avoid this
-    (recovery-side) module depending on the forward-solve module; `compute_terms` only
-    ever calls `.solve() -> (u_star | None, reason)` on it, so a test stub satisfying that
-    duck-typed interface is a legal `solver`.
+    (recovery-side) module depending on the forward-solve module. The duck-typed interface
+    depends on which assembler consumes the context, and only ONE of the two is ever called:
+
+      * serial (`compute_terms`)  — `forward.PatternSolver`, one per restart (it owns that
+        restart's warm start), called as `.solve() -> (u_star | None, reason)`;
+      * batched (`compute_terms_batched`) — `forward.BatchedPatternSolver`, ONE for the whole
+        batch (it owns per-MEMBER warm state keyed by global member index), called as
+        `.solve_subset(members, xstar_batch) -> (u_stack | None, ok_members, reasons)`.
+
+    A test stub satisfying whichever method its assembler calls is a legal `solver`.
     """
     solver: object
     targets: dict

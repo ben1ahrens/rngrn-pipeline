@@ -23,6 +23,15 @@ The CUDA integrator measures 3.25 ms/ETDRK4-step at 512^2 fp64 (~21x the numpy p
 policy. Amortised per-Adam-step cost under warm relaxing is still UNMEASURED; the
 warm_max_chunks budget cap is UNCALIBRATED.
 
+The module carries TWO solvers. ``PatternSolver`` is the serial one described above and
+remains the reference implementation; ``BatchedPatternSolver`` (bottom of the file) adds a
+restart/member axis over a ``model.BatchedRNGRN``, which is what lets a spectral run train
+B restarts at once on the GPU. The batched relax is one B-wide ETDRK4 stack; the Newton
+polish and the backward adjoint LOOP over the ignited members, calling the D1-verified
+``newton_polish`` / ``solve_adjoint`` unchanged. Measured split of a batched solve at
+32^2/B=3: relax 30 %, Newton 40 %, adjoint 30 %; at 64^2/B=3 it is 10 / 75 / 15 — so the
+per-member loop, not the relax, is what a further optimisation has to attack.
+
 Nothing here reads the observed frame or any answer-key quantity: the solver consumes
 only the model's own parameters and grid geometry supplied by the caller.
 """
@@ -32,12 +41,12 @@ import numpy as np
 import torch
 
 from .losses.terms import steady_state
-from .etdrk4_torch import (_torch_reaction_builder, integrate_etdrk4_rfft_torch,
-                           torch_half_coeffs)
-from .eval.numerics import integrate_etdrk4_rfft, _spectral_k2
+from .etdrk4_torch import (_phi_contour_torch, _torch_reaction_builder,
+                           integrate_etdrk4_rfft_torch, torch_half_coeffs)
+from .eval.numerics import integrate_etdrk4_rfft, _spectral_k2, _spectral_k2_half
 from .eval.rollout import _reaction_np_builder
 from . import observables as obs
-from .model import RNGRN, THETA_NAMES
+from .model import RNGRN, THETA_NAMES, _reaction_raw
 
 # Sanity tripwire on the backward adjoint solve, NOT a solver knob: the refinement loop
 # targets 1e-10 and D1 measured 2.3e-12-6.1e-12 at the committed 96^2 record
@@ -866,3 +875,531 @@ class PatternSolver:
         self.last_payload = payload
         out = PatternSolve.apply(payload, *(getattr(model, nm) for nm in THETA_NAMES))
         return self._finish(out, "ok")
+
+
+# ======================================================================================
+# BATCHED forward solve — a restart (member) axis over the SAME algebra
+# ======================================================================================
+# Everything below is additive. The serial path above is the REFERENCE implementation and
+# is not reachable from here: nothing in this section is called by `PatternSolver`,
+# `PatternSolve`, or any free function they use.
+#
+# WHAT IS BATCHED AND WHAT IS NOT (the split is measured, not assumed — see the unit's
+# report and the docstrings below):
+#
+#   * the ETDRK4 relax, which is the dominant cost of a solve, runs as ONE (b, N, n, n)
+#     stack through `integrate_etdrk4_rfft_torch`'s existing batch axis, with per-member
+#     dt and per-member D carried in the ETDRK4 coefficients;
+#   * the Newton polish and the backward adjoint LOOP over the ignited members, calling
+#     the D1-verified `newton_polish` / `solve_adjoint` UNCHANGED on a single-member view.
+#     Each member's polish is an independent minimal-norm least-squares solve, so a loop
+#     is exact by construction; a (b,)-batched LSMR would have to re-derive the D-FFT-10
+#     stopping and refinement semantics per member and is not worth that risk for a cost
+#     that measurement puts well below the relax. The ONE thing that is batched in the
+#     backward is the final dF/dtheta vjp: the per-member adjoints are stacked and hit the
+#     batched parameters in a single `torch.autograd.grad`.
+#
+# Member identity is stable throughout: `idx` is a tensor of GLOBAL member indices into the
+# `BatchedRNGRN`, and nothing here reorders the batch.
+
+
+def batched_reaction_fields(model, u: torch.Tensor, idx: torch.Tensor) -> torch.Tensor:
+    """Pointwise reaction on a (b, N, n, n) stack, member ``idx[j]``'s parameters on slice j.
+
+    Differentiable w.r.t. BOTH ``u`` and the batched model's raw parameters: the parameters
+    are pulled with ``index_select``, so a gradient lands on exactly the selected members'
+    rows of the (B, ...) parameter tensors and is zero elsewhere.
+
+    `model.BatchedRNGRN.reaction` cannot serve here — it takes ONE state vector per member,
+    (B, N), and refuses per-pixel states. `_reaction_raw`'s broadcasting contract explicitly
+    permits the caller to broadcast the parameters itself, which is what the `[:, None, None]`
+    inserts do: (b, 1, 1, N, N) against a (b, n, n, N) field. Elementwise-identical to the
+    serial `reaction_fields` for each member (same ops, same reduction axis and order); only
+    the broadcast shape differs.
+    """
+    x = u.permute(0, 2, 3, 1)                                    # (b, n, n, N)
+    KA = model.KA.index_select(0, idx)[:, None, None]            # (b, 1, 1, N, N)
+    KR = model.KR.index_select(0, idx)[:, None, None]
+    alpha = model.alpha.index_select(0, idx)[:, None, None]
+    beta = model.beta.index_select(0, idx)[:, None, None]        # (b, 1, 1, N)
+    delta = model.delta.index_select(0, idx)[:, None, None]
+    f = _reaction_raw(KA, KR, alpha, beta, delta, x, model.form, model.n_hill)
+    return f.permute(0, 3, 1, 2)                                 # (b, N, n, n)
+
+
+def make_spatial_F_batched(model, idx: torch.Tensor, n: int, L: float,
+                           k2h: torch.Tensor | None = None):
+    """`make_spatial_F` with a leading member axis: F(u) = D lap u + f(u) on (b, N, n, n).
+
+    Same spectral Laplacian (rfft2, no stencil) and the same differentiability contract —
+    the closure must stay differentiable through the batched model's parameter properties,
+    because the backward's dF/dtheta vjp runs through it.
+    """
+    if k2h is None:
+        KX, KY = _half_k_grids(n, L)
+        k2h = torch.from_numpy(KX**2 + KY**2).to(model.device)
+
+    def spatial_F(u: torch.Tensor) -> torch.Tensor:
+        lap = torch.fft.irfft2(-k2h * torch.fft.rfft2(u), s=(n, n))
+        D = model.D.index_select(0, idx)[:, :, None, None]        # (b, N, 1, 1)
+        return D * lap + batched_reaction_fields(model, u, idx)
+
+    return spatial_F
+
+
+def _member_F(model, member: int, n: int, L: float, k2h: torch.Tensor):
+    """A SERIAL-shaped ((N, n, n) -> (N, n, n)) F closure for one member of a batched model.
+
+    This is what lets the Newton polish and the adjoint reuse `newton_polish` /
+    `solve_adjoint` verbatim: they are written against a single field and a single set of
+    parameters, and the wrapper hands them exactly that while the gradient still flows into
+    the batched parameter tensors' row `member`.
+    """
+    idx = torch.as_tensor([int(member)], dtype=torch.long, device=model.device)
+    Fb = make_spatial_F_batched(model, idx, n, L, k2h=k2h)
+    return lambda u: Fb(u.unsqueeze(0)).squeeze(0)
+
+
+def _batched_reaction_builder(model, idx: torch.Tensor):
+    """`etdrk4_torch._torch_reaction_builder` with the batch axis carrying MEMBERS.
+
+    The serial builder's batch axis is a stack of initial conditions sharing ONE member's
+    parameters; here every slice has its own. Same competitive arithmetic (the einsum
+    contractions are term-for-term the serial ones with the parameter tensors gaining a
+    leading b), same DETACHED parameters — the relax is gradient-free by design; gradients
+    come from the IFT adjoint, never from backprop through the integrator.
+
+    nc1 is refused loudly for the same reason the serial builder refuses it: a silent
+    half-port would poison the numbers rather than fail.
+    """
+    if model.form != "competitive":
+        raise NotImplementedError(
+            f"batched torch ETDRK4 reaction supports form='competitive' only, got "
+            f"{model.form!r} — same restriction as etdrk4_torch._torch_reaction_builder "
+            "(ported from diagnostic D2); port nc1 with its own equivalence check first")
+    KA = model.KA.detach().index_select(0, idx)              # (b, N, N)
+    KR = model.KR.detach().index_select(0, idx)
+    alpha = model.alpha.detach().index_select(0, idx)
+    beta = model.beta.detach().index_select(0, idx)          # (b, N)
+    delta = model.delta.detach().index_select(0, idx)
+    n_h = model.n_hill
+    KAR = KA + KR
+    aKA = alpha * KA
+
+    def reaction_t(X: torch.Tensor) -> torch.Tensor:         # (b, N, n, n)
+        xn = torch.clamp(X, min=0.0) ** n_h
+        denom = 1.0 + torch.einsum("bij,bjxy->bixy", KAR, xn)
+        prod = torch.einsum("bij,bjxy->bixy", aKA, xn) / denom
+        return beta[:, :, None, None] + prod - delta[:, :, None, None] * X
+
+    return reaction_t
+
+
+def _half_coeffs_batched(D: np.ndarray, n: int, L: float, dt: np.ndarray,
+                         device: torch.device):
+    """Per-member ETDRK4 half-spectrum coefficients: (b, N, n, n//2+1) each.
+
+    `torch_half_coeffs` builds one member's set from a scalar dt and a (N,) D. Batched, dt
+    AND D are per member (dt = 0.2/|eig(J)|_max is recomputed per solve from that member's
+    own theta), so `Lop` gains a leading b and dt enters as a (b, 1, 1, 1) tensor.
+    `_phi_contour_torch` is shape-agnostic — every expression in it is elementwise over
+    `Lop` with the contour on a trailing axis — so it is reused unchanged rather than
+    re-derived.
+
+    COST NOTE, deliberate: the contour integral materialises a (b, N, n, n//2+1, 32)
+    complex128 intermediate, i.e. ~58 MB at b=8/n=96 and ~230 MB at b=32/n=96, once per
+    batched solve (dt and D move every Adam step, so it cannot be cached). That is the
+    price of one B-wide relax; chunking the contour would trade it back for kernel
+    launches and is not done here.
+    """
+    k2 = torch.from_numpy(_spectral_k2_half(n, L)).to(device)          # (n, n//2+1)
+    D_t = torch.as_tensor(np.asarray(D), device=device, dtype=k2.dtype)  # (b, N)
+    Lop = -D_t[:, :, None, None] * k2                                   # (b, N, n, nh)
+    dt_t = torch.as_tensor(np.asarray(dt), device=device,
+                           dtype=k2.dtype).reshape(-1, 1, 1, 1)
+    return _phi_contour_torch(Lop, dt_t)
+
+
+def _kstar_of_torch_batched(fields: torch.Tensor, L: float) -> torch.Tensor:
+    """`observables.kstar_of_torch` over a (b, n, n) stack, returning a (b,) DEVICE tensor.
+
+    Shares `observables._raps_torch_bins`' cached binning, so the two cannot drift on bin
+    edges — this is the batched twin of `observables.raps_torch`, not a second binning.
+
+    ONE arithmetic difference, and it is why this is documented rather than assumed
+    equivalent: the serial centroid sums the 5-bin slice `power[lo:hi]`, where
+    `lo = max(1, pk-2)` and `hi = min(nbins, pk+3)`; the batched form multiplies by a
+    boolean mask of exactly those bins and sums the whole vector. The selected terms and
+    their order are identical and the rest are exact zeros, so the values agree to
+    floating-point associativity (~1e-16 relative), not bit-for-bit. The only consumer is
+    the saturation detector's flatness ratio at flat_tol=1e-4, which is five orders of
+    magnitude above that.
+    """
+    f = fields - fields.mean(dim=(-2, -1), keepdim=True)
+    b, n = f.shape[0], f.shape[-1]
+    idx, counts, kcent = obs._raps_torch_bins(n, L, f.device, f.dtype)
+    P = torch.abs(torch.fft.fft2(f)) ** 2
+    power = torch.zeros(b, kcent.shape[0], device=f.device, dtype=f.dtype)
+    power = power.scatter_add_(1, idx.unsqueeze(0).expand(b, -1), P.reshape(b, -1))
+    power = power / counts
+    power[:, 0] = 0.0                                              # drop k=0
+    nb = kcent.shape[0]
+    pk = torch.argmax(power, dim=1, keepdim=True)                  # (b, 1)
+    bins = torch.arange(nb, device=f.device).unsqueeze(0)          # (1, nb)
+    sel = (bins >= torch.clamp(pk - 2, min=1)) & (bins < torch.clamp(pk + 3, max=nb))
+    w = power * sel
+    return (kcent.unsqueeze(0) * w).sum(dim=1) / (w.sum(dim=1) + 1e-12)
+
+
+def relax_to_pattern_torch_batched(model, idx: torch.Tensor, xstar: np.ndarray, n: int,
+                                   L: float, dt: np.ndarray, seeds, device: torch.device,
+                                   noise: float = 1e-2, chunk: int = 500,
+                                   max_chunks: int = 400, flat_tol: float = 1e-4,
+                                   X0: torch.Tensor | None = None):
+    """`relax_to_pattern_torch` over a member axis. Returns (list of (N, n, n) or None,
+    list of reason-or-None), both length b, in `idx` order.
+
+    Same initial condition as the serial paths (numpy rng, the member's own seed, same
+    x* + noise expression), the same D2-verified integrator, and the SAME saturation
+    detector — channel-0 amplitude and k* flat to `flat_tol` over 5 consecutive chunks —
+    evaluated PER MEMBER.
+
+    SNAPSHOT-ON-FINISH, not stop-on-finish. The stack integrates until every member has
+    finished or `max_chunks` is exhausted, but a member's returned field is the one it held
+    at the chunk where ITS detector first fired. That is exactly what the serial call would
+    have returned for that member; carrying it along afterwards costs integrator work for a
+    field nobody reads, which is the price of one B-wide relax and is why the stack's cost
+    is set by its SLOWEST member. Freezing a finished member instead would need a per-member
+    mask inside the integrator, which lives in a module this unit does not own.
+
+    FAILURE IS PER MEMBER, not per stack. `integrate_etdrk4_rfft_torch`'s own `blew` flag is
+    an `all()` over the whole stack and is deliberately ignored here in favour of a
+    per-member finiteness reduction: one member going non-finite cannot reach another (every
+    op is per-member over the trailing field axes), so it is recorded as that member's
+    failure and the rest continue. A member that never saturates gets the same
+    "no saturation" verdict the serial path raises.
+
+    Returns reasons "blew_up" / "no_saturation" for failed members, None for finished ones;
+    the CALLER decides whether either is fatal (as with the serial function).
+    """
+    b = int(idx.shape[0])
+    D = model.D.detach().index_select(0, idx).cpu().numpy()          # (b, N)
+    reaction_t = _batched_reaction_builder(model, idx)
+    coeffs = _half_coeffs_batched(D, n, L, dt, device)
+    if X0 is None:
+        N = int(model.N)
+        X_np = np.empty((b, N, n, n))
+        for j, s in enumerate(seeds):
+            rng = np.random.default_rng(int(s))
+            X_np[j] = xstar[j][:, None, None] + noise * rng.standard_normal((N, n, n))
+        X = torch.from_numpy(X_np).to(device)
+    else:
+        X = X0.detach().to(device).clone()
+
+    out: list = [None] * b
+    reasons: list = [None] * b
+    done = np.zeros(b, dtype=bool)
+    amps: list = []
+    ks: list = []
+    for _ in range(max_chunks):
+        # `dt` is carried by `coeffs`; integrate_etdrk4_rfft_torch takes the argument for
+        # signature parity only and never reads it (etdrk4_torch.py). Passing the
+        # per-member dt keeps the call site honest about which dt the coefficients hold.
+        X, _blew_stack = integrate_etdrk4_rfft_torch(X, reaction_t, n, dt, chunk, coeffs)
+        ch0 = X[:, 0].detach()
+        # ONE device->host transfer per chunk for the whole stack: amplitude, k*, finiteness.
+        stats = torch.stack([
+            ch0.std(dim=(-2, -1), correction=0),
+            _kstar_of_torch_batched(ch0, L),
+            torch.isfinite(X.detach()).reshape(b, -1).all(dim=1).to(ch0.dtype),
+        ]).cpu().numpy()
+        amps.append(stats[0]); ks.append(stats[1])
+        finite = stats[2] > 0.5
+        for j in range(b):
+            if done[j]:
+                continue
+            if not finite[j]:
+                done[j] = True
+                reasons[j] = "blew_up"
+                continue
+            if len(amps) < 5:
+                continue
+            a = np.array([amps[-i][j] for i in range(1, 6)])
+            k = np.array([ks[-i][j] for i in range(1, 6)])
+            if ((a.max() - a.min()) / a.mean() < flat_tol
+                    and (k.max() - k.min()) / k.mean() < flat_tol):
+                out[j] = X[j].detach().clone()
+                done[j] = True
+        if done.all():
+            break
+    for j in range(b):
+        if out[j] is None and reasons[j] is None:
+            reasons[j] = "no_saturation"
+    return out, reasons
+
+
+class BatchedPatternSolve(torch.autograd.Function):
+    """`PatternSolve` over a member axis: u*(theta) for b ignited members as one node.
+
+    Forward returns the DETACHED (b, N, n, n) solved stack. Backward is the same IFT chain,
+    with the split this section's header states: ONE minimal-norm adjoint solve PER MEMBER
+    (a loop over `solve_adjoint`, unchanged — each member's adjoint system is independent,
+    so a loop is exact and inherits D-FFT-10's verified semantics rather than re-deriving
+    them), then a SINGLE batched dL/dtheta = -lam^T dF/dtheta vjp through the batched F
+    closure, which scatters the gradient onto exactly the solved members' rows of the
+    (B, ...) parameter tensors.
+
+    The adjoint residual tripwire is applied PER MEMBER and raises on the first breach, with
+    the offending member named. This is the same severity as the serial path: a serial
+    adjoint breach also propagates out of recover()'s Adam loop (nothing catches it), so
+    batching does not turn a per-restart failure into a run failure — it was already one.
+    """
+
+    @staticmethod
+    def forward(ctx, payload, theta_s, theta_g, theta_alpha, theta_delta, theta_beta,
+                theta_D):
+        ctx.payload = payload
+        return payload["u_star"].clone()
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        p = ctx.payload
+        model, u_star, idx = p["model"], p["u_star"], p["idx"]
+        n, L = p["n"], p["L"]
+        members = p["members"]
+        with torch.enable_grad():
+            lams = []
+            worst = 0.0
+            for j, mem in enumerate(members):
+                F_j = _member_F(model, mem, n, L, p["k2h"])
+                lam, adj_res = solve_adjoint(
+                    F_j, u_star[j], grad_out[j].contiguous(), p["k2_full"],
+                    p["D_np"][j], float(p["gamma"][j]),
+                    k2_dev=p["k2_dev"], D_dev=p["D_dev"][j])
+                if adj_res > _ADJOINT_RESIDUAL_TRIPWIRE:
+                    raise RuntimeError(
+                        f"adjoint solve stalled at relative residual {adj_res:.2e} for "
+                        f"batch member {mem} (tripwire {_ADJOINT_RESIDUAL_TRIPWIRE:g}) — the "
+                        f"gradient would be biased by that order (D-FFT-10). Refusing to "
+                        f"hand it to the optimiser.")
+                worst = max(worst, adj_res)
+                lams.append(lam.reshape(u_star[j].shape))
+            p["last_adjoint_residual"] = worst
+            lam_stack = torch.stack(lams)
+            F_fn = make_spatial_F_batched(model, idx, n, L, k2h=p["k2h"])
+            params = [getattr(model, nm) for nm in THETA_NAMES]
+            Fv = F_fn(u_star)          # u_star fixed; graph runs through theta only
+            g_theta = torch.autograd.grad(Fv, params, grad_outputs=-lam_stack)
+        return (None,) + tuple(g_theta)
+
+
+class BatchedPatternSolver:
+    """`PatternSolver` with a restart (member) axis over a `model.BatchedRNGRN`.
+
+    Same state machine, same knobs, same skip/fail vocabulary — "ok" / "solve_failed" /
+    "not_patterned" — evaluated PER MEMBER, and the same warm-start policy. Three things
+    differ, all forced by the member axis and none of them a change of meaning:
+
+    1. **Ignition is per member**, so the caller passes the member indices to solve for.
+       `solve_subset` solves ONLY those, returning the stack of the ones that succeeded plus
+       a reason per member that did not. Members are never reordered: `members` are GLOBAL
+       indices into the batched model and the warm-state store is keyed by them, so a lane's
+       identity is stable for the whole run and a member that ignites at step 300 starts
+       from a fresh relax exactly as a serial restart would.
+    2. **The steady state is supplied, not recomputed.** `losses.total.compute_terms_batched`
+       has already solved it for the whole batch this step; the serial `PatternSolver` calls
+       `losses.terms.steady_state` itself and gets the same value the serial `compute_terms`
+       computed a moment earlier. Passing it in removes that duplicate solve without changing
+       which x* the relax starts from.
+    3. **Two relax passes at most per call.** Members that hold warm state take the short
+       warm re-relax first (warm_mode="relax"); those that fail it join the members with no
+       warm state in a single fresh full relax. That is the serial fall-through, batched: at
+       steady state after the first step, the fresh pass is empty.
+
+    `warm_mode` accepts the same two values as `PatternSolver` and carries the same meaning;
+    "relax" is the training policy for the reason stated there (translation-invariant losses,
+    and Newton-only warm starts measured pathological at Adam-scale theta displacement).
+    """
+
+    #: Newton convergence requirement on ||F||/||u|| — the serial value, verbatim.
+    CONVERGENCE_TOL = PatternSolver.CONVERGENCE_TOL
+
+    def __init__(self, model, n: int, L: float, seeds, noise: float = 1e-2,
+                 chunk: int = 500, max_chunks: int = 400, flat_tol: float = 1e-4,
+                 device: str | torch.device | None = None, warm_mode: str = "newton",
+                 warm_max_chunks: int = 40):
+        self.model = model
+        self.B = int(model.B)
+        self.seeds = [int(s) for s in seeds]
+        if len(self.seeds) != self.B:
+            raise ValueError(
+                f"BatchedPatternSolver needs one seed per member: got {len(self.seeds)} "
+                f"seeds for B={self.B} members")
+        self.n = int(n)
+        self.L = float(L)
+        self.noise = noise
+        self.chunk = chunk
+        self.max_chunks = max_chunks
+        self.flat_tol = flat_tol
+        self.device = torch.device(device) if device is not None else model.device
+        if self.device.type != model.device.type:
+            raise ValueError(
+                f"BatchedPatternSolver device={self.device} but the model lives on "
+                f"{model.device} — the spatial F closure mixes model parameters and field "
+                "tensors, so they must share a device.")
+        if warm_mode not in ("newton", "relax"):
+            raise ValueError(f"warm_mode must be 'newton' or 'relax', got {warm_mode!r}")
+        self.warm_mode = warm_mode
+        self.warm_max_chunks = int(warm_max_chunks)   # UNCALIBRATED budget cap
+        self.k2_full = _spectral_k2(self.n, self.L)
+        KX, KY = _half_k_grids(self.n, self.L)
+        self._k2h = torch.from_numpy(KX**2 + KY**2).to(self.device)
+        self._kxy = (torch.from_numpy(KX).to(self.device),
+                     torch.from_numpy(KY).to(self.device))
+        self._k2_full_dev = torch.from_numpy(self.k2_full).to(self.device)
+        # PER-MEMBER warm state, keyed by GLOBAL member index and persisting across Adam
+        # steps. None = no warm start (never solved, or cleared by a failure).
+        self._warm: list = [None] * self.B
+        self.last_residual = np.full(self.B, np.nan)
+        self.last_reason: list = ["never_solved"] * self.B
+
+    # -- internals -------------------------------------------------------------------
+
+    def _newton_member(self, member: int, u0: torch.Tensor, gamma: float,
+                       D_np: np.ndarray):
+        """One member's Newton polish, through the UNCHANGED D1-verified `newton_polish`."""
+        F_fn = _member_F(self.model, member, self.n, self.L, self._k2h)
+        modes_of = lambda uu: list(                                        # noqa: E731
+            translation_modes(uu, self.n, self.L, kxy=self._kxy))
+        D_dev = self.model.D.detach()[member]
+        return newton_polish(F_fn, u0, modes_of, self.k2_full, D_np, gamma,
+                             k2_dev=self._k2_full_dev, D_dev=D_dev)
+
+    def _relax(self, members, xstar: np.ndarray, dt: np.ndarray,
+               X0: torch.Tensor | None = None, max_chunks: int | None = None):
+        """Batched ETDRK4 relax for `members`. X0 = warm re-relax; None = fresh from
+        x* + noise. Returns (list of (N, n, n) or None, list of reason-or-None)."""
+        mc = self.max_chunks if max_chunks is None else max_chunks
+        idx = torch.as_tensor(list(members), dtype=torch.long, device=self.device)
+        return relax_to_pattern_torch_batched(
+            self.model, idx, xstar, self.n, self.L, dt,
+            [self.seeds[m] for m in members], self.device, noise=self.noise,
+            chunk=self.chunk, max_chunks=mc, flat_tol=self.flat_tol, X0=X0)
+
+    # -- the state machine -----------------------------------------------------------
+
+    def solve_subset(self, members, xstar_batch: torch.Tensor):
+        """Solve the patterned steady state for `members` (global indices, ascending).
+
+        `xstar_batch` is the (B, N) DETACHED homogeneous steady state this step's batched
+        loss already computed — the same quantity the serial solver takes from
+        `losses.terms.steady_state`.
+
+        Returns ``(u_stack, ok_members, reasons)``:
+          * ``u_stack``  (b_ok, N, n, n) differentiable-through-IFT, or None if none solved;
+          * ``ok_members`` the global member indices in `u_stack`'s row order;
+          * ``reasons``  {member: "solve_failed" | "not_patterned"} for the rest.
+        """
+        members = [int(m) for m in members]
+        if not members:
+            return None, [], {}
+        model = self.model
+        xs_np = xstar_batch.detach().cpu().numpy()
+        # |eig(J)|_max on the HOST, per member: J is (B, N, N) with N=3 and
+        # `torch.linalg.eigvals` has no batched cuSOLVER kernel for small non-symmetric
+        # matrices (CLAUDE.md §7). numpy's LAPACK over the stack is microseconds and gives
+        # the same values the serial path's per-matrix call does.
+        J = model.jacobian(xstar_batch, create_graph=False).detach().cpu().numpy()
+        rates = np.abs(np.linalg.eigvals(J)).max(axis=-1)                  # (B,)
+        bad = [m for m in members if not (np.isfinite(rates[m]) and rates[m] > 0.0)]
+        if bad:
+            raise RuntimeError(
+                f"|eig(J)|_max is not a usable timescale for batch member(s) {bad}: "
+                f"{rates[bad]!r}")
+        D_all = model.D.detach().cpu().numpy()                             # (B, N)
+        reasons: dict = {}
+
+        # ---- pass 1: warm re-relax for members that hold warm state --------------------
+        polished: dict = {}                                                # member -> u
+        pending: list = []
+        warm_members = [m for m in members if self._warm[m] is not None]
+        fresh_members = [m for m in members if self._warm[m] is None]
+        if warm_members:
+            if self.warm_mode == "newton":
+                for m in warm_members:
+                    u, res = self._newton_member(m, self._warm[m], float(rates[m]),
+                                                 D_all[m])
+                    if res <= self.CONVERGENCE_TOL:
+                        polished[m] = (u, res)
+                    else:
+                        pending.append(m)
+            else:
+                X0 = torch.stack([self._warm[m] for m in warm_members])
+                fields, _why = self._relax(
+                    warm_members, xs_np[warm_members],
+                    0.2 / rates[warm_members], X0=X0,
+                    max_chunks=self.warm_max_chunks)
+                for j, m in enumerate(warm_members):
+                    # A budget-exhausted or blown-up warm relax is NOT failure: it falls
+                    # through to the fresh pass, exactly as the serial path does.
+                    if fields[j] is None:
+                        pending.append(m)
+                        continue
+                    u, res = self._newton_member(m, fields[j], float(rates[m]), D_all[m])
+                    if res <= self.CONVERGENCE_TOL:
+                        polished[m] = (u, res)
+                    else:
+                        pending.append(m)
+
+        # ---- pass 2: fresh full relax for everyone the warm pass did not settle --------
+        rest = sorted(fresh_members + pending)
+        if rest:
+            fields, _why = self._relax(rest, xs_np[rest], 0.2 / rates[rest])
+            for j, m in enumerate(rest):
+                if fields[j] is None:
+                    reasons[m] = "solve_failed"
+                    continue
+                u, res = self._newton_member(m, fields[j], float(rates[m]), D_all[m])
+                if res > self.CONVERGENCE_TOL:
+                    reasons[m] = "solve_failed"
+                else:
+                    polished[m] = (u, res)
+
+        # ---- patterned-ness, per member ------------------------------------------------
+        ok_members: list = []
+        us: list = []
+        for m in sorted(polished):
+            u, res = polished[m]
+            self.last_residual[m] = float(res)
+            # the eval/rollout.py floor (rollout.py:234), D-FFT-9 closure 2
+            pattern_floor = max(1e-3, 0.02 * abs(float(xs_np[m][0])))
+            amp = float(u[0].std())
+            if not np.isfinite(amp):
+                reasons[m] = "solve_failed"
+            elif amp <= pattern_floor:
+                reasons[m] = "not_patterned"
+            else:
+                ok_members.append(m)
+                us.append(u.detach())
+        for m in members:
+            self.last_reason[m] = "ok" if m in ok_members else reasons.get(m, "solve_failed")
+        # warm state: kept only for members that produced a usable pattern. A failed or
+        # homogeneous member is cleared, for the serial path's reason — a homogeneous field
+        # would re-converge homogeneous forever as a warm start.
+        for m in members:
+            self._warm[m] = None
+        if not ok_members:
+            return None, [], reasons
+        u_stack = torch.stack(us)
+        for j, m in enumerate(ok_members):
+            self._warm[m] = u_stack[j].clone()
+        idx = torch.as_tensor(ok_members, dtype=torch.long, device=self.device)
+        payload = dict(model=model, idx=idx, members=ok_members, u_star=u_stack,
+                       n=self.n, L=self.L, k2_full=self.k2_full,
+                       D_np=D_all[ok_members], gamma=rates[ok_members],
+                       k2h=self._k2h, k2_dev=self._k2_full_dev,
+                       D_dev=model.D.detach().index_select(0, idx))
+        self.last_payload = payload
+        out = BatchedPatternSolve.apply(
+            payload, *(getattr(model, nm) for nm in THETA_NAMES))
+        return out, ok_members, reasons

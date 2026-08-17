@@ -179,7 +179,8 @@ def _clip_grad_norm_per_member(params, max_norm, B):
 def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
                       frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
                       adam_steps, adam_lr, grad_clip, tau, jac_floor, dev, verbose,
-                      term_kw, kstar_obs_init=None, history=None):
+                      term_kw, kstar_obs_init=None, history=None,
+                      spec_cfg=None, spec_targets=None):
     """Run all restarts SIMULTANEOUSLY as one batched optimisation (unit b2).
 
     `restart_seeds` is the EXPLICIT list of per-member init seeds, one per restart. It is
@@ -192,6 +193,14 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
     It must be in the SAME units the objective runs in (rad/length dimensional, rad/box
     nondim) — passing the physical k* on the nondim path would put L back into the init and
     destroy the cross-L invariance that path exists for.
+
+    `spec_cfg`/`spec_targets` (both None to run without the M1 spectral terms) turn on the
+    BATCHED forward solve. Unlike the serial loop, which builds one `forward.PatternSolver`
+    per restart because that class owns one restart's warm start, the batched path builds
+    ONE `forward.BatchedPatternSolver` for the whole batch: it owns per-MEMBER warm state
+    keyed by global member index, and members never reorder here, so a lane's warm start
+    follows it for the whole run. The live `alive` mask is passed to the loss so an
+    abandoned lane does not pay for a forward solve nobody reads.
 
     Returns (best, restart_log) in exactly the shape recover()'s serial loop produces, so the
     tail of recover() (unit conversion, RecoveryResult assembly) is shared and cannot drift.
@@ -226,12 +235,23 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
     died_at_step = torch.full((B,), -1, dtype=torch.long, device=dev)
     LIVENESS_SYNC_EVERY = 25   # see the comment at the sync point below
     loss_kw = dict(tau=tau, jac_floor=jac_floor, **term_kw)
+    if spec_cfg is not None:
+        from .forward import BatchedPatternSolver
+        from .losses.spectral import SpectralContext
+        # warm_mode="relax" is the TRAINING policy, for the reason the serial loop states
+        # below: the losses are translation-invariant so a warm re-relax's phase drift is
+        # harmless, and Newton-only warm starts measured pathological at Adam-scale theta
+        # displacement. Seeded per member exactly like the serial restarts.
+        loss_kw["spectral"] = SpectralContext(
+            solver=BatchedPatternSolver(bmodel, n=frame.shape[-1], L=L_model,
+                                        seeds=restart_seeds, warm_mode="relax"),
+            targets=spec_targets, cfg=spec_cfg)
 
     for step in range(adam_steps):
         opt.zero_grad()
         loss_vec, parts, conv = LT.total_loss_batched(
             bmodel, frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
-            step=step, **loss_kw)
+            step=step, active=alive if spec_cfg is not None else None, **loss_kw)
         newly_dead = alive & ~conv                               # tensor op, no host sync
         died_at_step = torch.where(newly_dead, torch.full_like(died_at_step, step), died_at_step)
         alive = alive & conv                                     # tensor op, no host sync
@@ -274,7 +294,7 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
     with torch.no_grad():
         loss_vec, parts, conv = LT.total_loss_batched(
             bmodel, frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
-            step=adam_steps, **loss_kw)
+            step=adam_steps, active=alive if spec_cfg is not None else None, **loss_kw)
     final_alive = alive & conv
     # The FINAL parameters -- the ones that get checkpointed -- are always in the trace,
     # whatever the stride (TrainingHistory.should_record).
@@ -367,15 +387,24 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         `SpectralConfig`. Only consulted when `strategy.base` carries a non-zero weight for
         at least one of the five spectral terms (spec_shape/spec_aniso/spec_amp_mean/
         spec_amp_fluct/real_moments) -- the same implicit gate `resid`/`param_prior` already
-        use, not a separate enabled flag. When active: `build_frame_targets` runs ONCE (the
-        observed frame does not change across restarts), a `forward.PatternSolver` is built
-        PER RESTART (it owns per-restart warm-start state) seeded like the model init
-        (`_restart_seed`), and both are threaded into `losses.total.total_loss` as a
-        `losses.spectral.SpectralContext`. RAISES if a non-zero spectral weight is combined
-        with `batched=True` (no batched forward solve) or `split_hinges=False` (no
-        `sig_max_pos` -- no ignition signal). The forward solve is expensive (3-9 s/solve
-        at 64^2 -- unrecorded test timing; forward.py module docstring); every default
-        here keeps it OFF.
+        use, not a separate enabled flag. When active `build_frame_targets` runs ONCE (the
+        observed frame does not change across restarts) with its tensor-valued targets placed
+        on `device`, and a solver is threaded into losses/total as a
+        `losses.spectral.SpectralContext`:
+
+          * serial (`batched=False`): a `forward.PatternSolver` PER RESTART, since that class
+            owns one restart's warm-start state, seeded like the model init (`_restart_seed`);
+          * batched (`batched=True`): ONE `forward.BatchedPatternSolver` for the whole batch.
+            It owns per-MEMBER warm state keyed by global member index and solves only the
+            members ignited at that step. This combination USED TO RAISE -- there was no
+            batched forward solve -- and the refusal is now DELETED because the solve gained
+            a member axis, not relaxed because the reason stopped mattering.
+
+        RAISES if a non-zero spectral weight is combined with `split_hinges=False` (no
+        `sig_max_pos` -- no ignition signal), with an adaptive strategy, or with a
+        non-identity `observed_idx` on the fitted channels. The forward solve is expensive
+        (3-9 s/solve at 64^2 -- unrecorded test timing; forward.py module docstring); every
+        default here keeps it OFF.
 
     history: an optional `history.TrainingHistory`. When given, the per-step loss terms, the
         live weights, and the CONSTRAINED physical parameters of EVERY member are recorded at
@@ -449,12 +478,6 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     # rather than loudly refused.
     from .losses.spectral import SPECTRAL_TERM_KEYS  # unit U4
     use_spectral = any(float(strategy.base.get(k, 0.0)) != 0.0 for k in SPECTRAL_TERM_KEYS)
-    if use_spectral and batched:
-        raise ValueError(
-            "a spectral weight is non-zero but batched=True (unit U4): forward.PatternSolver "
-            "owns per-restart warm-start state, which has no batched form, and the batched "
-            "reaction does not broadcast to the per-pixel fields the forward solve needs. "
-            "Run the serial path (batched=False) for spectral runs.")
     if use_spectral and not split_hinges:
         raise ValueError(
             "a spectral weight is non-zero but split_hinges=False (unit U4): spectral "
@@ -524,8 +547,13 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         spec_cfg = SpectralConfig(b_lo=spectral_b_lo, b_hi=spectral_b_hi,
                                   channels=tuple(spectral_channels), nblk=spectral_nblk,
                                   ignition_margin=spectral_ignition_margin)
+        # device=dev places the tensor-valued targets (the RAPS band target, its bin index
+        # and the 2-D block target) on the training device ONCE, instead of paying the
+        # transfer inside every term function on every step. The statistics themselves are
+        # computed on the host from the numpy frame either way, so no value depends on it,
+        # and dev is CPU on the default path, where the argument is a no-op.
         spec_targets = build_frame_targets(frame.detach().cpu().numpy(), L_model, kstar_obs,
-                                           spec_cfg)
+                                           spec_cfg, device=dev)
 
     best = None; restart_log = []
     if batched:
@@ -563,7 +591,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             dispersion_backend, frame, L_model,
             observed_idx, kgrid, kstar_obs, strategy, adam_steps, adam_lr, grad_clip,
             tau, jac_floor, dev, verbose, term_kw,
-            kstar_obs_init=kstar_obs if d_init_from_kstar else None, history=history)
+            kstar_obs_init=kstar_obs if d_init_from_kstar else None, history=history,
+            spec_cfg=spec_cfg, spec_targets=spec_targets)
     # the serial loop is skipped entirely when the batched path ran; it stays the REFERENCE
     # implementation and the default, so no pre-existing number changes method.
     for r in range(0 if batched else n_restarts):

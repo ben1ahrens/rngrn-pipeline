@@ -3237,7 +3237,8 @@ Owner-decision register, I trust you."*
 μ_central = 7.2e-4 — L1 `eval/lifted.py::turing_verdict_lifted` strict-Turing AND stationary
 (Hopf excluded); L2 `simulate_lifted` patterns (existing `pattern_floor`, horizon-stop, dt
 policy min(0.2/jac_rate, μ/2) with a dt-halving check); L3 k* of the lifted rollout within
-one radial bin `|k*_lift − k*_obs| ≤ 2π/L` (12.5% at the target's p=8, per D-FFT-3) — with
+one radial bin `|k*_lift − k*_obs| ≤ 2π/L` (the binding form per D-FFT-3; ≈12.0% of k*_obs
+on the target, which holds 8.36 measured periods — 12.5% at nominal p=8) — with
 the L1 verdict, `mu_critical`, and `robustness_vs_mu` *reported* across the biological band
 [1.1e-5, 9.2e-3]. QSS F1–F3 remain co-gates. **The gate binds nothing until the V0–V4
 validation ladder of `docs/REDESIGN_rngrn.md` §5.3 passes** — that ladder is the structural
@@ -3344,3 +3345,70 @@ reproducible from the run directory).
 R2 deliverables, the noise arm an R4 deliverable.
 
 **Where it lives:** `docs/REDESIGN_rngrn.md` §4.7–§4.8, §6, §7 (R2, R4), §8 item 16.
+
+### D-REDESIGN-3 — the "~135 generator D-ratio median" is quoted-unverified and names the wrong statistic; comparisons must use the code's two-most-mobile definition
+
+**Date:** 2026-08-17 (METHODS evidence audit, finding H4). **Status:** DECIDED
+**Decided by:** the implementing agent under the D-REDESIGN-1 delegation.
+
+**The decision:** the figure "population median ~135" (`configs/bio_box.yaml` header;
+`docs/PREREGISTRATION.md` §3.4 "134.9"; `docs/BIO_VIABILITY.md`) is treated as **quoted,
+not verified**: no script, run directory or measurement backs it anywhere in the repo, and
+it does not follow from the generator priors under any candidate definition. Computed from
+the stated priors (4×10⁶ draws): median of a single 10^U(0.9,2.4) draw ≈ 44.6; median
+D_max/D_min ≈ 91.4; median of the **two most mobile species** — the definition
+`scoring/plausibility.py::d_ratio_of`, `losses/terms.py::param_prior` and the §3.4 scoring
+all use — ≈ **2.8**, i.e. *inside* the [1, 60] box, consistent with the D5 row's measured
+`plausibility_d_ratio_in_box_frac = 1.0` at prior weight 0. Henceforth any box/prior
+comparison must name the ratio definition it uses, and the ~135 figure is not to be cited
+as a measured population statistic. `docs/REDESIGN_rngrn.md` §3.3 corrected accordingly;
+the bio_box owner decision (literature-centred priors) is untouched.
+
+**Evidence:** the audit's 4×10⁶-draw simulation from `scripts/gen_tg3.py`'s stated priors
+(D = (1, 10^U(0.9,2.4), 10^U(0.9,2.4))); `experiments/diag_fft/d5/target_reports.jsonl`
+(`plausibility_d_ratio_in_box_frac = 1.0`, n_scored 10); absence of any measurement
+provenance for 135/134.9 across docs/ and scripts/.
+
+**What was rejected and why:** silently keeping the 135 rationale (a number with no run
+behind it steering a register item's stated justification); and re-opening register item 3
+(the soft-prior choice stands — its recorded purpose is to make the viability tension
+measurable, and the prior's centre/width provenance is unchanged).
+
+**Not independently validated:** the ≈2.8/≈91 figures are from the audit's simulation of
+the *stated* priors, not from re-running the generator; a one-cell notebook check against
+actual generator draws is a cheap follow-up when the corpus is next touched.
+
+**Where it lives:** `docs/REDESIGN_rngrn.md` §3.3; `configs/bio_box.yaml` header (to be
+annotated when next edited); this entry.
+
+### D-REDESIGN-4 — fixed-point pinning uses RAW frame means; bias-corrected pinning is rejected
+
+**Date:** 2026-08-17 (R2 Task 11 measurement + controller ruling). **Status:** DECIDED
+**Decided by:** the implementing agent under the D-REDESIGN-1 delegation, resolving the
+condition register item 7 attached to the β-pinning decision.
+
+**The decision:** the redesign's fixed-point pinning (`docs/REDESIGN_rngrn.md` §3.2;
+`model.py::RNGRN(pin_xstar=...)`) pins observed channels to the **raw per-channel frame
+means**, with no bias correction. The measured single-sample bias on the target is
+**recorded as the operating-point scale-error budget**, not corrected for:
+`frame.mean()/x*` = [1.068, 1.193, 0.811] per channel on `turing_labyrinth/sample_0000`
+(`experiments/redesign_r2/frame_bias/results/bias.json`, script
+`scripts/measure_frame_bias.py`, k*_obs cross-check 0.283878 exact vs D3).
+
+**Evidence:** the Task 11 measurement above; the legacy population figure (ratio median
+0.921, IQR 0.796–1.036, n=127 `three_gene` — exp12, STATE_OF_THE_SCIENCE §2.8) has the
+**opposite sign** of channel 0's bias on this target (1.068), demonstrating that a
+population-level correction does not transfer across dataset families.
+
+**What was rejected and why:** (a) per-sample bias correction — it requires the sample's
+own `x_star` from the AnswerKey, which is ground truth and firewall-illegal on the
+recovery side; (b) population-level correction — measured wrong-signed on this target
+(above); (c) leaving the bias unstated — the ±7–19% per-channel scale error propagates
+into every rate that trades against x*, and is disclosed instead, partially absorbed by
+the time-gauge convention (geomean δ ≡ 1) and the invariant-combination reporting.
+
+**Not independently validated:** n=1 (this sample); the other four `turing_labyrinth`
+samples would give a spread — a cheap follow-up before R5 breadth if wanted.
+
+**Where it lives:** `docs/REDESIGN_rngrn.md` §3.2 (the pinning) and §8 item 7;
+`scripts/measure_frame_bias.py`; `experiments/redesign_r2/frame_bias/results/bias.json`.

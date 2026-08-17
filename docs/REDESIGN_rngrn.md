@@ -110,9 +110,10 @@ structural defect of its own.
   weight D5 measured α 0/10 and δ 0/10 in-box — but d_ratio **10/10 in-box** (and β
   correctly unscored, its box row being UNCITED). So the two rows §3.3 hard-boxes are
   the two that fail, and the row it keeps as a soft prior already passes without one:
-  that prior's purpose is to hold the recovered ratio near the literature value 7.5
-  against the generator's ~135 — making the viability-vs-recovery tension measurable —
-  not to fix a measured failure.
+  that prior's purpose is to hold the recovered ratio near the literature value 7.5 —
+  making the viability-vs-recovery tension measurable — not to fix a measured failure.
+  (The "~135 generator median" this bullet once cited is quoted-unverified and names an
+  unidentified statistic — see §3.3's correction and D-REDESIGN-3.)
 - **The dynamical lift is written but unvalidated, and deferred.** `eval/lifted.py`
   implements the finite-μ system (promoter occupancies GA, GR as explicit fast state,
   dim N+2N² = 21 at N=3, only x diffuses, fixed points μ-independent) and even a
@@ -202,10 +203,16 @@ the gauges where they live:
   changes preregistration §3.4's α/δ component from a measured outcome into a
   structural truth — prereg-touching, owner-decision item 3.
 - **D-ratio: soft prior, not a hard box.** The box row is [1, 60], centre 7.5
-  (Nodal/Lefty), while the generator population's D-ratio median is ~135 — *outside
-  the box by recorded owner decision* (`configs/bio_box.yaml` header: priors are
-  centred on biologically viable literature values, not on the synthetic data). A hard
-  box would make the synthetic target itself unrepresentable. Keep the existing
+  (Nodal/Lefty). **Corrected 2026-08-17 (METHODS audit H4; D-REDESIGN-3):** this bullet
+  previously repeated the "~135 generator D-ratio median" carried by
+  `configs/bio_box.yaml`'s header and PREREG §3.4 — that figure names no measurement,
+  and the statistic the code actually scores (ratio of the **two most mobile** species,
+  `scoring/plausibility.py::d_ratio_of`) has a simulated median **≈2.8** under the
+  stated generator priors — *inside* the box, consistent with D5's measured
+  `d_ratio_in_box_frac = 10/10`. The bio_box owner decision (priors centred on
+  literature, not on the synthetic data) stands; what changes is the rationale wording:
+  a hard box on the *largest-to-unit* ratio (median ≈91) would fight the generator
+  regime, and comparisons must always name which ratio they use. Keep the existing
   `param_prior` log-normal on the d_ratio of the two most mobile species (centre 7.5,
   spread 1.0 [TUNE]) at nonzero weight — promoted from its current weight-0 default,
   with §2's caveat: this row already passes 10/10 at weight 0, so the prior's role is
@@ -425,11 +432,16 @@ ambiguity.
   R3 work — §4.1), warm-started, Newton polish + adjoint per §4.2/§4.3. Budget ~2000
   steps, lr 0.02 (both UNCALIBRATED, swept). A de-ignited member falls back to
   guard-rail terms — the existing semantics.
-- **Phase III — LBFGS polish, ablation arm only.** Existing `lbfgs_steps` knob on the
-  winner, ignition gate frozen, abort on de-ignition. **No measurement of
-  `lbfgs_steps` exists in this repo** (every recorded run sets it to 0), so nothing
-  rests on it. (STATE §3's "continuation had no effect" result concerns warm-starting
-  the Newton *steady-state solve*, not LBFGS.)
+- **Phase III — LBFGS polish, ablation arm.** Existing `lbfgs_steps` knob on the
+  winner, ignition gate frozen, abort on de-ignition. **Corrected 2026-08-17 (METHODS
+  audit A1) — this bullet previously said no recorded run used LBFGS; the source says
+  the opposite:** `recover()` defaults to `lbfgs_steps=50`, and 10 of 11 tracked
+  `frozen_config.yaml` files — including all ten D5 baseline seeds — ran with it, so
+  **the D5 row includes the polish**. Consequences: the A0 arm keeps `lbfgs_steps=50`
+  (comparability with D5); what does NOT exist is an A/B isolating the polish's
+  contribution, which is exactly what this arm measures. (STATE §3's "continuation had
+  no effect" result concerns warm-starting the Newton *steady-state solve*, not
+  LBFGS.)
 - **Selection:** winner and gate-passers chosen on fitted-band loss only; held-out
   bands are consulted exactly once, by scoring code, at gate time.
 
@@ -668,10 +680,11 @@ to ETDRK4 is removed** (made loud) regardless of anything else in this document.
   lifted test is N=2 at 16², μ=1e-6 (`tests/test_lifted.py`); extend to N=3, both
   forms, at μ ∈ {1e-4, 1e-5, 1e-6}, same seed/dt/horizon: patterned flag equal,
   morphology class equal (512² only), k* within one radial bin — `|k*_lift − k*_qss| ≤
-  2π/L`, i.e. **12.5% at this target's p=8** (`docs/SPEC_fourier_training.md` §9.1,
-  D-FFT-3; the pre-registered 8.3% figure is *half* a bin, derived on the legacy
-  `three_gene` sets, and D-FFT-3 records rejecting its import here as sub-resolution
-  at p=8) — and field relative L2 difference decreasing with μ (absolute bound
+  2π/L`, the binding form per D-FFT-3/`docs/SPEC_fourier_training.md` §9.1: **≈12.0%
+  of k* on this target** (measured 8.36 periods in the box; 12.5% at the nominal
+  p = 8). The pre-registered 8.3% figure is *half* a bin, derived on the legacy
+  `three_gene` sets, and D-FFT-3 records rejecting its import here as sub-resolution —
+  and field relative L2 difference decreasing with μ (absolute bound
   UNCALIBRATED — the measured curve becomes the calibration). (b) Then at μ_central
   with the §5.2 dt policy and a dt-halving pair — the first run in territory where the
   lift can say something new; report-only until the ladder completes.
@@ -703,8 +716,9 @@ Evaluated per gate-passing candidate at 512² on the data box:
   pattern_floor, `stopped_reason == "horizon"` (a step-budget truncation is not
   evidence), under the §5.2 dt policy with a passing dt-halving check.
 - **L3 — wavelength:** k* of the lifted rollout within one radial bin of k*_obs —
-  `|k*_lift − k*_obs| ≤ 2π/L`, **12.5% at this target's p=8** (SPEC §9.1 / D-FFT-3,
-  the binding one-bin bar; see V3 for why the 8.3% figure is not imported).
+  `|k*_lift − k*_obs| ≤ 2π/L`, the binding one-bin form (SPEC §9.1 / D-FFT-3):
+  **≈12.0% of k*_obs on this target** (measured 8.36 periods; 12.5% at nominal p = 8;
+  see V3 for why the 8.3% half-bin figure is not imported).
 - **Reported, never gated:** the L1 verdict at 9 log-spaced μ across the band plus
   both endpoints (near-free via `rescale_mu`); `mu_critical` with the re-entrance
   flag; the drawn-μ robustness row (`robustness_vs_mu` — the criterion half of

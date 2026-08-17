@@ -260,6 +260,15 @@ prior and its recorded tension above) — with β still UNCITED and unscored. Th
 arm A0 keeps the original parameterization, so its §3.4 numbers remain comparable to all
 pre-amendment runs. Nothing about the bar itself changes.
 
+*Cross-reference note 2026-08-17 (documentation of an existing owner decision; the bar
+above is unchanged).* §3.3's `kstar_fft_rel_err ≤ 8.3%` (half an FFT bin, derived on the
+legacy `three_gene` sets) remains the pre-registered §3 pass condition. Separately,
+forward-validation F3 and the lifted gate L3 (§3.7) use the **one-radial-bin** form
+`|Δk*| ≤ 2π/L` per the owner decision D-FFT-3 (2026-08-11, `docs/DECISIONS.md`), which
+rejected importing the 8.3% figure there as sub-resolution at the canonical targets'
+periods-per-box. The two bars govern different criteria; any report quoting either must
+say which it used.
+
 ### 3.5 Generalisation across domain size
 
 **Amended 2026-07-30, before any convergence result existed.** The owner clarified the
@@ -519,8 +528,10 @@ stiff numerics was D-FFT-4's stated risk; the ladder is its answer, not its dism
 >   patterns — amplitude above the existing `pattern_floor`, `stopped_reason == "horizon"` —
 >   under dt = min(0.2/jac_rate, μ/2) with a passing dt-halving check.
 > - **L3 (wavelength):** k* of the lifted rollout within one radial bin of `k*_obs`:
->   `|k*_lift − k*_obs| ≤ 2π/L` (12.5% at the canonical target's p = 8; the one-bin bar of
+>   `|k*_lift − k*_obs| ≤ 2π/L` — the formula is the binding form (the one-bin bar of
 >   `docs/SPEC_fourier_training.md` §9.1 / D-FFT-3, not the legacy 8.3% half-bin figure).
+>   On the canonical target this is ≈12.0% of k*_obs (measured 8.36 periods in the box;
+>   12.5% at the nominal p = 8).
 
 *Reported, never gated:* the L1 verdict at 9 log-spaced μ across [1.1e-5, 9.2e-3] plus both
 endpoints; `mu_critical` with its re-entrance flag; the drawn-μ `robustness_vs_mu` row (the

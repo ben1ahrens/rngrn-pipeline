@@ -1,8 +1,0 @@
-### 2026-08-03T18:16:52+01:00 START c2_D_turing8  [-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0]
-=== CELL experiments/c2_D_turing8 target=sample_0000 overrides: -o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 ===
-=== TARGET experiments/c2_D_turing8 sample_0000 rc=0 secs=295 ===
-=== CELL experiments/c2_D_turing8 target=sample_0001 overrides: -o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 ===
-=== TARGET experiments/c2_D_turing8 sample_0001 rc=0 secs=496 ===
-=== CELL DONE experiments/c2_D_turing8 ===
-### 2026-08-03T18:30:03+01:00 END c2_D_turing8 rc=0
-### QUEUE DONE

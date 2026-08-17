@@ -1,5 +1,0 @@
-# Milestone 2 — Gierer-Meinhardt, N=2 m=1: hide v (channel 1), infer it as a latent field.
-_base_: [base.yaml]
-data: {system: gierer_meinhardt, L: 100.0}
-model: {N: 2, m: 1, observed_idx: [0]}
-tracking: {run_name: m2_gm_partial}

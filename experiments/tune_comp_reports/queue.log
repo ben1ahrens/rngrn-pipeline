@@ -1,7 +1,0 @@
-2026-08-03T18:16:10+01:00 START detach/sample_0000 seeds=[0 1 2 3 4 5 6 7] extra=[-o loss.detach_xstar=true]
-2026-08-03T18:37:25+01:00 OK    detach/sample_0000  1275s
-2026-08-03T18:37:25+01:00 START legacy_control/sample_0000 seeds=[0 1 2 3 4 5 6 7] extra=[]
-2026-08-03T18:43:35+01:00 OK    legacy_control/sample_0000  370s
-2026-08-03T18:43:35+01:00 START baseline/sample_0003 seeds=[0 1 2 3 4 5 6 7] extra=[]
-/home/benja/.claude-science/conda/envs/python/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 5 leaked semaphore objects to clean up at shutdown
-  warnings.warn('resource_tracker: There appear to be %d '

@@ -1,6 +1,0 @@
-### 2026-08-03T18:34:19+01:00 START c2_L_t8k8  [-o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=8.0]
-=== CELL experiments/c2_L_t8k8 target=sample_0000 overrides: -o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=8.0 ===
-=== TARGET experiments/c2_L_t8k8 sample_0000 rc=0 secs=476 ===
-=== CELL experiments/c2_L_t8k8 target=sample_0001 overrides: -o train.adam_steps=400 -o loss.weights.param_prior=1.0 -o loss.weights.turing=8.0 -o loss.weights.kstar=8.0 ===
-/home/benja/.claude-science/conda/envs/python/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 5 leaked semaphore objects to clean up at shutdown
-  warnings.warn('resource_tracker: There appear to be %d '

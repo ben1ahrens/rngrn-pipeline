@@ -122,11 +122,11 @@ class RNGRN(nn.Module):
     """
 
     def __init__(self, N: int, form: str = "competitive", n_hill: int = 2,
-                 seed: int | None = None, dispersion_backend: str = "eig",
+                 seed: int | None = None, dispersion_backend: str = "auto",
                  init: str = "default", kstar_obs: float | None = None):
         super().__init__()
         assert form in ("competitive", "nc1"), form
-        assert dispersion_backend in ("eig", "cubic"), dispersion_backend
+        assert dispersion_backend in ("eig", "cubic", "auto"), dispersion_backend
         assert init in ("default", "low_basal"), init
         if kstar_obs is not None and not (math.isfinite(kstar_obs) and kstar_obs > 0):
             raise ValueError(
@@ -135,12 +135,17 @@ class RNGRN(nn.Module):
         self.form = form
         self.n_hill = int(n_hill)
         self.init = init
-        # "eig": torch.linalg.eigvals, any N, the reference. "cubic": exact closed-form
-        # roots, N=3 ONLY, 162x faster on CUDA (see _sigma_max_cubic). Default stays "eig"
-        # so nothing silently changes; set "cubic" for GPU runs.
+        # "auto" (the default): resolved HERE, at construction, to "cubic" when N==3 and
+        # "eig" otherwise -- "cubic" is exact for N=3 (see _sigma_max_cubic) and measured
+        # 162x faster than eigvals on CUDA per restart-step, "eig" is the general-N
+        # reference. self.dispersion_backend is always stored as the RESOLVED concrete
+        # value ("eig"/"cubic"), never "auto", so callers can read it directly.
+        # "eig"/"cubic" can also be requested explicitly, bypassing the N-based choice.
         # Rejected at CONSTRUCTION, not lazily at the first dispersion() call: a model that
         # can never evaluate its own dispersion is misconfigured the moment it is built, and
         # a run that only discovers that mid-optimisation has already wasted the budget.
+        if dispersion_backend == "auto":
+            dispersion_backend = "cubic" if int(N) == 3 else "eig"
         if dispersion_backend == "cubic" and int(N) != 3:
             raise ValueError(
                 f"dispersion_backend='cubic' is exact for N=3 only (got N={N}). "
@@ -275,8 +280,11 @@ def _sigma_max_cubic(M: torch.Tensor, eps: float = 1e-14) -> torch.Tensor:
     Why this exists: torch.linalg.eigvals on batched small NON-SYMMETRIC matrices has no
     cuSOLVER batched kernel, costing ~700 us PER MATRIX on CUDA regardless of batch size
     (measured flat from batch 200 to 51200) versus ~1 us on CPU. That single call made a
-    GPU training step ~5x slower than CPU. This routine is arithmetic only -- no eig, svd
-    or linear solve -- so it maps onto GPU kernels: measured 162x faster than eigvals on
+    GPU training step ~5x slower than CPU. This routine avoids eig and svd entirely, but it
+    is NOT "arithmetic only" -- torch.linalg.det (for c3, below) IS an LU factorisation; see
+    BatchedRNGRN's docstring for the float32 backward bug that fact causes and for the
+    explicit-cofactor-determinant alternative that was measured and REJECTED. Even so it
+    maps onto GPU kernels far better than eigvals: measured 162x faster than eigvals on
     CUDA, and numerically EXACT rather than approximate (validated against eigvals on 127
     real answer-key Jacobians: sigma_max MAE 9.2e-13, k* MAE 0, Turing verdict flips
     0/127, d sigma_max/dJ agreeing to 2e-16).
@@ -429,7 +437,7 @@ class BatchedRNGRN(nn.Module):
 
     @classmethod
     def from_seeds(cls, N: int, seeds, form: str = "competitive", n_hill: int = 2,
-                   dispersion_backend: str = "eig", init: str = "default",
+                   dispersion_backend: str = "auto", init: str = "default",
                    kstar_obs: float | None = None) -> "BatchedRNGRN":
         """One member per entry of `seeds`, in order.
 

@@ -221,6 +221,10 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
     opt = torch.optim.Adam(params, lr=adam_lr)
     alive = torch.ones(B, dtype=torch.bool, device=dev)
     died_at = [None] * B
+    # Per-member death step, kept on-device. Updated every step by pure tensor ops (no host
+    # sync); only read back to host on the cadence below. -1 means "still alive".
+    died_at_step = torch.full((B,), -1, dtype=torch.long, device=dev)
+    LIVENESS_SYNC_EVERY = 25   # see the comment at the sync point below
     loss_kw = dict(tau=tau, jac_floor=jac_floor, **term_kw)
 
     for step in range(adam_steps):
@@ -228,17 +232,32 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
         loss_vec, parts, conv = LT.total_loss_batched(
             bmodel, frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
             step=step, **loss_kw)
-        newly_dead = alive & ~conv
-        if bool(newly_dead.any()):
-            for b in newly_dead.nonzero().flatten().tolist():
-                died_at[b] = step
-                if history is not None:
-                    history.record_death(b, step)
-                if verbose:
-                    print(f"  member {b} step {step}: steady state diverged; member abandoned")
-            alive = alive & conv
-        if not bool(alive.any()):
-            break
+        newly_dead = alive & ~conv                               # tensor op, no host sync
+        died_at_step = torch.where(newly_dead, torch.full_like(died_at_step, step), died_at_step)
+        alive = alive & conv                                     # tensor op, no host sync
+        is_sync_step = (step % LIVENESS_SYNC_EVERY == 0) or (step == adam_steps - 1)
+        if is_sync_step:
+            # ONE D2H sync here does the work that used to cost TWO every single step
+            # (bool(newly_dead.any()) and bool(alive.any())). A member already stops
+            # contributing gradient the step it dies (`alive` masks the loss below, updated
+            # tensor-side every step), so cadencing only the host bookkeeping means: the
+            # early break can fire up to LIVENESS_SYNC_EVERY-1 steps late (harmless -- those
+            # extra steps optimise an all-dead, all-masked batch and produce nothing), and
+            # per-death logging can batch up to that many steps late.
+            died_at_step_host = died_at_step.tolist()
+            still_alive = False
+            for b, died_step in enumerate(died_at_step_host):
+                if died_step < 0:
+                    still_alive = True
+                elif died_at[b] is None:
+                    died_at[b] = died_step
+                    if history is not None:
+                        history.record_death(b, died_step)
+                    if verbose:
+                        print(f"  member {b} step {died_step}: steady state diverged; "
+                              "member abandoned")
+            if not still_alive:
+                break
         # Recorded BEFORE opt.step(), so the parameters in the trace are the ones that
         # produced the loss in the same row. `alive` is passed so an abandoned lane stays
         # NaN instead of logging frozen parameters nobody is optimising any more.
@@ -289,7 +308,7 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             lbfgs_steps=50, grad_clip=10.0, seed=0, verbose=False, device=None,
             split_hinges=True, hinge_k_min_frac=0.1, staging_keys=("turing",),
             staging_off_frac=0.25, staging_ramp_frac=0.25, detach_xstar=False,
-            nondim=False, model_seed=None, dispersion_backend="eig", init="default",
+            nondim=False, model_seed=None, dispersion_backend="auto", init="default",
             d_init_from_kstar=False,   # unit b4
             batched=False,             # unit b2
             dratio_centre=7.5, dratio_spread=1.0,          # unit 5, biological prior
@@ -321,7 +340,10 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         so distinct (model_seed, r) pairs give independent draws and repeats are exact.
         Defaults to `seed` when not given, for backward compatibility.
 
-    dispersion_backend: 'eig' (any N, the reference) | 'cubic' (exact for N<=3 ONLY).
+    dispersion_backend: 'auto' (default; resolves to 'cubic' when N == 3, else 'eig')
+        | 'eig' (any N, the reference) | 'cubic' (exact for N<=3 ONLY). Resolution
+        happens in RNGRN.__init__ (D-PERF-3); the model's .dispersion_backend always
+        reads the concrete backend.
 
     init: 'default' | 'low_basal' -- model raw-parameter init strategy (see model.py).
         Defaults to 'default' (OFF); callers opt in explicitly.
@@ -613,6 +635,7 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                                     failed_at="train", failed_at_step=step))
             continue
 
+        lbfgs_error = None
         if lbfgs_steps:
             lopt = torch.optim.LBFGS(params, max_iter=lbfgs_steps, line_search_fn="strong_wolfe")
             def closure():
@@ -625,8 +648,17 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                 loss.backward(); return loss
             try:
                 lopt.step(closure)
-            except Exception:
-                pass
+            except Exception as e:
+                # The LBFGS polish is optional refinement (Adam already produced a usable
+                # `model`), so a failed polish does not abort the restart -- but the failure
+                # must not vanish silently either: this is where the FIRST async CUDA error
+                # of a GPU run would previously have been swallowed by a bare `except: pass`.
+                # Recorded on the restart log (below) so it lands in the results rather than
+                # only in a log line no one reads.
+                lbfgs_error = f"{type(e).__name__}: {e}"
+                if verbose:
+                    print(f"  restart {r}: LBFGS polish failed ({lbfgs_error}); "
+                          "keeping the pre-LBFGS (Adam) parameters")
 
         try:
             with torch.no_grad():
@@ -654,7 +686,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             history.record_serial(adam_steps, r, parts, model)
         restart_log.append(dict(restart=r, total=float(loss), sig_max=parts.get("sig_max"),
                                 sig_max_pos=parts.get("sig_max_pos"),
-                                kstar_model=parts.get("kstar_model"), rel_err=parts.get("rel_err")))
+                                kstar_model=parts.get("kstar_model"), rel_err=parts.get("rel_err"),
+                                lbfgs_error=lbfgs_error))
         if best is None or float(loss) < best[0]:
             from .losses.terms import steady_state
             xs, _ = steady_state(model)

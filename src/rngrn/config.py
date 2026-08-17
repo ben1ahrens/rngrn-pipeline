@@ -77,7 +77,8 @@ class ModelConfig:
     observed_idx: Optional[list] = None     # which model indices the m rows map to
     nondim: bool = False                    # recover on the unit box x/L; see recover.py  # unit 12
 
-    dispersion_backend: str = "eig"         # 'eig'|'cubic' ('cubic' exact for N==3 only) # unit 10
+    dispersion_backend: str = "auto"        # 'auto' (cubic at N==3, else eig) | 'eig' | 'cubic'
+                                             # ('cubic' exact for N==3 only) # unit 10
 
     init: str = "default"                   # 'default' | 'low_basal' -- see model.py (unit 2)
 

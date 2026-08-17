@@ -37,6 +37,11 @@ RECOVERY_SIDE = [
     "etdrk4_torch.py",                              # 2026-08-12, GPU-port unit: the batched
     # torch ETDRK4 integrator ported from scripts/diag_fft_d2.py (D2-verified bit-equivalent
     # to eval/numerics). Same character as forward.py: model parameters + grid geometry only.
+    "eval/ladder.py",                               # 2026-08-17, R1 lift-validation-ladder
+    # V0: draws models via RNGRN(...) + losses.terms.steady_state and checks eval/lifted.py's
+    # own algebraic invariants at the resulting x*. Same character as eval/lifted.py itself
+    # (which it wraps, not reimplements): reads only the model's own parameters, no frame,
+    # no ground-truth quantity.
 ]
 
 # SCORING-side modules under losses/ and eval/. These MAY read the answer key; they are

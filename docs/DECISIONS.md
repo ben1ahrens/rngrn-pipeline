@@ -3220,3 +3220,41 @@ the planner. §11's table wins.
 
 **Where it lives:** `CLAUDE.md` §11, `.claude/rules/orchestration.md`, and the `model:` line in
 each of the five files under `.claude/agents/`.
+
+### D-PERF-3 — `dispersion_backend` defaults to `'auto'`, which resolves to the closed-form cubic at N = 3
+
+**Date:** 2026-08-17 (GPU-optimisation branch `feature/gpu-optim`, orchestrating session).
+**Status:** DECIDED
+**Decided by:** the orchestrating session under delegated authority (§10).
+
+**The decision:** `RNGRN.__init__`, `BatchedRNGRN.from_seeds`, `config.ModelConfig.dispersion_backend`
+and `recover()` all default to `'auto'`, resolved at construction to `'cubic'` when `N == 3`
+and `'eig'` otherwise. The resolved concrete value is what `.dispersion_backend` reads —
+`'auto'` never survives construction. Explicit `'eig'`/`'cubic'` are respected unchanged, and
+explicit `'cubic'` still raises for N ≠ 3.
+
+**Evidence:** measured in this repo and recorded in `model.py`'s docstrings and `CLAUDE.md` §7:
+batched cubic dispersion 0.97 ms vs `torch.linalg.eigvals` 156.6 ms on 127 matrices (162×);
+on CUDA the eig backend costs ~816 ms per restart-step flat in B (~2500× the cubic at B=8),
+because small non-symmetric eigendecomposition has no batched cuSOLVER kernel. The cubic form
+is exact for N ≤ 3 by construction; per-step agreement with eig was previously measured at
+~1e-12. The dispersion relation is evaluated twice per optimiser step, so this is the dominant
+kernel cost of every N = 3 run on either device.
+
+**What was rejected and why:** (a) keeping `'eig'` as the default and only raising loudly on
+the eig+CUDA+N=3 combination — that guards the GPU path but leaves every CPU run misrouted
+away from a measured 162× win for no benefit; (b) changing the default to a bare `'cubic'` —
+breaks every N ≠ 3 construction site and every reference-system test at N = 2.
+
+**Announced loudly:** runs recorded after this change are **not bit-comparable** to runs
+recorded before it for any N = 3 config that did not pin the backend explicitly — cubic and
+eig agree to ~1e-12 per step but diverge over a full optimisation. Any cross-branch comparison
+of recovered parameters must pin `dispersion_backend` explicitly on both sides.
+
+**Not independently validated:** the ~1e-12 agreement figure is the previously measured one
+(`model.py`); no fresh cubic-vs-eig full-run comparison was made in this session, and the test
+suite had not yet been re-run when this entry was written (owner deferred testing to the end
+of the branch).
+
+**Where it lives:** `src/rngrn/model.py::RNGRN.__init__` (resolution), `::BatchedRNGRN.from_seeds`,
+`src/rngrn/config.py::ModelConfig`, `src/rngrn/recover.py::recover`.

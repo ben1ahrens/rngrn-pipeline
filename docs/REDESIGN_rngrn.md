@@ -610,7 +610,7 @@ the *vehicle* of the withdrawn preregistration §3.6 — but not its criterion.*
 (added and withdrawn 2026-08-03, before any measurement; retained verbatim in
 `docs/PREREGISTRATION.md` as a transparency record) required §3.2's `turing_volume`
 bars recomputed on the lifted Jacobian *at every μ across the biological band*. The
-§3.7 proposed here gates three point verdicts at μ_central and *reports* the
+§3.7 proposed here gates three point verdicts at the owner-set gate point μ_gate and *reports* the
 robustness row and the band sweep — both differences are narrowings, and both are in
 the register (§8 items 1 and 6). The proposal: a new, additive preregistration §3.7
 defining the lifted gate, plus a DECISIONS.md entry (working name D-LIFT-1,
@@ -633,7 +633,7 @@ ETDRK4 x-substep. This is the right scheme; what is missing is *validation*, and
 accuracy trap the design states loudly:
 
 > **Exactness of the substep is not accuracy of the coupling.** At
-> μ_central = 7.2e-4 with the current dt = 0.2/jac_rate policy, dt/μ ~ 30–300: each
+> μ_gate = 1e-3 with the current dt = 0.2/jac_rate policy, dt/μ ~ 20–200: each
 > gate substep relaxes fully to quasi-steady state, silently re-imposing QSS within a
 > step. A finite-μ oscillatory (Hopf) route could be smoothed into a stationary-looking
 > pattern — the mirror image of the artefact D-FFT-4 feared. Mitigations, both
@@ -671,7 +671,7 @@ to ETDRK4 is removed** (made loud) regardless of anything else in this document.
 - **V2 — temporal, 0-D.** The 21-dim well-mixed lifted ODE against a trusted stiff
   reference (scipy Radau, rtol 1e-10): (i) trajectories converge to the QSS 3-dim ODE
   as μ → 0; (ii) the Strang stepper itself matches the reference at
-  μ ∈ {1e-5, 7.2e-4, 1e-2, 1e-1, 1} under dt-halving, observed order ≈ 2 where
+  μ ∈ {1e-5, 7.2e-4, 1e-3, 1e-2, 1e-1, 1} under dt-halving, observed order ≈ 2 where
   dt ≲ μ, sup-norm error at the rollout horizon ≤ 0.1 × pattern_floor
   (= 0.1 × max(1e-3, 0.02·|x*_0|) — derived from the existing patterning floor:
   integration error must sit an order below the smallest amplitude ever called a
@@ -685,7 +685,7 @@ to ETDRK4 is removed** (made loud) regardless of anything else in this document.
   p = 8). The pre-registered 8.3% figure is *half* a bin, derived on the legacy
   `three_gene` sets, and D-FFT-3 records rejecting its import here as sub-resolution —
   and field relative L2 difference decreasing with μ (absolute bound
-  UNCALIBRATED — the measured curve becomes the calibration). (b) Then at μ_central
+  UNCALIBRATED — the measured curve becomes the calibration). (b) Then at μ_gate
   with the §5.2 dt policy and a dt-halving pair — the first run in territory where the
   lift can say something new; report-only until the ladder completes.
 - **V4 — re-entrant-band survey.** `mu_critical` (with its re-entrance detection) and
@@ -707,12 +707,16 @@ V3 hours (a few 512² fields at 2–3× QSS cost); V4 hours (batched 21×21 eige
 
 Evaluated per gate-passing candidate at 512² on the data box:
 
-- **L1 — lifted linear verdict at μ_central = 7.2e-4:** strict Turing on the full
+- **L1 — lifted linear verdict at μ_gate = 1e-3** (owner-set 2026-08-17, D-REDESIGN-5;
+  inside the cited biological band [1.1e-5, 9.2e-3], and equal to
+  `docs/TIMESCALE_MU.md`'s headline estimate from the same Chen/Müller citations; the
+  band's literature-central 7.2e-4 stays a reported point in the band sweep)**:**
+  strict Turing on the full
   21-branch lifted Jacobian AND not oscillatory (the `stationary` classification —
   built deliberately to avoid the trace test that a −1/μ diagonal defeats). The Hopf
   exclusion is non-negotiable: a wave instability is not the claimed stationary
   pattern.
-- **L2 — lifted rollout patterns at μ_central:** amplitude above the existing
+- **L2 — lifted rollout patterns at μ_gate:** amplitude above the existing
   pattern_floor, `stopped_reason == "horizon"` (a step-budget truncation is not
   evidence), under the §5.2 dt policy with a passing dt-halving check.
 - **L3 — wavelength:** k* of the lifted rollout within one radial bin of k*_obs —
@@ -728,7 +732,7 @@ Evaluated per gate-passing candidate at 512² on the data box:
   a labyrinth, 94.4% held-out, and the classifier is report-only regardless); and the
   QSS-vs-lifted field difference.
 
-**Gate at μ_central, report across the band.** μ is a three-decade *uncertainty band*
+**Gate at μ_gate, report across the band.** μ is a three-decade *uncertainty band*
 on a literature-derived timescale ratio, not a swept parameter: gating band-wide would
 turn one uncertain quantity into a conjunction of claims biology does not license, and
 the measured re-entrance means an edge point can flip on the least-certain digit.
@@ -750,7 +754,7 @@ discriminate mechanism. Numerics controls per gated model: the dt-halving check
 ### 5.5 Training–verification coupling
 
 A periodic **non-differentiable** lifted-linear audit inside training: one lifted
-Jacobian at μ=1, `rescale_mu` to μ_central, eigenscan of the 21×21 across a coarse
+Jacobian at μ=1, `rescale_mu` to μ_gate, eigenscan of the 21×21 across a coarse
 k-grid — cheap enough to run every M steps (cost measured at R1, not asserted). Used
 for **checkpoint selection** (prefer lifted-Turing checkpoints; reject
 QSS-Turing-but-lift-dead candidates before expensive verification), not as a loss
@@ -868,11 +872,14 @@ therefore complete. Items marked UNCALIBRATED stay UNCALIBRATED: ratification fi
    §4.6.
 5. **Linear terms demoted to guard-rail weight after ignition** — amends the SPEC §3
    "unchanged for the whole run" decision; baseline arm A0 preserved. §4.4.
-6. **Gate at μ_central vs band-wide** — **RULED: gate at μ_central = 7.2e-4, report
+6. **Gate at a point μ vs band-wide** — **RULED: gate at a single point, report
    across the band.** Rejected: band-wide gating (a conjunction of claims over a
    three-decade uncertainty band, with measured re-entrance able to flip an edge
    point on the least-certain digit). Revisited after V4 only if the survey shows the
-   biological band generically inside the first Turing window. §5.4.
+   biological band generically inside the first Turing window. **The gate point is
+   μ_gate = 1e-3, set by the owner 2026-08-17 (D-REDESIGN-5), superseding the
+   delegated choice of the literature-central 7.2e-4** — within the cited band and
+   equal to TIMESCALE_MU's headline estimate. §5.4.
 7. **β solved out / fixed-point pinning** — supersedes `frame_scale_anchor`
    (record-decision entry; not a prereg change), conditional on the §3.2 frame-mean
    bias measurement on the target. §3.2.

@@ -507,7 +507,7 @@ shortfall is reported against the bar as written.
 verification gate. It supersedes D-FFT-4's deferral ("never the gate") and revives the
 **vehicle** of the withdrawn §3.6 above — the lifted system as the object judged — but
 **not its criterion**: §3.6 required §3.2's robustness-volume bars at every μ across the
-band; this section gates three point verdicts at μ_central and *reports* the band and the
+band; this section gates three point verdicts at the gate point μ_gate and *reports* the band and the
 robustness row. It was added under the owner's explicit delegation of the
 `docs/REDESIGN_rngrn.md` §8 register (*"you decide on the Owner-decision register, I trust
 you"*, 2026-08-17), is **additive** — §§3.1–3.5 are unchanged and the QSS forward checks
@@ -519,7 +519,10 @@ before any run it judges.
 stiff numerics was D-FFT-4's stated risk; the ladder is its answer, not its dismissal.
 
 > On the seeds that pass the applicable criteria above, evaluated at 512² on the data box,
-> at μ_central = **7.2e-4** (`eval/lifted.py` MU_BIO_CENTRAL, Chen et al. 2014 / Müller et
+> at μ_gate = **1e-3** (set by the owner 2026-08-17, D-REDESIGN-5, before any gated run;
+> inside the biological band [1.1e-5, 9.2e-3] and equal to `docs/TIMESCALE_MU.md`'s
+> headline estimate from the same sources; the band's literature-central value is
+> `eval/lifted.py` MU_BIO_CENTRAL = 7.2e-4, reported in the band sweep — Chen et al. 2014 / Müller et
 > al. 2012):
 >
 > - **L1 (linear):** `turing_verdict_lifted` on the full N+2N²-branch lifted Jacobian is

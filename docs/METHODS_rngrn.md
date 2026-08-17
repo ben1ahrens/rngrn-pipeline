@@ -1561,8 +1561,8 @@ the ETDRK4 $x$-substep. Measured against a $2\times10^{5}$-substep explicit Eule
 ODE: $<10^{-5}$.
 
 **Exactness of the substep is not accuracy of the coupling — the trap, stated loudly.** At
-$\mu_\mathrm{central} = 7.2\times10^{-4}$ under the inherited policy
-$\Delta t = 0.2/\rho(J)$, the ratio $\Delta t/\mu \sim 30$–$300$: each gate substep relaxes
+$\mu_\mathrm{gate} = 10^{-3}$ (owner-set, D-REDESIGN-5) under the inherited policy
+$\Delta t = 0.2/\rho(J)$, the ratio $\Delta t/\mu \sim 20$–$200$: each gate substep relaxes
 *fully* to quasi-steady state, silently re-imposing QSS within a step. A genuine finite-$\mu$
 oscillatory route could then be smoothed into a stationary-looking pattern — the mirror image
 of the artefact the earlier deferral decision feared. Two mitigations are mandatory: the linear
@@ -1612,7 +1612,7 @@ completes**.
 - **V2 — temporal, 0-D.** The 21-dimensional well-mixed lifted ODE against a trusted stiff
   reference (Radau, rtol $10^{-10}$): trajectories converge to the 3-dimensional QSS ODE as
   $\mu\to0$; and the Strang stepper matches the reference at
-  $\mu \in \{10^{-5}, 7.2\times10^{-4}, 10^{-2}, 10^{-1}, 1\}$ under $\Delta t$-halving, with
+  $\mu \in \{10^{-5}, 7.2\times10^{-4}, 10^{-3}, 10^{-2}, 10^{-1}, 1\}$ under $\Delta t$-halving, with
   observed order $\approx 2$ where $\Delta t \lesssim \mu$ and sup-norm error at the horizon
   $\le 0.1 \times \text{pattern\_floor}$ — derived, not invented: integration error must sit an
   order below the smallest amplitude ever called a pattern.
@@ -1620,7 +1620,7 @@ completes**.
   $\mu\in\{10^{-4},10^{-5},10^{-6}\}$, same seed, timestep and horizon: patterned flag equal,
   morphology class equal (at $512^2$ only), $k^\ast$ within one radial bin, and field relative
   $L_2$ difference decreasing with $\mu$ (absolute bound **UNCALIBRATED** — the measured curve
-  becomes the calibration). (b) Then at $\mu_\mathrm{central}$ with the §8.4 timestep policy
+  becomes the calibration). (b) Then at $\mu_\mathrm{gate}$ with the §8.4 timestep policy
   and a $\Delta t$-halving pair — the first run in territory where the lift can say something
   new, and report-only until the ladder completes.
 - **V4 — re-entrant-band survey.** `mu_critical` (with re-entrance detection) and
@@ -1641,9 +1641,9 @@ and report "never loses it", which is false.
 
 Evaluated per gate-passing candidate at $512^2$ on the data box.
 
-- **L1 — lifted linear verdict at $\mu_\mathrm{central} = 7.2\times10^{-4}$:** strict Turing on
+- **L1 — lifted linear verdict at $\mu_\mathrm{gate} = 10^{-3}$** (owner-set 2026-08-17, D-REDESIGN-5; inside the biological band, equal to `TIMESCALE_MU.md`'s headline estimate; the literature-central $7.2\times10^{-4}$ is a reported point in the band sweep)**:** strict Turing on
   the full 21-branch lifted Jacobian **and** classified `stationary` (§8.3).
-- **L2 — lifted rollout patterns at $\mu_\mathrm{central}$:** amplitude above the existing
+- **L2 — lifted rollout patterns at $\mu_\mathrm{gate}$:** amplitude above the existing
   `pattern_floor`, with `stopped_reason == "horizon"` (a step-budget truncation is not
   evidence), under the §8.4 timestep policy and a passing $\Delta t$-halving check.
 - **L3 — wavelength:** $k^\ast$ of the lifted rollout within **one radial bin** of
@@ -1672,7 +1672,7 @@ QSS-versus-lifted field difference. Morphology classification is **report-only t
 the classifier was measured at $57.1\,\%$ stripe recall in-bank and $33.3\,\%$ on held-out
 $n=3$, which is too weak to gate.
 
-**Gate at $\mu_\mathrm{central}$, report across the band.** $\mu$ is a three-decade
+**Gate at $\mu_\mathrm{gate}$, report across the band.** $\mu$ is a three-decade
 *uncertainty band* on a literature-derived ratio, not a swept parameter. Gating band-wide would
 turn one uncertain quantity into a conjunction of claims biology does not license, and the
 measured re-entrance means an edge point can flip on the least-certain digit. Band-wide gating
@@ -1690,7 +1690,7 @@ current **silent fallback** to ETDRK4 is removed and made loud, unconditionally.
 ### 8.8 Training–verification coupling
 
 A periodic **non-differentiable** lifted-linear audit runs inside training: one lifted Jacobian
-at $\mu=1$, `rescale_mu` to $\mu_\mathrm{central}$, and an eigenscan of the $21\times21$ across
+at $\mu=1$, `rescale_mu` to $\mu_\mathrm{gate}$, and an eigenscan of the $21\times21$ across
 a coarse $k$-grid — cheap enough to run every $M$ steps (cost to be measured, not asserted). It
 is used for **checkpoint selection** — prefer lifted-Turing checkpoints, reject
 QSS-Turing-but-lift-dead candidates before expensive verification — and **not** as a loss term.
@@ -1714,7 +1714,7 @@ differentiable proxy is last resort and would be an objective change.
 | **Forward (QSS)** | patterns above the amplitude floor; $k^\ast$ within one radial bin | morphology class |
 | **Spectral** | held-out-band `spec_shape` distance beating **every** member of the $\ge6$-member null ensemble | train-band distances, per-term traces |
 | **Channels** | per-channel amplitude-ratio log-error (channels 1–2 against channel 0) beating **every** null-ensemble member (`docs/SPEC_fourier_training.md` §9.6, **BINDING at Stage 0**) | the raw log-errors; and the recorded caveat that channels 1–2 of this sample are near-flat (cv $\approx 0.075$) though D3 measures a $k^\ast$ on both within one radial bin |
-| **Lifted** | L1, L2, L3 at $\mu_\mathrm{central}$ (after the ladder) | band-wide L1, `mu_critical`, robustness-vs-$\mu$, lifted morphology |
+| **Lifted** | L1, L2, L3 at $\mu_\mathrm{gate} = 10^{-3}$ (after the ladder; D-REDESIGN-5) | band-wide L1, `mu_critical`, robustness-vs-$\mu$, lifted morphology |
 | **Cross-$L$** | — (see the disclosure below) | small-box transfer, mode-selection distribution |
 | **Plausibility** | — | $\alpha,\delta$ reported as `structural`; $D$-ratio and $\beta$ as measured/unscored |
 
@@ -1884,8 +1884,9 @@ $10\,\mathrm{s}/2\times10^{4}\,\mathrm{s} \approx 5\times10^{-4}$ "rounded up on
 `src/rngrn/eval/lifted.py` (MU_BIO_*) gives $\mu_\mathrm{central} = 7.2\times10^{-4}$ and the
 band $[1.1\times10^{-5},\,9.2\times10^{-3}]$, from the same Chen 2014 and Müller 2012 sources
 but with the model-time-unit factor $\delta_\mathrm{model} \in [0.4,5]$ carried explicitly. The
-band and $7.2\times10^{-4}$ are the values the ratified gate uses, and this draft follows the
-source. The two are reconcilable (they differ by the $\delta$ factor and a rounding), but they
+band is the reported sweep; the gate point is $\mu_\mathrm{gate} = 10^{-3}$, set by the
+owner (D-REDESIGN-5, 2026-08-17) — coinciding with TIMESCALE_MU's headline — and this
+draft follows that record. The two are reconcilable (they differ by the $\delta$ factor and a rounding), but they
 are **two separate calibration passes reported as one number** in places, and the older
 headline $10^{-3}$ should not be quoted alongside the band without saying so.
 

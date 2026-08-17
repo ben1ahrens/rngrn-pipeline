@@ -3234,7 +3234,8 @@ with the dynamical lift", and on the register the owner said *"you decide on the
 Owner-decision register, I trust you."*
 
 **The decision:** forward verification of a recovered model gates on the lifted system at
-μ_central = 7.2e-4 — L1 `eval/lifted.py::turing_verdict_lifted` strict-Turing AND stationary
+μ_gate = 1e-3 (as amended the same day by the owner, D-REDESIGN-5; originally the
+literature-central 7.2e-4) — L1 `eval/lifted.py::turing_verdict_lifted` strict-Turing AND stationary
 (Hopf excluded); L2 `simulate_lifted` patterns (existing `pattern_floor`, horizon-stop, dt
 policy min(0.2/jac_rate, μ/2) with a dt-halving check); L3 k* of the lifted rollout within
 one radial bin `|k*_lift − k*_obs| ≤ 2π/L` (the binding form per D-FFT-3; ≈12.0% of k*_obs
@@ -3276,7 +3277,8 @@ including the small-box extension and the estimator policy).
 
 **The decision:** all 15 items of `docs/REDESIGN_rngrn.md` §8 are ratified as written
 there. Rulings made under the delegation, with rejected alternatives: **item 6** — gate at
-μ_central, band reported (rejected: band-wide; see D-LIFT-1); **item 8** — adjoint-primary
+a point μ, band reported (rejected: band-wide; see D-LIFT-1; the point itself was moved
+to 1e-3 by the owner, D-REDESIGN-5); **item 8** — adjoint-primary
 gradient policy with the unrolled-path promotion rule pre-specified (FD-faithful at 1e-4 on
 converged AND stalled members, cost not exceeding the adjoint's; rejected: leaving promotion
 to a post-hoc choice after results exist); **item 13** — the unit of independence for
@@ -3412,3 +3414,28 @@ samples would give a spread — a cheap follow-up before R5 breadth if wanted.
 
 **Where it lives:** `docs/REDESIGN_rngrn.md` §3.2 (the pinning) and §8 item 7;
 `scripts/measure_frame_bias.py`; `experiments/redesign_r2/frame_bias/results/bias.json`.
+
+### D-REDESIGN-5 — the lifted gate evaluates at μ_gate = 1e-3, set by the owner
+
+**Date:** 2026-08-17 (owner instruction, mid-R1 session). **Status:** DECIDED
+**Decided by:** **the owner** (direct instruction: μ = 0.001, "seems like a better value
+from my experience") — not a delegated ruling.
+
+**The decision:** the §3.7 lifted gate (L1–L3) evaluates at **μ_gate = 1e-3**,
+superseding the delegated choice of the literature-central 7.2e-4. The biological band
+[1.1e-5, 9.2e-3] and its constants (`eval/lifted.py` MU_BIO_LO/CENTRAL/HI) are unchanged
+and remain the reported sweep; 7.2e-4 stays a reported point within it. Made **before any
+gated run exists**, so no recorded number changes meaning.
+
+**Evidence:** owner experience (the stated basis), and two consistency facts: 1e-3 lies
+inside the cited band, and equals `docs/TIMESCALE_MU.md`'s own headline μ estimate from
+the same Chen 2014 / Müller 2012 sources (the 7.2e-4 figure is the same derivation with a
+δ_model factor — the two documents' discrepancy is on record in the METHODS audit, A2).
+
+**What was rejected and why:** keeping 7.2e-4 (a delegated derivation the owner has now
+overridden within its own uncertainty band — the band spans three decades, and a factor
+of 1.4 within it is well inside the least-certain digit); and gating at both points (a
+conjunction; the second point is reported, not gated, per register item 6).
+
+**Where it lives:** `docs/PREREGISTRATION.md` §3.7; `docs/REDESIGN_rngrn.md` §5.2, §5.3
+(V3b), §5.4, §5.5, §8 item 6; the V2 ladder rung's μ set gains 1e-3 (Task 4, in flight).

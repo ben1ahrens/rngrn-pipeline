@@ -3135,10 +3135,12 @@ call.
 
 ### D-FFT-14 — PROPOSED ablation arm: parameter-noise ("weight noise") during training as an annealer and robustness prior
 
-**Date:** 2026-08-12. **Status:** PROPOSED by the owner (not designed into any stage, not
-run; recorded so the idea survives the session). Adopting it is a Stage-0/1 ablation
-decision that must go through the A/B protocol below — never a silent default, because it
-changes what every recorded number means.
+**Date:** 2026-08-12. **Status:** ADOPTED into the redesign as an ablation arm, 2026-08-17
+(D-REDESIGN-2; `docs/REDESIGN_rngrn.md` §4.7, R4) — under this entry's rules verbatim, with
+schedule and magnitude still UNCALIBRATED and to be pre-registered here before the arm
+runs. Originally PROPOSED by the owner (not designed into any stage, not run; recorded so
+the idea survives the session). Adoption went through the register, not a silent default,
+because it changes what every recorded number means.
 
 **The proposal:** inject annealed noise into the raw parameters θ (or the gradient,
 SGLD-style) during training. Two distinct payoffs, to be evaluated separately:
@@ -3302,3 +3304,43 @@ and any future change that would weaken a bar still goes to the owner by name.
 
 **Where it lives:** `docs/REDESIGN_rngrn.md` §8; `docs/PREREGISTRATION.md` §3.4 amendment
 note and §3.7.
+
+### D-REDESIGN-2 — weight-noise adopted as a redesign ablation arm under D-FFT-14's rules; loss registry, training telemetry and pipeline/plots notebooks added as infrastructure
+
+**Date:** 2026-08-17 (redesign session, branch `docs/redesign-rngrn`). **Status:** DECIDED
+**Decided by:** the implementing agent under the same owner delegation as D-REDESIGN-1;
+the weight-noise request, the loss registry, the telemetry/visualisation requirement and
+the two notebooks were owner-requested in this session.
+
+**The decision:** (1) parameter noise during training enters the redesign as an
+**ablation arm at R4**, governed by D-FFT-14 verbatim — injection in the gradient or the
+linear-theory evaluations only, never the θ the forward solve sees; matched no-noise
+control at identical seeds and budget; judged on held-out-band distances and channel
+co-gates alongside seed agreement, never agreement alone; noise schedule and magnitude
+UNCALIBRATED until pre-registered here before the run. (2) Loss terms move onto a
+registry built on `rngrn/registry.py::Registry` — per term: serial callable, batched twin
+or explicit refusal, default weight, calibration tag — with an enumeration-contract test;
+`DEFAULT_WEIGHTS` and `compute_terms{,_batched}` enumerate it. (3) `TrainingHistory`
+extends to the population loop (ignition/de-ignition/stall/cull/death events, per-term
+traces, canonical-gauge invariant trajectories alongside raw θ), with a `viz` module and
+two thin-driver notebooks: `notebooks/redesign_pipeline.ipynb` (full pipeline; trainer
+launches wrapped in `scripts/guarded_run.sh`) and `notebooks/redesign_plots.ipynb`
+(figures from a finished run directory). Items (2)–(3) are engineering: they carry no
+thresholds and change no number's meaning.
+
+**Evidence:** D-FFT-14's recorded cost measurements (warm-Newton 5030 s pathology;
+ignition chatter) fix the injection placement; D5's ten-distinct-basins measurement is
+the annealing motivation; `history.py` already records per-step per-member parts and
+parameter vectors, so the extension is incremental; `rngrn/registry.py` already provides
+the registry primitive.
+
+**What was rejected and why:** weight noise as a default (D-FFT-14's own prohibition —
+it changes what every recorded number means); recording only raw θ trajectories (gauge-
+ridden; convergence is only visible in the §3.4 invariant coordinates); science logic in
+notebook cells (notebooks are thin drivers over library code, or their results are not
+reproducible from the run directory).
+
+**Not independently validated:** nothing here is run yet; the notebooks and telemetry are
+R2 deliverables, the noise arm an R4 deliverable.
+
+**Where it lives:** `docs/REDESIGN_rngrn.md` §4.7–§4.8, §6, §7 (R2, R4), §8 item 16.

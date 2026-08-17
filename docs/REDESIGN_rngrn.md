@@ -512,7 +512,68 @@ absolute units — the only way to break the time gauge (§3.2) and pin absolute
 No current gate needs absolute rates (the R2 restriction exists precisely for this), so
 this stays a designed follow-up arm, not critical path.
 
-### 4.7 Hidden channels (design now, run later)
+### 4.7 Weight-noise arm (owner-requested 2026-08-17; adopts D-FFT-14 under its own rules)
+
+Parameter noise during training enters the redesign as an **ablation arm**, exactly as
+D-FFT-14 pre-registered it — never a silent default, because it changes what every
+recorded number means. The two payoffs are evaluated separately, per that entry:
+optimization annealing (D5 measured ten seeds in ten distinct sign-structure basins; if
+good mechanisms occupy wider basins, noise concentrates seeds into them — an empirical
+claim about *this* landscape, not a given) and a mechanism-robustness prior (noise
+penalises sharp minima, selecting θ whose Turing instability survives perturbation —
+the same axis §3.2's `turing_volume` measures post-hoc). D-FFT-14's placement
+constraints bind verbatim: **noise never touches the θ the forward solve sees** (the
+warm-start cost is sharply sensitive to per-step θ displacement, and noise near the
+ignition margin would toggle the gate — ignition chatter, wasted solves); it is
+injected in the gradient or the cheap linear-theory evaluations only, and every solve
+runs at the clean current θ. Gate integrity likewise: the arm is judged on the
+held-out-band distances and channel co-gates alongside seed agreement, never on
+agreement alone — noise that merely smooths the landscape can raise agreement without
+raising truthfulness. The noise schedule and magnitude are **UNCALIBRATED** and must be
+pre-registered in `docs/DECISIONS.md` before the arm runs, with the D-FFT-14 A/B
+protocol (matched no-noise control, identical seeds and budget). In the §4.5 loop the
+natural placement is Phase I (linear-theory terms, population-wide, milliseconds); a
+Phase II variant would need its own cost measurement first. Register item 16.
+
+### 4.8 Loss registry, training telemetry, and the two notebooks (owner-requested 2026-08-17)
+
+Infrastructure, not science — no thresholds live here — but designed now so the
+campaign is observable and reproducible:
+
+- **Loss registry.** Loss terms become registry entries on the existing generic
+  `Registry` (`rngrn/registry.py`), one record per term: name, serial callable, batched
+  twin (or an explicit refusal, like today's spectral-terms-in-batched refusal),
+  default weight, and a calibration tag (`CALIBRATED(<source>)` | `UNCALIBRATED`).
+  `DEFAULT_WEIGHTS`, `compute_terms`/`compute_terms_batched` and the config validation
+  enumerate the registry instead of hand-maintained key sets, and an
+  enumeration-contract test asserts every registered term is classified (batched twin
+  or refusal, calibration tag present) — the same completeness-test pattern
+  `test_firewall.py` uses for module classification. New terms (`kstar_si`) and retired
+  ones (A0-only terms) are then registry states, not scattered edits.
+- **Training telemetry.** `TrainingHistory` already records per-step, per-member loss
+  parts and raw parameter vectors (`history.py::record_serial/record_batched/
+  to_arrays`); it extends to the population loop with: per-member ignition, de-ignition,
+  stall, cull and death events (timestamped by step); per-term loss traces through both
+  phases; and — because raw θ is gauge-ridden — the **canonical-gauge invariant
+  combinations of §3.4 recorded alongside the raw vectors**, so "how parameters are
+  being learned" is watchable in coordinates where convergence means something. Arrays
+  land in the run directory under `arrays/` (tracked, per the D-PLOT-1 gitignore
+  policy) with a `viz` module turning them into the standard figures: per-term loss
+  curves, invariant trajectories per member, ignition/cull timelines, and the Phase-II
+  spectral-distance trace against the D3 estimation floor.
+- **Two notebooks**, in `notebooks/`, both thin drivers over library code (no science
+  in notebook cells): `redesign_pipeline.ipynb` runs the full pipeline for the
+  campaign — config resolution, the R-milestone stages, each trainer launch wrapped in
+  `bash scripts/guarded_run.sh` (§7a of `CLAUDE.md` binds notebook launches too), with
+  the run directory as the sole output contract; `redesign_plots.ipynb` consumes a
+  finished run directory (tracked indexes + `arrays/`) and regenerates every figure via
+  the `viz` module. Firewall note: notebooks sit harness-side, like `train.fit` — they
+  may orchestrate both sides but import no answer-key reader into any recovery-side
+  module, and they keep `scripts/` off the recovery-side import graph (the §5
+  completeness-test blind spot for `scripts/` is exactly where notebook convenience
+  imports have bitten before).
+
+### 4.9 Hidden channels (design now, run later)
 
 No latent field variables and no `resid`. The forward solve integrates all N species;
 spectral terms are computed on observed channels only; the unobserved species is
@@ -710,6 +771,10 @@ owner-decision class, not taken here.
 | `integrate_bdf1_newton_krylov` silent ETDRK4 fallback | **Removed/made loud** unconditionally (§5.2) |
 | Morphology scorer, robustness cloud, leak controls, L-transfer harness, firewall tests | Survive unchanged; L-transfer stays QSS (lifted L-transfer is future work) |
 | Data generator | Gains multi-realization emission (N = 8 at 512²/p=8, 6/2 realization split) and held-out small-box sets (p ∈ {2,3,4} × S seeds) (owner decision, §4.6) |
+| `rngrn/registry.py` (generic `Registry`) | Survives; gains the **loss-term registry** (name, serial fn, batched twin or explicit refusal, default weight, calibration tag) with an enumeration-contract test (§4.8) |
+| `history.py` (`TrainingHistory`) | Survives; extended with population events (ignition/de-ignition/stall/cull/death), per-term traces through both phases, and canonical-gauge invariant trajectories (§4.8) |
+| Visualization / notebooks | **New**: `viz` module + `notebooks/redesign_pipeline.ipynb` (guarded full-pipeline driver) + `notebooks/redesign_plots.ipynb` (figures from a finished run dir) (§4.8) |
+| Weight noise (D-FFT-14) | **Adopted as an ablation arm** at R4, under D-FFT-14's placement and A/B rules; never a default (§4.7, register item 16) |
 
 Firewall note: every new training-side component (solve-box logic, unrolled gradients,
 lifted audit) is recovery-side and touches only observation-derived quantities; the
@@ -725,12 +790,16 @@ the completeness test enforces this inside `src/rngrn/`.
 - **R1 — lift validation ladder** V0–V4 (§5.3), including the GPU port of
   `simulate_lifted` and the loud `bdf1` fallback fix. Deliverable: the ladder report
   and the V4 survey number.
-- **R2 — model reconstruction.** Fixed-point pinning (β solved out — including the
-  frame-mean bias measurement on the target required by §3.2), box-sigmoid
-  reparameterization, `kstar_si`, retired terms; baseline arm A0 preserved verbatim.
-  Deliverables: a Phase-I-only population run on the target read against the D5 row
-  on the §1 comparable columns, and the measured per-member ignition rate and
-  throughput/RSS curve that set B and K (§4.5).
+- **R2 — model reconstruction + observability.** Fixed-point pinning (β solved out —
+  including the frame-mean bias measurement on the target required by §3.2),
+  box-sigmoid reparameterization, `kstar_si`, retired terms; baseline arm A0 preserved
+  verbatim. The §4.8 infrastructure lands here too: the loss registry with its
+  enumeration-contract test, the `TrainingHistory` population/event/invariant
+  extension, the `viz` module, and both notebooks (the pipeline notebook driving R2's
+  own run is its first test). Deliverables: a Phase-I-only population run on the
+  target read against the D5 row on the §1 comparable columns, the measured per-member
+  ignition rate and throughput/RSS curve that set B and K (§4.5), and the run's
+  figures regenerated end-to-end from `redesign_plots.ipynb`.
 - **R3 — gradient machinery.** Batched spectral/forward implementation with its
   bit-level equivalence test (§4.1); adaptive commensurate solve box; FD A/B on both
   gradient paths at the operating point plus the 96²-vs-512² RAPS fidelity and
@@ -739,7 +808,9 @@ the completeness test enforces this inside `src/rngrn/`.
   stall-rate distribution (which calibrates the §4.3 switch fraction).
 - **R4 — the campaign.** Full Phase I → cull → Phase II on the target with the
   N-frame training targets (§4.6); guard-rail and spectral weights swept (all UNCALIBRATED at birth);
-  gate-passers through the §5.4 lifted gate with the §9.5 null ensemble. Deliverable:
+  gate-passers through the §5.4 lifted gate with the §9.5 null ensemble; the §4.7
+  weight-noise arm runs here as a D-FFT-14 A/B against its matched no-noise control,
+  after its schedule and magnitude are pre-registered. Deliverable:
   the redesign's row on the §1 comparable columns — Turing fraction, distinct sign
   structures, k* error — plus the population-consistent `topology_consistency` (§3.4),
   the lifted-gate pass/null-pass fractions, the held-out realization-consistency check
@@ -751,7 +822,7 @@ the completeness test enforces this inside `src/rngrn/`.
   on the tuning sample, in this direction, by this much, against the D5 row and the
   null ensemble". A recovery claim requires R5.
 - **R5 — breadth (out of first-campaign scope).** Remaining canonical samples, nc1
-  form, noise arms, held-out one-shot under the frozen config; the m<N arm (§4.7,
+  form, noise arms, held-out one-shot under the frozen config; the m<N arm (§4.9,
   including the recorded coupling-threshold calibration); transient-pair protocol if
   ratified.
 
@@ -836,3 +907,12 @@ therefore complete. Items marked UNCALIBRATED stay UNCALIBRATED: ratification fi
     Rejected: swapping the primary estimator — the sub-bin centroid k* and the
     one-bin bar are calibrated on the unwindowed estimator, and a silent swap would
     change what every spectral number means.
+16. **Weight-noise arm** (owner-requested 2026-08-17) — **RULED: adopted as an
+    ablation arm under D-FFT-14's pre-registered rules verbatim** (gradient/
+    linear-theory injection only, solves at clean θ; matched no-noise control;
+    judged on held-out bands alongside seed agreement, never agreement alone).
+    Schedule and magnitude UNCALIBRATED — pre-registered in `docs/DECISIONS.md`
+    before the arm runs. Rejected: making noise a default (changes what every
+    recorded number means — D-FFT-14's own prohibition). §4.7; D-REDESIGN-2. The
+    loss registry, telemetry and notebooks of §4.8 are engineering, carry no
+    thresholds, and need no register item.

@@ -188,14 +188,14 @@ def integrate_etdrk4_rfft(X0, D, reaction_np, n, L, dt, nsteps):
     return np.fft.irfft2(v, s=(n, n), axes=(1, 2)), False
 
 
-def integrate_bdf1_newton_krylov(X0, D, reaction_np, n, L, dt, nsteps):
-    """Implicit-Euler (BDF1) with a Newton-Krylov nonlinear solve. STUB.
-
-    TODO(claude-code): each step solve X^{n+1} - dt(D lap + f)(X^{n+1}) = X^n with
-    scipy.optimize.newton_krylov (diffusion applied spectrally inside the residual).
-    Falls back to ETDRK4 so the pipeline stays runnable.
-    """
-    return integrate_etdrk4(X0, D, reaction_np, n, L, dt, nsteps)
+def integrate_bdf1_newton_krylov(*args, **kwargs):
+    """STUB — deliberately loud. docs/REDESIGN_rngrn.md §5.2 removed the silent
+    ETDRK4 fallback (a result labelled bdf1 that was not bdf1). Implemented at the
+    gate milestone (R4 plan) as the 128² cross-check integrator."""
+    raise NotImplementedError(
+        "bdf1_newton_krylov is not implemented; it previously fell back to ETDRK4 "
+        "silently. Use 'etdrk4'/'etdrk4_rfft', or implement the BDF1 scheme."
+    )
 
 
 INTEGRATORS = dict(

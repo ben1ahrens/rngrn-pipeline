@@ -29,13 +29,23 @@ differently:
       ways (gates_qss's closed form vs lifted_rhs_torch's `1 - GA.sum - GR.sum`), algebraically
       identical but not bit-identical, so their float64 difference (~1e-13-1e-16) gets divided
       by mu inside the residual. This is a real property of the EXISTING eval/lifted.py code,
-      not a defect, and not something V0 re-derives or patches. RULING: the bar itself becomes
-      mu-aware and MEASURED rather than a fixed 1e-7 -- `v0_invariants` now also reports
-      `amplification_A`, the empirical worst-case value of (residual(mu) * mu) / eps
-      (eps = float64 machine epsilon) over the whole (model, mu) grid, and
-      tests/test_lift_ladder.py freezes the measured A per form into a mu-scaled bound,
-      `max_residual(mu) <= max(1e-9, 10 * A_FORM * eps / mu)`, with A_FORM's provenance
-      recorded at the site.
+      not a defect, and not something V0 re-derives or patches.
+
+RULING ROUND 2 (ledger 2026-08-17, review of round 1's fix). Round 1's single amplification
+constant A was measured as the max of `residual(mu) * mu / eps` over the WHOLE (model, mu)
+grid, including the flat-in-mu region -- so it was FLOOR-dominated (the x-block round-off
+floor, mechanism (b)'s "flat" part below, sets the max of that ratio at the LARGEST mu, not
+the smallest), producing a bound ~5 orders of magnitude too loose exactly where V1 (mu in
+{1e-7, 1e-6, 1e-5}) needs it tight. Two DISTINCT residual components, honestly measured
+separately, replace the single A:
+  - `residual_floor_F` = max fixed-point residual over mu in the FLAT region ({1e-2, 1, 1e2}
+    in the standard mu list) -- this is the x-BLOCK round-off floor: `model.reaction(x*)`
+    itself, mu-INDEPENDENT (it does not touch the gate rows at all).
+  - `amplification_C` = max of `residual(mu) * mu / eps` over mu in the GATE-BLOCK
+    amplification region ({1e-6, 1e-4} in the standard mu list) -- the C/mu mechanism proper,
+    isolated from the floor by only sampling the region where it actually dominates.
+tests/test_lift_ladder.py freezes both, per form, into
+`max_residual(mu) <= max(1e-9, 10 * F_FORM, 10 * C_FORM * eps / mu)`, tight in both regimes.
 """
 from __future__ import annotations
 
@@ -53,8 +63,17 @@ from . import lifted
 # invented threshold.
 NEWTON_TIGHT_TOL = 1e-10
 
-# float64 machine epsilon, used to define `amplification_A` (ruling, ledger 2026-08-17).
+# float64 machine epsilon, used to define `amplification_C` (ruling round 2, ledger
+# 2026-08-17).
 EPS64 = 2.220446049250313e-16
+
+# The two mu regions ruling round 2 (ledger 2026-08-17) splits `fixed_point_residual` into,
+# matching the standard mu list [1e-6, 1e-4, 1e-2, 1.0, 1e2] this ladder rung is measured on:
+# mu >= FLOOR_REGION_MU_MIN is the flat, x-block-round-off-dominated region (residual_floor_F);
+# mu <= AMPLIFICATION_REGION_MU_MAX is the gate-block 1/mu-amplified region (amplification_C).
+# A mu strictly between the two (not present in the standard list) contributes to neither.
+FLOOR_REGION_MU_MIN = 1e-2
+AMPLIFICATION_REGION_MU_MAX = 1e-4
 
 
 class ModelDraws(list):
@@ -129,27 +148,37 @@ def v0_invariants(models: list, mus: list[float]) -> dict:
     a floor measurement, not a spot check, per docs/REDESIGN_rngrn.md §5.3 V0.
 
     Returns {"max_fixed_point_residual", "max_rescale_mu_err", "max_gate_qss_err",
-    "n_models", "exclusion_rate", "amplification_A"}. `max_rescale_mu_err` is RELATIVE
-    (max abs diff / max abs of the fresh Jacobian), matching
+    "n_models", "exclusion_rate", "residual_floor_F", "amplification_C"}.
+    `max_rescale_mu_err` is RELATIVE (max abs diff / max abs of the fresh Jacobian), matching
     tests/test_lifted.py::test_rescale_mu_matches_autodiff -- the gate rows of J_full scale
     as 1/mu, so an ABSOLUTE tolerance would not be comparable across the mu range in `mus`
     (a 1e-6 relative slip at mu=1e-6 is a 1.0-scale absolute one). `max_gate_qss_err` is
     absolute, matching tests/test_lifted.py::test_gates_qss_reproduce_the_qss_reaction (both
     f_lift and f_qss are O(x*), no scale sweep involved).
 
-    CONTROLLER RULING (ledger 2026-08-17, module docstring has the full rationale):
+    CONTROLLER RULING ROUND 2 (ledger 2026-08-17, module docstring has the full rationale):
     `exclusion_rate` is read back from `models.exclusion_rate` if `models` came from
     `draw_models` (a `ModelDraws`); NaN for a plain list, since the rate is meaningless
     without draw_models's own bookkeeping of steady_state-converged-but-loose draws.
-    `amplification_A` = max over every (model, mu) pair of `residual(mu) * mu / EPS64` --
-    the empirical worst-case constant in the residual's measured C/mu scaling at small mu
-    (task-2-report.md §4 mechanism (a)). It is a MEASUREMENT this function reports, not a
-    bar it enforces; the caller (tests/test_lift_ladder.py) freezes it into a mu-scaled bound.
+    `fixed_point_residual(mu)` has TWO honestly-distinct components, and round 2 replaced
+    round 1's single floor-dominated `amplification_A` with one measurement per component:
+      - `residual_floor_F` = max residual over mu in the FLAT region (mu >=
+        FLOOR_REGION_MU_MIN) -- the x-BLOCK round-off floor, i.e. how far
+        `model.reaction(x*)` itself sits from zero; mu-INDEPENDENT, because the gate rows of
+        the lifted RHS do not appear in this component at all.
+      - `amplification_C` = max of `residual(mu) * mu / EPS64` over mu in the
+        GATE-AMPLIFICATION region (mu <= AMPLIFICATION_REGION_MU_MAX) -- the C/mu mechanism
+        proper (task-2-report.md §4 mechanism (a): eval/lifted.py's two independent,
+        not-bit-identical reconstructions of the gate normalisation `free`), isolated from
+        the floor by only sampling the region where it actually dominates.
+    Both are MEASUREMENTS this function reports, not bars it enforces; the caller
+    (tests/test_lift_ladder.py) freezes both, per form, into a bound tight in both regimes.
     """
     max_fp_residual = 0.0
     max_rescale_err = 0.0
     max_gate_err = 0.0
-    max_amplification_A = 0.0
+    residual_floor_F = 0.0
+    amplification_C = 0.0
     for m in models:
         xs, converged = steady_state(m)
         if not converged:
@@ -159,6 +188,10 @@ def v0_invariants(models: list, mus: list[float]) -> dict:
         xstar = xs.detach().cpu().numpy()
 
         GA, GR = lifted.gates_qss(m, xstar)
+        # Mirrors eval/lifted.py::lifted_rhs_torch's `dx = model.beta + prod - model.delta *
+        # x` line (numpy here vs torch there, since this feeds a numpy f_qss comparison
+        # below) -- a shared helper is deferred to Task 7's single-sourcing decision rather
+        # than introduced here as a one-off (Minor, code review round 2).
         f_lift = (m.beta.detach().cpu().numpy() + lifted.production_from_gates(m, GA, GR)
                   - m.delta.detach().cpu().numpy() * xstar)
         f_qss = m.reaction(
@@ -169,7 +202,10 @@ def v0_invariants(models: list, mus: list[float]) -> dict:
         for mu in mus:
             resid = lifted.fixed_point_residual(m, xstar, mu)
             max_fp_residual = max(max_fp_residual, resid)
-            max_amplification_A = max(max_amplification_A, resid * mu / EPS64)
+            if mu >= FLOOR_REGION_MU_MIN:
+                residual_floor_F = max(residual_floor_F, resid)
+            if mu <= AMPLIFICATION_REGION_MU_MAX:
+                amplification_C = max(amplification_C, resid * mu / EPS64)
             Jd = lifted.lifted_jacobian(m, xstar, mu)
             Jr = lifted.rescale_mu(J1, m.N, mu)
             rel = float(np.max(np.abs(Jr - Jd))) / max(float(np.max(np.abs(Jd))), 1e-300)
@@ -181,4 +217,5 @@ def v0_invariants(models: list, mus: list[float]) -> dict:
                max_gate_qss_err=max_gate_err,
                n_models=len(models),
                exclusion_rate=exclusion_rate,
-               amplification_A=max_amplification_A)
+               residual_floor_F=residual_floor_F,
+               amplification_C=amplification_C)

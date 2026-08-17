@@ -250,6 +250,16 @@ lower raw hit rate is the **expected** consequence, not a defect. If viability a
 rate trade off, that trade-off is a result and gets reported as one; the centre does not
 move to make the bar easier.
 
+*Amendment 2026-08-17 (redesign arm only; D-REDESIGN-1, owner-delegated).* In the
+redesign arm of `docs/REDESIGN_rngrn.md`, α and δ are confined to their cited box rows
+**by reparameterization** (box-sigmoid), so those two rows are satisfied by construction.
+Consequence for this criterion, stated so no tautology can be reported as a result: in
+that arm the α and δ rows are reported as `structural`, never as measured pass rates, and
+the §3.4 verdict reads on the **still-measured** rows — the D-ratio (which keeps its soft
+prior and its recorded tension above) — with β still UNCITED and unscored. The baseline
+arm A0 keeps the original parameterization, so its §3.4 numbers remain comparable to all
+pre-amendment runs. Nothing about the bar itself changes.
+
 ### 3.5 Generalisation across domain size
 
 **Amended 2026-07-30, before any convergence result existed.** The owner clarified the
@@ -481,6 +491,46 @@ circuits carrying the claim — currently `three_gene_qvar` `sample_0003` and `s
 prior-ON, the two that are simultaneously `plausibility_score = 1.0` and patterned — are
 evaluated at full depth. If this criterion fails, it fails; §5 applies unchanged and the
 shortfall is reported against the bar as written.
+
+### 3.7 Lifted verification gate — added 2026-08-17 (additive; D-LIFT-1, owner-delegated)
+
+*Provenance, stated first.* This section makes the finite-μ dynamical lift the forward
+verification gate. It supersedes D-FFT-4's deferral ("never the gate") and revives the
+**vehicle** of the withdrawn §3.6 above — the lifted system as the object judged — but
+**not its criterion**: §3.6 required §3.2's robustness-volume bars at every μ across the
+band; this section gates three point verdicts at μ_central and *reports* the band and the
+robustness row. It was added under the owner's explicit delegation of the
+`docs/REDESIGN_rngrn.md` §8 register (*"you decide on the Owner-decision register, I trust
+you"*, 2026-08-17), is **additive** — §§3.1–3.5 are unchanged and the QSS forward checks
+(F1–F3 of `docs/SPEC_fourier_training.md` §1) remain binding co-gates — and is dated
+before any run it judges.
+
+*Precondition.* This gate binds **nothing** until the lift validation ladder V0–V4 of
+`docs/REDESIGN_rngrn.md` §5.3 has passed and its report is on record. Gating on unvalidated
+stiff numerics was D-FFT-4's stated risk; the ladder is its answer, not its dismissal.
+
+> On the seeds that pass the applicable criteria above, evaluated at 512² on the data box,
+> at μ_central = **7.2e-4** (`eval/lifted.py` MU_BIO_CENTRAL, Chen et al. 2014 / Müller et
+> al. 2012):
+>
+> - **L1 (linear):** `turing_verdict_lifted` on the full N+2N²-branch lifted Jacobian is
+>   strict-Turing AND stationary — the oscillatory/Hopf classification fails the gate.
+> - **L2 (nonlinear):** the lifted rollout (`simulate_lifted`, Strang/exact-gate scheme)
+>   patterns — amplitude above the existing `pattern_floor`, `stopped_reason == "horizon"` —
+>   under dt = min(0.2/jac_rate, μ/2) with a passing dt-halving check.
+> - **L3 (wavelength):** k* of the lifted rollout within one radial bin of `k*_obs`:
+>   `|k*_lift − k*_obs| ≤ 2π/L` (12.5% at the canonical target's p = 8; the one-bin bar of
+>   `docs/SPEC_fourier_training.md` §9.1 / D-FFT-3, not the legacy 8.3% half-bin figure).
+
+*Reported, never gated:* the L1 verdict at 9 log-spaced μ across [1.1e-5, 9.2e-3] plus both
+endpoints; `mu_critical` with its re-entrance flag; the drawn-μ `robustness_vs_mu` row (the
+criterion half of §3.6, report-only); the morphology class of the lifted field; and the
+QSS-vs-lifted field difference. *Controls:* the gate runs identically on the
+alternative-sign-structure null ensemble of `docs/SPEC_fourier_training.md` §9.5, and the
+null pass-fraction is reported — a high null pass-rate is itself the finding that this gate
+does not discriminate mechanism. *Band-wide gating* (all three verdicts across the full μ
+band) was considered and rejected (D-LIFT-1); it is revisited only if the V4 survey shows
+the biological band generically inside the first Turing window.
 
 ---
 

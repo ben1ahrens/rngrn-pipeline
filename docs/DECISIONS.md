@@ -2623,7 +2623,9 @@ documents.
 
 ### D-FFT-4 — forward validation gates on the QSS rollout; the finite-μ lift is a later milestone, never the gate
 
-**Date:** 2026-08-11 (design session). **Status:** DECIDED
+**Date:** 2026-08-11 (design session). **Status:** SUPERSEDED by D-LIFT-1 (2026-08-17;
+the lift becomes the gate *after* a validation ladder — numbers gated under this
+decision's QSS-only regime remain comparable only to other QSS-gated numbers)
 **Decided by:** the owner (who had asked for "simulated under the dynamical lift"), after
 the numerics risk was laid out.
 
@@ -3220,3 +3222,83 @@ the planner. §11's table wins.
 
 **Where it lives:** `CLAUDE.md` §11, `.claude/rules/orchestration.md`, and the `model:` line in
 each of the five files under `.claude/agents/`.
+
+### D-LIFT-1 — the finite-μ dynamical lift becomes the verification gate, after a validation ladder; supersedes D-FFT-4
+
+**Date:** 2026-08-17 (redesign session, branch `docs/redesign-rngrn`). **Status:** DECIDED
+**Decided by:** the implementing agent under explicit owner delegation, given in the same
+session: the owner's redesign brief named verification "by simulating the learned parameters
+with the dynamical lift", and on the register the owner said *"you decide on the
+Owner-decision register, I trust you."*
+
+**The decision:** forward verification of a recovered model gates on the lifted system at
+μ_central = 7.2e-4 — L1 `eval/lifted.py::turing_verdict_lifted` strict-Turing AND stationary
+(Hopf excluded); L2 `simulate_lifted` patterns (existing `pattern_floor`, horizon-stop, dt
+policy min(0.2/jac_rate, μ/2) with a dt-halving check); L3 k* of the lifted rollout within
+one radial bin `|k*_lift − k*_obs| ≤ 2π/L` (12.5% at the target's p=8, per D-FFT-3) — with
+the L1 verdict, `mu_critical`, and `robustness_vs_mu` *reported* across the biological band
+[1.1e-5, 9.2e-3]. QSS F1–F3 remain co-gates. **The gate binds nothing until the V0–V4
+validation ladder of `docs/REDESIGN_rngrn.md` §5.3 passes** — that ladder is the structural
+answer to D-FFT-4's numerics-risk rationale, which was correct and is not being overridden,
+only satisfied. Preregistration §3.7 (added 2026-08-17, additive) is the binding form.
+
+**Evidence:** the lift's fixed points are μ-independent and its machinery exists
+(`eval/lifted.py`: `rescale_mu`, `lifted_dispersion`, `turing_verdict_lifted`,
+`simulate_lifted` with the exact gate substep); the one measured μ-scan (`eval/lifted.py`
+"Measured" note, n=1) shows re-entrance with the biological band inside the first Turing
+window; validation status and the coupling trap (dt ≫ μ silently re-imposes QSS) are stated
+in `docs/REDESIGN_rngrn.md` §5.2–§5.3. No gated number exists yet under either regime that
+this changes.
+
+**What was rejected and why:** (a) keeping the QSS rollout as the sole gate (D-FFT-4) — the
+owner's stated verification target is the lift, and QSS-Turing does not imply lifted-Turing
+at a given μ (measured re-entrance); (b) gating band-wide across μ — a conjunction over a
+three-decade uncertainty band whose edge points can flip on the least-certain digit of a
+literature ratio (revisited after V4); (c) gating before the ladder — exactly the artefact
+risk D-FFT-4 named.
+
+**Not independently validated:** the lift itself — that is what V0–V4 exists to do; the
+ladder's own tolerances are UNCALIBRATED where marked in §5.3.
+
+**Where it lives:** `docs/REDESIGN_rngrn.md` §5; `docs/PREREGISTRATION.md` §3.7;
+`src/rngrn/eval/lifted.py` (unchanged as of this entry — implementation is milestone R1).
+
+### D-REDESIGN-1 — the REDESIGN_rngrn owner-decision register is ratified; per-item rulings recorded
+
+**Date:** 2026-08-17 (redesign session, branch `docs/redesign-rngrn`). **Status:** DECIDED
+**Decided by:** the implementing agent under explicit owner delegation (*"you decide on the
+Owner-decision register, I trust you"*), after interactive owner review that itself set
+three of the items (single 3-node target scope, learnable signs, the §4.6 data protocol
+including the small-box extension and the estimator policy).
+
+**The decision:** all 15 items of `docs/REDESIGN_rngrn.md` §8 are ratified as written
+there. Rulings made under the delegation, with rejected alternatives: **item 6** — gate at
+μ_central, band reported (rejected: band-wide; see D-LIFT-1); **item 8** — adjoint-primary
+gradient policy with the unrolled-path promotion rule pre-specified (FD-faithful at 1e-4 on
+converged AND stalled members, cost not exceeding the adjoint's; rejected: leaving promotion
+to a post-hoc choice after results exist); **item 13** — the unit of independence for
+preregistration §3.1/R1 is the full pipeline replicate, K_rep = 5 independent master seeds,
+population members never counted as seeds (rejected: counting culled members as seeds — the
+cull selects for sign-structure distinctness, biasing exactly the statistic §3.1 measures);
+**item 3** — hard bio-boxes for α/δ with the §3.4 amendment note making those rows
+`structural`, soft prior for the D-ratio (rejected: a hard D-ratio box — the generator
+population's median ~135 sits outside [1, 60] by the recorded bio_box decision, and a hard
+box would make the synthetic target unrepresentable); **item 15** — the Hann–Welch windowed
+spectral estimator enters report-only under the both-sides-identical rule (rejected:
+swapping the primary estimator, which would silently change what k*_obs and every spectral
+target means).
+
+**Evidence:** each item's grounding is cited at its section of `docs/REDESIGN_rngrn.md`
+(a document revised against a full evidence audit the same day; the audit verified every
+carried-over number against its source). The register's UNCALIBRATED numbers (item 14)
+remain UNCALIBRATED with their calibration rules named — ratification fixes rules, not
+values.
+
+**What was rejected and why:** treating the delegation as blanket authority to weaken
+pre-registered conditions — it is not read that way. §3.7 is additive; the §3.4 amendment
+narrows two rows to `structural` while the criterion's verdict continues to read on the
+still-measured rows (d_ratio; β stays UNCITED/unscored); nothing in §3.1–§3.5 is loosened,
+and any future change that would weaken a bar still goes to the owner by name.
+
+**Where it lives:** `docs/REDESIGN_rngrn.md` §8; `docs/PREREGISTRATION.md` §3.4 amendment
+note and §3.7.

@@ -1,8 +1,12 @@
 # REDESIGN_rngrn — a clean-slate design for robust GRN recovery, verified by the dynamical lift
 
-**Status: PROPOSAL.** This document proposes; the owner ratifies. Nothing in it amends
-`docs/DECISIONS.md` or `docs/PREREGISTRATION.md` by itself — every item in §8's
-owner-decision register requires an explicit ratification entry before implementation.
+**Status: RATIFIED DESIGN (2026-08-17).** Authored as a proposal, then ratified the
+same day: the owner reviewed it interactively and explicitly delegated the §8
+owner-decision register (*"you decide on the Owner-decision register, I trust you"*).
+The rulings live in `docs/DECISIONS.md` (D-LIFT-1, D-REDESIGN-1) and the
+preregistration amendments in `docs/PREREGISTRATION.md` (§3.7 added; §3.4 amendment
+note), all dated before any run they judge. UNCALIBRATED numbers remain UNCALIBRATED —
+ratification fixed the rules, not the values.
 Every number carried over from prior work is traced to a run directory, a document
 section, or a source file. Numbers *introduced* here are design choices: each is marked
 UNCALIBRATED at its point of use and listed in §8 item 14 with its calibration rule.
@@ -468,6 +472,39 @@ p ≥ 11). That box-dominance is exactly what makes them *validation* assets, tw
    estimator**, so it enters report-only and requires its own decision entry before it
    could ever bind.
 
+**Spectral estimator policy (added 2026-08-17, owner-accepted).** The unwindowed
+full-frame RAPS (`observables.raps`, sub-bin centroid k*) stays the **primary**
+estimator for the synthetic campaign: the generator's fields are periodic by
+construction, so the full-frame FFT has zero leakage, and windowing a periodic frame
+only convolves the spectrum with the window transform (~2-bin main lobe for Hann),
+buying nothing and costing peak resolution. A **Hann–Welch windowed estimator path**
+(2-D Hann window, ~50%-overlapping patches, window-power-normalised) is added alongside
+it, with three jobs and one strict rule:
+
+1. **Per-bin variance from within a frame**: cropped patches are not periodic, so
+   unwindowed patch spectra leak — D3's ~31%/bin floor was measured on plain quadrants;
+   windowed overlapping patches give roughly twice the effective independent spectral
+   samples per frame area with leakage suppressed, tightening the §4.6
+   inverse-variance weights.
+2. **Within-frame vs across-realization variance comparison**: windowed-patch variance
+   against the 6/2 realization split's across-frame variance. Agreement says
+   realization noise is patch noise writ large (fewer generated frames suffice);
+   excess across-realization variance is genuine realization-level structure — this
+   comparison is the calibration measurement for N (register item 14).
+3. **Real-data readiness**: experimental images are cropped, non-periodic, and
+   boundary-contaminated — there, full-frame FFT with assumed periodicity is simply
+   wrong and windowing is mandatory. Validating the windowed estimator against the
+   unwindowed one on synthetic data, where both are computable, is the on-ramp.
+
+**The rule: it is an estimator *pair*, or it is a bug.** Every spectral loss is a
+comparison between an observed and a model-side spectrum; any windowed estimator is
+applied identically on both sides so the window bias cancels (the discipline D6
+enforced for torch-vs-numpy RAPS). Because it changes what k*_obs and every spectral
+target means — the sub-bin centroid and the one-bin bar are calibrated on the
+unwindowed estimator — the windowed path is **report-only until calibrated against the
+unwindowed baseline on synthetic frames** (register item 15); it never silently
+replaces the primary.
+
 **Transient-pair data is designed but deferred.** Two *steady-state* frames dt apart
 carry zero rate information; the informative protocol is a transient pair (one frame at
 ~half saturation plus the final frame), whose band-power growth estimates σ(k*) in
@@ -682,8 +719,9 @@ the completeness test enforces this inside `src/rngrn/`.
 
 ## 7. Milestone sketch (single target; each milestone gates the next)
 
-- **R0 — ratification.** Owner rules on §8. Prereg §3.7 + D-LIFT-1 drafted and
-  ratified. Nothing else starts.
+- **R0 — ratification. COMPLETE 2026-08-17** (owner delegation; §8 preamble). Prereg
+  §3.7 and the §3.4 amendment note are in `docs/PREREGISTRATION.md`; D-LIFT-1 and
+  D-REDESIGN-1 are in `docs/DECISIONS.md`.
 - **R1 — lift validation ladder** V0–V4 (§5.3), including the GPU port of
   `simulate_lifted` and the loud `bdf1` fallback fix. Deliverable: the ladder report
   and the V4 survey number.
@@ -719,9 +757,14 @@ the completeness test enforces this inside `src/rngrn/`.
 
 ## 8. Owner-decision register
 
-Every item below requires explicit owner ratification (a DECISIONS.md entry, and a
-preregistration amendment where marked) before implementation. Nothing here is decided
-by this document.
+**RATIFIED 2026-08-17 under explicit owner delegation.** The owner reviewed this
+proposal interactively and delegated the register: *"you decide on the Owner-decision
+register, I trust you."* The rulings are recorded in `docs/DECISIONS.md` (D-LIFT-1 for
+item 1, which supersedes D-FFT-4; D-REDESIGN-1 for the register as a whole, including
+the per-item rulings on 6, 8 and 13), and the preregistration amendments (§3.7 added;
+§3.4 amendment note) are dated 2026-08-17 — before any run they judge. R0 of §7 is
+therefore complete. Items marked UNCALIBRATED stay UNCALIBRATED: ratification fixes the
+*rules*, not the numbers.
 
 1. **The lift becomes the verification gate** — proposes reversing D-FFT-4; revives
    the *vehicle* of withdrawn §3.6 (not its criterion — §5.1) as a new additive §3.7
@@ -740,14 +783,19 @@ by this document.
    §4.6.
 5. **Linear terms demoted to guard-rail weight after ignition** — amends the SPEC §3
    "unchanged for the whole run" decision; baseline arm A0 preserved. §4.4.
-6. **Gate at μ_central vs band-wide** — recommend central + band report; revisit after
-   V4. §5.4.
+6. **Gate at μ_central vs band-wide** — **RULED: gate at μ_central = 7.2e-4, report
+   across the band.** Rejected: band-wide gating (a conjunction of claims over a
+   three-decade uncertainty band, with measured re-entrance able to flip an edge
+   point on the least-certain digit). Revisited after V4 only if the survey shows the
+   biological band generically inside the first Turing window. §5.4.
 7. **β solved out / fixed-point pinning** — supersedes `frame_scale_anchor`
    (record-decision entry; not a prereg change), conditional on the §3.2 frame-mean
    bias measurement on the target. §3.2.
-8. **Gradient estimator policy** — adjoint primary, truncated-unrolled as stall
-   fallback; any promotion of the unrolled path to primary is a separate
-   ratification. §4.2.
+8. **Gradient estimator policy** — **RULED: adjoint primary, truncated-unrolled as
+   stall fallback**, with the promotion rule pre-specified now so no post-hoc choice
+   exists: the unrolled path may become primary only if R3's FD A/B shows it
+   FD-faithful at tol 1e-4 on both converged and stalled members AND its measured
+   cost does not exceed the adjoint path's. §4.2.
 9. **Reserved** (folded into item 14; kept so earlier cross-references stay stable).
 10. **The SPEC §9.5 null ensemble** — the design's default implements §9.5 as written
     (frozen-gate refits + single-edge flips, identical budget, seeded from the §4.5
@@ -760,10 +808,13 @@ by this document.
 12. **`k_min_frac` redefined k*-relative** — `TUNING.md` records this changes what the
     term means and requires re-measurement; A0 keeps the grid-relative form. §4.4.
 13. **Reconciling the population loop with §3.1/R1's independent-seeds requirement** —
-    the diversity cull makes the Phase-II population non-independent by construction;
-    the §3.1 verdict still requires independent runs, and how the two coexist (e.g.
-    independent replications of the whole population pipeline) is an owner ruling.
-    §3.4, §4.5.
+    **RULED: the unit of independence is the full pipeline replicate.** §3.1/R1
+    statistics are computed across the winners of K_rep independent
+    Phase I → cull → Phase II replicates run from independent master seeds
+    (K_rep = 5, matching SPEC R1's five independent runs); members inside one
+    replicate's population are never counted as independent seeds. Rejected: treating
+    culled members as seeds — the cull selects them *for* sign-structure distinctness,
+    which biases exactly the statistic §3.1 measures. §3.4, §4.5.
 14. **Numbers introduced by this design, all UNCALIBRATED, with their calibration
     rules**: B = 512 and K = 16 (R2 throughput/RSS and distinct-structure counts,
     §4.5); the ~20% stall-switch fraction (R3 stall-rate distribution vs measured
@@ -778,3 +829,10 @@ by this document.
     ≥20-draw V0 extension and 5-seed IC replication counts (§5.3–§5.4); and the ≥0.95
     working notion in §5.5 (set from V4). None becomes binding without a measurement
     behind it.
+15. **Spectral estimator policy** — unwindowed full-frame RAPS stays primary for the
+    synthetic campaign; the Hann–Welch windowed path is added under the
+    both-sides-identical rule and is **report-only until calibrated against the
+    unwindowed baseline on synthetic frames** (its three jobs and the rule: §4.6).
+    Rejected: swapping the primary estimator — the sub-bin centroid k* and the
+    one-bin bar are calibrated on the unwindowed estimator, and a silent swap would
+    change what every spectral number means.

@@ -13,6 +13,7 @@ import torch
 
 from . import terms as T
 from .spectral import is_ignited, spectral_terms, SPECTRAL_TERM_KEYS
+from .term_registry import LOSS_TERMS
 
 
 class SteadyStateError(RuntimeError):
@@ -200,17 +201,12 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
     solve needs. Refused loudly rather than silently skipped, mirroring `compute_resid`.
     """
     if compute_resid:
-        raise ValueError(
-            "compute_terms_batched cannot compute the stationarity residual: the batched "
-            "reaction takes one state vector per member, not per-pixel states. Its default "
-            "weight is 0 (exp06 settled it off), so batched recovery is available only for "
-            "loss.weights.resid == 0. Use the serial path for residual runs.")
+        # message single-sourced from losses/term_registry.py (Task 8, R2 redesign) so the
+        # registry's `resid` refusal_reason and this raise can never drift apart.
+        raise ValueError(LOSS_TERMS.get("resid").refusal_reason)
     if spectral is not None:
-        raise ValueError(
-            "compute_terms_batched cannot compute the spectral terms (unit U4): "
-            "forward.PatternSolver owns per-restart warm-start state, which has no batched "
-            "form, and the batched reaction does not broadcast to per-pixel fields. Use the "
-            "serial path for spectral runs.")
+        # single-sourced the same way; the five spectral entries share one refusal text.
+        raise ValueError(LOSS_TERMS.get("spec_shape").refusal_reason)
     xstar, conv = T.steady_state_batched(model)
     # ones for the failed members: a poison guard for the SHARED graph, not a scored value.
     x_ok = torch.where(conv.unsqueeze(-1), xstar, torch.ones_like(xstar))

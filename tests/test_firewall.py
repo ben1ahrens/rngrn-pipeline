@@ -37,6 +37,9 @@ RECOVERY_SIDE = [
     "etdrk4_torch.py",                              # 2026-08-12, GPU-port unit: the batched
     # torch ETDRK4 integrator ported from scripts/diag_fft_d2.py (D2-verified bit-equivalent
     # to eval/numerics). Same character as forward.py: model parameters + grid geometry only.
+    "losses/term_registry.py",                      # Task 8 (R2 redesign): the loss-term
+    # registry. Imports only losses/terms.py and losses/spectral.py (both already
+    # RECOVERY_SIDE) and rngrn/registry.py; reads no ground-truth quantity.
 ]
 
 # SCORING-side modules under losses/ and eval/. These MAY read the answer key; they are

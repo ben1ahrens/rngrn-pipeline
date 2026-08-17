@@ -771,17 +771,15 @@ def _np(t):
 # 8 seeds each; ALL NINE cells collapsed to 1/8 Turing seeds, best median k* error 11.8 %
 # against 0.4 % with the residual off. The term is kept, not deleted — it is the only
 # pixel-level term and a future arm may re-enable it — but it is off by default.
-DEFAULT_WEIGHTS = dict(kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5,
-                       anchor=2.0, morphology=0.0,
-                       param_prior=0.0,   # param_prior default 0.0: opt-in (unit 5)
-                       # unit U4 (M1 spectral terms, losses/spectral.py): 0.0 by default and
-                       # gated on DETECTED Turing instability (losses.spectral.is_ignited)
-                       # plus the solve's own pattern floor, never unconditionally -- the
-                       # forward solve (forward.py) is expensive (3-9 s/solve at 64^2,
-                       # unrecorded test timing), so nothing in a default config may
-                       # trigger it.
-                       spec_shape=0.0, spec_aniso=0.0, spec_amp_mean=0.0,
-                       spec_amp_fluct=0.0, real_moments=0.0)
+#
+# DEFAULT_WEIGHTS is DERIVED from losses/term_registry.py (Task 8, R2 redesign), not a
+# second literal: the registry pairs each of these 12 defaults with its serial/batched
+# callables and an honest calibration tag (CALIBRATED(<source>) or UNCALIBRATED). This
+# name stays a plain dict, bit-identical to the pre-registry literal
+# (tests/test_term_registry.py::test_default_weights_are_bit_identical_to_the_legacy_dict
+# pins it), so every existing caller of `terms.DEFAULT_WEIGHTS` is unaffected.
+from . import term_registry as _term_registry  # noqa: E402  (after the terms it registers)
+DEFAULT_WEIGHTS = _term_registry.default_weights()
 
 
 def composite_loss(model, frame, L, observed_idx, kgrid, kstar_obs,

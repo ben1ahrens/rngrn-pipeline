@@ -11,7 +11,6 @@ registered names with NO estimator behind them; both raise NotImplementedError a
 construction rather than silently running with fixed weights.
 """
 from __future__ import annotations
-import torch
 
 from ..registry import Registry
 

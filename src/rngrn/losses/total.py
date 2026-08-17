@@ -59,7 +59,8 @@ def _apply_spectral(term_vals: dict, parts: dict, spectral) -> None:
 def compute_terms(model, frame, L, observed_idx, kgrid, kstar_obs,
                   latent_fields=None, tau=0.12, jac_floor=1.0, strict=True,
                   split_hinges=True, hinge_k_min_frac=0.1, detach_xstar=False,
-                  compute_resid=True, param_prior_kw=None, spectral=None) -> tuple:
+                  compute_resid=True, param_prior_kw=None, spectral=None,
+                  obs_scale=None, kstar_idx=None) -> tuple:
     """Return (terms_dict, parts_dict) of UNWEIGHTED loss terms + diagnostics.
 
     strict=True (default): raise SteadyStateError if the steady state did not converge,
@@ -105,6 +106,12 @@ def compute_terms(model, frame, L, observed_idx, kgrid, kstar_obs,
     patterning, not a config flag) -- see `_apply_spectral` above for the omitted-not-zeroed
     contract and the history-stability reason all five "L_<key>" placeholders are written
     every step this argument is not None.
+
+    obs_scale / kstar_idx: two quantities that are FIXED for a whole recover() call and were
+    being recomputed on every step -- `float(frame.mean())`, a device->host sync of a frame
+    that never changes, and the k-grid index k*_obs interpolates into, a host->device copy
+    and a search. None (the default) computes them here exactly as before, so every external
+    caller and test is unaffected; recover.py resolves both once and passes them in.
     """
     xstar, conv = T.steady_state(model)
     if not conv and strict:
@@ -115,14 +122,21 @@ def compute_terms(model, frame, L, observed_idx, kgrid, kstar_obs,
             "steady-state Newton did not converge; physics terms are undefined for this init")
     xstar = T.steady_state_diff(model, xstar)
     x_disp = xstar.detach() if detach_xstar else xstar
-    L_k, p_k = T.kstar_anchor(model, x_disp, kgrid, kstar_obs, tau=tau)
+    # ONE autodiff Jacobian for the three dispersion-side terms. They all evaluate J at the
+    # SAME x_disp with create_graph=True, so this is the same tensor each of them used to
+    # build for itself -- three identical `torch.autograd.functional.jacobian` calls per
+    # step, of which two were pure waste.
+    J = model.jacobian(x_disp, create_graph=True)
+    L_k, p_k = T.kstar_anchor(model, x_disp, kgrid, kstar_obs, tau=tau, J=J, idx=kstar_idx)
     if split_hinges:
-        L_t, p_t = T.turing_hinges_split(model, x_disp, kgrid, k_min_frac=hinge_k_min_frac)
+        L_t, p_t = T.turing_hinges_split(model, x_disp, kgrid, k_min_frac=hinge_k_min_frac,
+                                         J=J)
     else:
-        L_t, p_t = T.turing_hinges(model, x_disp, kgrid)
-    L_a, p_a = T.anticollapse(model, x_disp, jac_floor=jac_floor)
+        L_t, p_t = T.turing_hinges(model, x_disp, kgrid, J=J)
+    L_a, p_a = T.anticollapse(model, x_disp, jac_floor=jac_floor, J=J)
     # FIREWALL: frame.mean() is a statistic of the observed image, nothing else.
-    L_s, p_s = T.frame_scale_anchor(xstar, float(frame.mean()))
+    L_s, p_s = T.frame_scale_anchor(
+        xstar, float(frame.mean()) if obs_scale is None else obs_scale)
     term_vals = dict(kstar=L_k, turing=L_t, anticollapse=L_a, anchor=L_s)
     parts = dict(ss_converged=conv, **p_k, **p_t, **p_a, **p_s)
     if compute_resid:
@@ -143,8 +157,12 @@ def compute_terms(model, frame, L, observed_idx, kgrid, kstar_obs,
 def total_loss(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
                step=0, latent_fields=None, tau=0.12, jac_floor=1.0, strict=True,
                split_hinges=True, hinge_k_min_frac=0.1, detach_xstar=False,
-               compute_resid=True, param_prior_kw=None, spectral=None) -> tuple:
+               compute_resid=True, param_prior_kw=None, spectral=None,
+               obs_scale=None, kstar_idx=None) -> tuple:
     """Composite loss via a weighting strategy. Returns (scalar loss, parts).
+
+    obs_scale / kstar_idx: per-call constants the caller may resolve once — see
+    `compute_terms`; None reproduces the previous per-step computation exactly.
 
     Raises SteadyStateError (from compute_terms) when strict and x* did not converge."""
     term_vals, parts = compute_terms(
@@ -152,7 +170,8 @@ def total_loss(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
         latent_fields=latent_fields, tau=tau, jac_floor=jac_floor, strict=strict,
         split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
         detach_xstar=detach_xstar, compute_resid=compute_resid,
-        param_prior_kw=param_prior_kw, spectral=spectral)
+        param_prior_kw=param_prior_kw, spectral=spectral,
+        obs_scale=obs_scale, kstar_idx=kstar_idx)
     loss, weights_used = strategy.combine(term_vals, step, model=model)
     parts["total"] = float(loss.detach())
     parts["weights_used"] = weights_used
@@ -168,7 +187,7 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
                           tau=0.12, jac_floor=1.0, split_hinges=True,
                           hinge_k_min_frac=0.1, detach_xstar=False,
                           compute_resid=False, param_prior_kw=None,
-                          spectral=None) -> tuple:
+                          spectral=None, obs_scale=None, kstar_idx=None) -> tuple:
     """Batched twin of `compute_terms`. Returns (term_vals, parts, converged).
 
     `model` is a model.BatchedRNGRN of B members; every term_vals entry is a (B,) tensor and
@@ -198,6 +217,9 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
     state and cannot be shared across a batched member axis, and (same reason as the
     residual) the batched reaction does not broadcast to the per-pixel fields the forward
     solve needs. Refused loudly rather than silently skipped, mirroring `compute_resid`.
+
+    `obs_scale` / `kstar_idx`: the same per-call constants the serial `compute_terms` takes,
+    with the same None-means-compute-it-here default.
     """
     if compute_resid:
         raise ValueError(
@@ -218,15 +240,19 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
     # a singular J at the polish step is the same failure the serial path raises on
     conv = conv & polish_ok
     x_disp = xstar.detach() if detach_xstar else xstar
-    L_k, p_k = T.kstar_anchor_batched(model, x_disp, kgrid, kstar_obs, tau=tau)
+    # ONE batched Jacobian for the three dispersion-side terms -- see `compute_terms`.
+    J = model.jacobian(x_disp, create_graph=True)
+    L_k, p_k = T.kstar_anchor_batched(model, x_disp, kgrid, kstar_obs, tau=tau, J=J,
+                                      idx=kstar_idx)
     if split_hinges:
         L_t, p_t = T.turing_hinges_split_batched(model, x_disp, kgrid,
-                                                 k_min_frac=hinge_k_min_frac)
+                                                 k_min_frac=hinge_k_min_frac, J=J)
     else:
-        L_t, p_t = T.turing_hinges_batched(model, x_disp, kgrid)
-    L_a, p_a = T.anticollapse_batched(model, x_disp, jac_floor=jac_floor)
+        L_t, p_t = T.turing_hinges_batched(model, x_disp, kgrid, J=J)
+    L_a, p_a = T.anticollapse_batched(model, x_disp, jac_floor=jac_floor, J=J)
     # FIREWALL: frame.mean() is a statistic of the observed image, nothing else.
-    L_s, p_s = T.frame_scale_anchor_batched(xstar, float(frame.mean()))
+    L_s, p_s = T.frame_scale_anchor_batched(
+        xstar, float(frame.mean()) if obs_scale is None else obs_scale)
     term_vals = dict(kstar=L_k, turing=L_t, anticollapse=L_a, anchor=L_s)
     parts = dict(ss_converged=conv.detach().cpu().numpy(), resid_skipped=True,
                  **p_k, **p_t, **p_a, **p_s)
@@ -240,7 +266,8 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
 def total_loss_batched(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
                        step=0, tau=0.12, jac_floor=1.0, split_hinges=True,
                        hinge_k_min_frac=0.1, detach_xstar=False,
-                       compute_resid=False, param_prior_kw=None, spectral=None) -> tuple:
+                       compute_resid=False, param_prior_kw=None, spectral=None,
+                       obs_scale=None, kstar_idx=None) -> tuple:
     """Batched twin of `total_loss`. Returns (loss_vec (B,), parts, converged (B,)).
 
     The weighting strategy is applied UNCHANGED: `combine` only ever does
@@ -257,7 +284,8 @@ def total_loss_batched(model, frame, L, observed_idx, kgrid, kstar_obs, strategy
         model, frame, L, observed_idx, kgrid, kstar_obs, tau=tau, jac_floor=jac_floor,
         split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
         detach_xstar=detach_xstar, compute_resid=compute_resid,
-        param_prior_kw=param_prior_kw, spectral=spectral)
+        param_prior_kw=param_prior_kw, spectral=spectral,
+        obs_scale=obs_scale, kstar_idx=kstar_idx)
     loss, weights_used = strategy.combine(term_vals, step, model=model)
     parts["total"] = loss.detach().cpu().numpy()
     parts["weights_used"] = weights_used

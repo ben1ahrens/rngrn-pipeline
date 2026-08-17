@@ -462,12 +462,17 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             "term igniting between refreshes would silently contribute 0 and then jump. "
             "Spectral runs require a static-weight strategy (same rule as param_prior).")
 
+    # The bio box is READ FROM DISK by losses.terms.param_prior whenever `box` is None --
+    # a file open and a yaml.safe_load on EVERY step of every restart. It is a static config
+    # file, so load it once here and pass the parsed bounds down instead of the path.
+    param_prior_kw = None
+    if use_param_prior:
+        from .losses.terms import _load_box_bounds
+        param_prior_kw = dict(dratio_centre=dratio_centre, dratio_spread=dratio_spread,
+                              box=_load_box_bounds(bio_box_path))
     term_kw = dict(split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
                    detach_xstar=detach_xstar, compute_resid=compute_resid,
-                   param_prior_kw=(dict(dratio_centre=dratio_centre,
-                                        dratio_spread=dratio_spread,
-                                        box_path=bio_box_path)
-                                   if use_param_prior else None))
+                   param_prior_kw=param_prior_kw)
 
     # The length unit the objective is written in. nondim=True sets it to the box itself,
     # which is an exact change of variables: obs.kstar_of and obs.laplacian_torch are both
@@ -476,6 +481,17 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     L_model = 1.0 if nondim else L
     kstar_obs = obs.kstar_of(frame[0].detach().cpu().numpy(), L=L_model)  # firewall: FFT of the observed image
     kgrid = _kgrid_for(kstar_obs, device=dev)
+
+    # Two per-STEP host<->device round trips the loss terms were paying for quantities that
+    # are FIXED for this whole call: the frame's mean (the scale anchor's target, a
+    # device->host sync of a frame that never changes) and the k-grid index k*_obs
+    # interpolates into (a host->device copy of the key plus a search). Resolve both once
+    # and thread them through term_kw; losses/total defaults them to the old per-step form
+    # for any other caller. Same values, same terms -- see losses/total.compute_terms.
+    term_kw["obs_scale"] = float(frame.mean())
+    term_kw["kstar_idx"] = int(
+        torch.searchsorted(kgrid, torch.as_tensor(float(kstar_obs), device=kgrid.device))
+        .clamp(1, len(kgrid) - 1))
 
     # unit U4: the observed-frame spectral targets are FIXED across every restart (the
     # frame does not change), so build them ONCE here. `spec_cfg`/`spec_targets` stay None

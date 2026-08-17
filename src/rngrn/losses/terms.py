@@ -33,28 +33,47 @@ torch.set_default_dtype(torch.float64)
 # --------------------------------------------------------------------------------------
 # 5.5  model-derived homogeneous steady state
 # --------------------------------------------------------------------------------------
+_LINE_SEARCH_HALVINGS = 30
+
+
 def _damped_newton(model, x0, tol, max_iter):
     """The damped-Newton core with the positivity guard. ARITHMETIC IS THE LEGACY ONE,
-    lifted verbatim out of `steady_state` so it can be re-run from more than one seed;
-    do not "improve" the line search here — `steady_state`'s bit-identity guarantee
-    rests on this being unchanged. Returns (last iterate, converged)."""
+    lifted out of `steady_state` so it can be re-run from more than one seed.
+    Returns (last iterate, converged).
+
+    LINE SEARCH, VECTORISED (GPU hot path, 2026-08-17). The damping used to be searched by
+    a Python loop that synced the device to the host up to three times per halving —
+    `(xn > 0).all()` plus two `.item()` calls — i.e. up to ~90 syncs per Newton iteration
+    and ~9,000 per call. The 30 candidate dampings lam = 0.5**j are now evaluated in ONE
+    batched reaction call and the accepted one selected tensor-side, so the only host sync
+    left is the convergence test at the top of each iteration.
+    SAME RULE, SAME SELECTION: the accepted lam is still the FIRST (largest) candidate that
+    is both positivity-preserving and norm-decreasing, and still 0.5**30 when none of the 30
+    is accepted, exactly as the loop's fall-through gave. The candidate norms now come from
+    one (30, N) reaction evaluation instead of 30 separate (N,) ones — the same arithmetic
+    per row, but not guaranteed identical to the last ulp, so a candidate sitting exactly on
+    the acceptance boundary could in principle be decided the other way."""
     x = x0.clone()
+    # lam candidates 1, 0.5, ..., 0.5**29 (shape (30,)), built once per call.
+    lams = torch.pow(torch.as_tensor(0.5, device=x0.device, dtype=x0.dtype),
+                     torch.arange(_LINE_SEARCH_HALVINGS, device=x0.device, dtype=x0.dtype))
+    lam_exhausted = lams[-1] * 0.5                      # 0.5**30: no candidate accepted
     for _ in range(max_iter):
         fx = model.reaction(x)
-        if torch.linalg.norm(fx).item() < tol:
+        nrm = torch.linalg.norm(fx)
+        if nrm.item() < tol:
             return x, True
         J = model.jacobian(x, create_graph=False)
         try:
             step = torch.linalg.solve(J, fx)
         except RuntimeError:
             return x, False
-        # damped Newton with positivity guard
-        lam = 1.0
-        for _ in range(30):
-            xn = x - lam * step
-            if (xn > 0).all() and torch.linalg.norm(model.reaction(xn)).item() < torch.linalg.norm(fx).item():
-                break
-            lam *= 0.5
+        # damped Newton with positivity guard, all 30 candidates at once
+        xn = x - lams.unsqueeze(-1) * step                                  # (30, N)
+        ok = (xn > 0).all(dim=-1) & (
+            torch.linalg.norm(model.reaction(xn), dim=-1) < nrm)            # (30,)
+        first = torch.argmax(ok.to(torch.uint8))        # 0 when nothing is accepted
+        lam = torch.where(ok.any(), lams[first], lam_exhausted)
         x = torch.clamp(x - lam * step, min=1e-9)
     return x, False
 
@@ -160,9 +179,13 @@ def _softplus_hinge(violation, beta=10.0):
     return F.softplus(violation * beta) / beta
 
 
-def turing_hinges(model, xstar, kgrid, margin=1e-3):
+def turing_hinges(model, xstar, kgrid, margin=1e-3, J=None):
     """SUPERSEDED shared-support hinges. Kept because docs and scripts/exp02 reference it as
     the control arm; `turing_hinges_split` is the default in losses/total.compute_terms.
+
+    `J`: the model's Jacobian at `xstar`, or None to compute it here. It is the SAME
+    quantity either way (`model.jacobian(xstar, create_graph=True)`); the argument exists so
+    a caller evaluating several terms at one x* pays for the autodiff Jacobian once.
 
     Softplus hinges on the Turing conditions. General-N: uses the differentiable dispersion,
     requiring sigma(0) < 0 (uniform-stable) and max_k sigma(k) > 0 (structured-unstable).
@@ -171,7 +194,7 @@ def turing_hinges(model, xstar, kgrid, margin=1e-3):
     kgrid[0] point at random init, so `sig.max()` and `sig[0]` are the SAME scalar and the
     two hinges push it in opposite directions. See docs/STATE_OF_THE_SCIENCE.md 2.2.
     """
-    J = model.jacobian(xstar, create_graph=True)
+    J = model.jacobian(xstar, create_graph=True) if J is None else J
     sig = model.dispersion(xstar, kgrid, J=J)              # (K,)
     # sigma at (near) k=0: stability to uniform perturbations -> want sig0 < 0
     sig0 = sig[0]
@@ -183,8 +206,11 @@ def turing_hinges(model, xstar, kgrid, margin=1e-3):
                                         sig_max=float(sig_max_pos.detach()))
 
 
-def turing_hinges_split(model, xstar, kgrid, margin=1e-3, k_min_frac=0.1):
+def turing_hinges_split(model, xstar, kgrid, margin=1e-3, k_min_frac=0.1, J=None):
     """Turing hinges on DISJOINT k-support. The promoted default (see total.compute_terms).
+
+    `J`: the model's Jacobian at `xstar`, or None to compute it here — the same quantity
+    either way; see `turing_hinges`.
 
     Same two conditions as `turing_hinges`, but the instability hinge maximises only over
     k >= kgrid[i_min] with i_min = max(1, int(k_min_frac * len(kgrid))), so it can never be
@@ -216,7 +242,7 @@ def turing_hinges_split(model, xstar, kgrid, margin=1e-3, k_min_frac=0.1):
         raise ValueError(
             f"k_min_frac={k_min_frac} leaves no k>=k_min grid points (i_min={i_min}, K={K}); "
             "the instability hinge would have empty support")
-    J = model.jacobian(xstar, create_graph=True)
+    J = model.jacobian(xstar, create_graph=True) if J is None else J
     sig = model.dispersion(xstar, kgrid, J=J)              # (K,)
     sig0 = sig[0]
     sig_pos = sig[i_min:].max()                            # strictly k > kgrid[0]
@@ -270,7 +296,7 @@ def frame_scale_anchor(xstar, obs_scale, floor=1e-6):
 # --------------------------------------------------------------------------------------
 # 5.1  k* soft-anchor (tolerance band)
 # --------------------------------------------------------------------------------------
-def _sigma_at(sig, kgrid, k):
+def _sigma_at(sig, kgrid, k, idx=None):
     """Differentiable linear interpolation of sigma(kgrid) at scalar k.
 
     `device=kgrid.device` is load-bearing, not defensive (unit b2): without it this line
@@ -279,16 +305,21 @@ def _sigma_at(sig, kgrid, k):
     objective unrunnable on CUDA -- measured: recover(device='cuda') crashed here on the
     first step, on the serial path, before unit b2 existed. Fixing it changes no CPU value
     (the index and the interpolation are identical); it only removes a hard crash.
+
+    `idx`: the bracketing index, precomputed by a caller for whom `kgrid` and `k` are fixed
+    for the whole optimisation (recover.py resolves it once per call). None recomputes it
+    here — the SAME index, at the cost of a host->device copy of `k` and a search per step.
     """
-    idx = torch.searchsorted(kgrid, torch.as_tensor(float(k), device=kgrid.device)
-                             ).clamp(1, len(kgrid) - 1)
+    if idx is None:
+        idx = torch.searchsorted(kgrid, torch.as_tensor(float(k), device=kgrid.device)
+                                 ).clamp(1, len(kgrid) - 1)
     k0, k1 = kgrid[idx - 1], kgrid[idx]
     s0, s1 = sig[idx - 1], sig[idx]
     t = (k - k0) / (k1 - k0 + 1e-12)
     return s0 + t * (s1 - s0)
 
 
-def kstar_anchor(model, xstar, kgrid, kstar_obs, tau=0.12, temp=60.0):
+def kstar_anchor(model, xstar, kgrid, kstar_obs, tau=0.12, temp=60.0, J=None, idx=None):
     """Make the OBSERVED wavenumber the dominant (fastest-growing) mode of the model's dispersion.
 
     Rather than estimate a k*_model by a (broad-band-unreliable) soft-argmax and match it, penalise
@@ -299,10 +330,15 @@ def kstar_anchor(model, xstar, kgrid, kstar_obs, tau=0.12, temp=60.0):
     This is >= 0 and zero exactly when k*_obs is the argmax of sigma. A broad, weakly-selective band
     yields a small penalty (honest: selection is weak), a sharp peak away from k*_obs a large one.
     The true argmax is reported (detached) as kstar_model for logging/scoring.
+
+    `J`: the model's Jacobian at `xstar`, or None to let `model.dispersion` compute it — the
+    same quantity either way (model.py::dispersion builds it with create_graph=True), passed
+    in so a caller evaluating several dispersion terms at one x* pays for it once.
+    `idx`: precomputed bracketing index for k*_obs on `kgrid` — see `_sigma_at`.
     """
-    sig = model.dispersion(xstar, kgrid, J=None)
+    sig = model.dispersion(xstar, kgrid, J=J)
     lse = torch.logsumexp(sig * temp, dim=0) / temp        # smooth max of sigma
-    sig_obs = _sigma_at(sig, kgrid, kstar_obs)
+    sig_obs = _sigma_at(sig, kgrid, kstar_obs, idx=idx)
     L = torch.clamp(lse - sig_obs, min=0.0)
     kstar_model = float(kgrid[torch.argmax(sig)].detach())
     r = abs(kstar_model - kstar_obs) / (kstar_obs + 1e-9)
@@ -357,11 +393,14 @@ def stationarity_residual(model, fields, L, observed_idx, latent_fields=None):
 # --------------------------------------------------------------------------------------
 # 5.4  anti-collapse
 # --------------------------------------------------------------------------------------
-def anticollapse(model, xstar, jac_floor=1.0, amp_floor=None, sim_field=None):
+def anticollapse(model, xstar, jac_floor=1.0, amp_floor=None, sim_field=None, J=None):
     """Exclude the f==0, D==0 trivial minimum. Default: keep the Jacobian Frobenius norm above a
     floor (the reaction must have non-trivial local dynamics). If a lifted-simulation field is
-    supplied, additionally floor its amplitude so a flat relaxation is penalised."""
-    J = model.jacobian(xstar, create_graph=True)
+    supplied, additionally floor its amplitude so a flat relaxation is penalised.
+
+    `J`: the model's Jacobian at `xstar`, or None to compute it here — the same quantity
+    either way; see `turing_hinges`."""
+    J = model.jacobian(xstar, create_graph=True) if J is None else J
     jn = torch.linalg.norm(J)
     L = _softplus_hinge(jac_floor - jn)                    # penalise ||J|| < floor
     parts = dict(jac_norm=float(jn.detach()))
@@ -437,6 +476,10 @@ def param_prior(model, dratio_centre=7.5, dratio_spread=1.0, box=None,
     The RETURNED loss is UNWEIGHTED; the caller applies loss.weights.param_prior
     (config.py, default 0.0 — this term is opt-in, its effect measurable rather than
     assumed).
+
+    `box`: a pre-loaded {name: (low, high) or None} mapping. None re-reads `box_path` from
+    disk ON EVERY CALL, which inside a training loop is a file open + YAML parse per step —
+    recover.py loads it once and passes `box=`. Same bounds either way.
 
     Returns (loss: 0-d torch tensor, parts: dict of floats for logging).
     """
@@ -529,27 +572,37 @@ def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
             fx = model.reaction(x)
             nrm = torch.linalg.norm(fx, dim=-1)                  # (B,)
             active = active & (nrm >= tol)
-            if not bool(active.any()):
-                break
             J = model.jacobian(x, create_graph=False)
             step, info = torch.linalg.solve_ex(J, fx.unsqueeze(-1))
             step = step.squeeze(-1)
+            # a singular J is per-member, so fold it into the masks unconditionally: the
+            # `if bad.any()` guard this replaces only saved three tensor ops and cost a host
+            # sync every iteration (GPU hot path, 2026-08-17). Same masks, same result.
             bad = (info != 0) & active
-            if bool(bad.any()):
-                broke = broke | bad
-                active = active & ~bad
-                step = torch.where(bad.unsqueeze(-1), torch.zeros_like(step), step)
-                if not bool(active.any()):
-                    break
+            broke = broke | bad
+            active = active & ~bad
+            step = torch.where(bad.unsqueeze(-1), torch.zeros_like(step), step)
+            # ONE host sync per Newton iteration, covering both exits the two `active.any()`
+            # checks used to cover separately. It now sits AFTER the solve, so an iteration
+            # in which every member has already converged (or died) pays for one extra
+            # Jacobian and solve before breaking — their x is masked out of the update
+            # either way, so nothing that is returned changes.
+            if not bool(active.any()):
+                break
             lam = torch.ones(B, device=dev, dtype=dt_)
             accept = torch.zeros(B, dtype=torch.bool, device=dev)
-            for _ in range(30):
+            for j in range(30):
                 xn = x - lam.unsqueeze(-1) * step
                 ok = (xn > 0).all(dim=-1) & (
                     torch.linalg.norm(model.reaction(xn), dim=-1) < nrm)
                 accept = accept | ok
                 lam = torch.where(accept, lam, lam * 0.5)
-                if bool((accept | ~active).all()):
+                # Early exit on a CADENCE, not every halving: this check was up to 30 host
+                # syncs per Newton iteration and 3,000 per call. Value-preserving — an
+                # accepted member's lam is frozen by the `torch.where` above, so the extra
+                # halvings before the next check cannot move it, and an inactive member's
+                # x_new is masked out below.
+                if (j + 1) % 5 == 0 and bool((accept | ~active).all()):
                     break
             x_new = torch.clamp(x - lam.unsqueeze(-1) * step, min=1e-9)
             x = torch.where(active.unsqueeze(-1), x_new, x)
@@ -652,9 +705,11 @@ def steady_state_diff_batched(model, xstar_init):
     return x - step.squeeze(-1), ok
 
 
-def turing_hinges_batched(model, xstar, kgrid, margin=1e-3):
-    """Batched SUPERSEDED shared-support hinges (control arm). Returns ((B,), parts)."""
-    J = model.jacobian(xstar, create_graph=True)
+def turing_hinges_batched(model, xstar, kgrid, margin=1e-3, J=None):
+    """Batched SUPERSEDED shared-support hinges (control arm). Returns ((B,), parts).
+
+    `J`: the batched Jacobian at `xstar`, or None to compute it here (see `turing_hinges`)."""
+    J = model.jacobian(xstar, create_graph=True) if J is None else J
     sig = model.dispersion(xstar, kgrid, J=J)                # (B,K)
     sig0 = sig[:, 0]
     sig_max_pos = sig.max(dim=1).values
@@ -662,18 +717,20 @@ def turing_hinges_batched(model, xstar, kgrid, margin=1e-3):
     return L, dict(sig0=_np(sig0), sig_max=_np(sig_max_pos))
 
 
-def turing_hinges_split_batched(model, xstar, kgrid, margin=1e-3, k_min_frac=0.1):
+def turing_hinges_split_batched(model, xstar, kgrid, margin=1e-3, k_min_frac=0.1, J=None):
     """Batched disjoint-support Turing hinges (the promoted default). Returns ((B,), parts).
 
     Identical to `turing_hinges_split` term for term; `i_min` depends only on the k-grid,
-    which is shared across members, so it is one integer for the whole batch."""
+    which is shared across members, so it is one integer for the whole batch.
+
+    `J`: the batched Jacobian at `xstar`, or None to compute it here (see `turing_hinges`)."""
     K = len(kgrid)
     i_min = max(1, int(k_min_frac * K))
     if i_min >= K:
         raise ValueError(
             f"k_min_frac={k_min_frac} leaves no k>=k_min grid points (i_min={i_min}, K={K}); "
             "the instability hinge would have empty support")
-    J = model.jacobian(xstar, create_graph=True)
+    J = model.jacobian(xstar, create_graph=True) if J is None else J
     sig = model.dispersion(xstar, kgrid, J=J)                # (B,K)
     sig0 = sig[:, 0]
     sig_pos = sig[:, i_min:].max(dim=1).values
@@ -729,15 +786,24 @@ def frame_scale_anchor_batched(xstar, obs_scale, floor=1e-6):
     return L, dict(obs_scale=s, xstar_mean=_np(xstar.detach().mean(dim=-1)))
 
 
-def kstar_anchor_batched(model, xstar, kgrid, kstar_obs, tau=0.12, temp=60.0):
+def kstar_anchor_batched(model, xstar, kgrid, kstar_obs, tau=0.12, temp=60.0, J=None,
+                         idx=None):
     """Batched k* soft-anchor. Returns ((B,), parts).
 
     `searchsorted` runs on the shared k-grid, so the interpolation index is one scalar for
-    the batch -- the same index the serial `_sigma_at` computes."""
-    sig = model.dispersion(xstar, kgrid, J=None)              # (B,K)
+    the batch -- the same index the serial `_sigma_at` computes.
+
+    `J`: the batched Jacobian at `xstar`, or None to let `model.dispersion` compute it (see
+    `kstar_anchor`). `idx`: that same interpolation index, precomputed by a caller for whom
+    `kgrid` and k*_obs are fixed for the whole optimisation — it is a host<->device round
+    trip (a `float()` cast, a copy of the key onto the device and an `int()` read-back) and
+    was being paid on every step."""
+    sig = model.dispersion(xstar, kgrid, J=J)                 # (B,K)
     lse = torch.logsumexp(sig * temp, dim=1) / temp
-    idx = int(torch.searchsorted(kgrid, torch.as_tensor(float(kstar_obs), device=kgrid.device))
-              .clamp(1, len(kgrid) - 1))
+    if idx is None:
+        idx = int(torch.searchsorted(kgrid,
+                                     torch.as_tensor(float(kstar_obs), device=kgrid.device))
+                  .clamp(1, len(kgrid) - 1))
     k0, k1 = kgrid[idx - 1], kgrid[idx]
     s0, s1 = sig[:, idx - 1], sig[:, idx]
     t = (kstar_obs - k0) / (k1 - k0 + 1e-12)
@@ -748,12 +814,14 @@ def kstar_anchor_batched(model, xstar, kgrid, kstar_obs, tau=0.12, temp=60.0):
     return L, dict(kstar_model=_np(kstar_model), kstar_obs=float(kstar_obs), rel_err=_np(r))
 
 
-def anticollapse_batched(model, xstar, jac_floor=1.0):
+def anticollapse_batched(model, xstar, jac_floor=1.0, J=None):
     """Batched anti-collapse Jacobian-norm floor. Returns ((B,), parts).
 
     The optional `sim_field` amplitude floor of the serial term is NOT carried: no caller in
-    the library passes it (recover.py never does), so batching it would be dead code."""
-    J = model.jacobian(xstar, create_graph=True)
+    the library passes it (recover.py never does), so batching it would be dead code.
+
+    `J`: the batched Jacobian at `xstar`, or None to compute it here (see `turing_hinges`)."""
+    J = model.jacobian(xstar, create_graph=True) if J is None else J
     jn = torch.linalg.matrix_norm(J, ord="fro")               # (B,) — Frobenius, per member
     L = _softplus_hinge(jac_floor - jn)
     return L, dict(jac_norm=_np(jn))

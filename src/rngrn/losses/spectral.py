@@ -74,6 +74,41 @@ class SpectralConfig:
 # --------------------------------------------------------------------------------------
 # spectral primitives
 # --------------------------------------------------------------------------------------
+#: Cache of the RAPS binning, keyed (n, L, device, dtype). The binning is pure grid
+#: geometry — it depends on nothing that changes between training steps — while building
+#: it costs an fftfreq/meshgrid/digitize/bincount pass on the HOST plus two H2D transfers.
+#: Uncached that ran once per `raps_torch` call, i.e. twice per training step. Entries are
+#: a handful of (n^2,) index tensors; a run touches one or two geometries.
+_RAPS_BINS: dict = {}
+
+
+def _raps_bins(n: int, L: float, device: torch.device, dtype: torch.dtype):
+    """(idx, counts, k_centers) for `raps_torch`'s binning — built once per geometry.
+
+    `idx` is the flat bin index of every |k| lattice point and `counts` the per-bin
+    occupancy, both device-resident; `k_centers` is a read-only numpy array (it is shared
+    by every caller, so it must not be written through)."""
+    key = (int(n), float(L), device, dtype)
+    ent = _RAPS_BINS.get(key)
+    if ent is not None:
+        return ent
+    k = 2.0 * np.pi * np.fft.fftfreq(n, d=L / n)
+    KX, KY = np.meshgrid(k, k)
+    KR = np.sqrt(KX ** 2 + KY ** 2)
+    dk = 2.0 * np.pi / L
+    n_edges = int(np.ceil((KR.max() + dk) / dk))
+    kbins = np.arange(n_edges) * dk
+    which = np.clip(np.digitize(KR.ravel(), kbins) - 1, 0, len(kbins) - 2)
+    counts = np.bincount(which, minlength=len(kbins) - 1)
+    k_centers = 0.5 * (kbins[:-1] + kbins[1:])
+    k_centers.setflags(write=False)
+    ent = (torch.from_numpy(which).to(device),
+           torch.from_numpy(np.maximum(counts, 1)).to(device=device, dtype=dtype),
+           k_centers)
+    _RAPS_BINS[key] = ent
+    return ent
+
+
 def raps_torch(field: torch.Tensor, L: float) -> tuple[np.ndarray, torch.Tensor]:
     """Radially averaged power spectrum of one (H, W) channel, differentiable w.r.t. `field`.
 
@@ -84,31 +119,26 @@ def raps_torch(field: torch.Tensor, L: float) -> tuple[np.ndarray, torch.Tensor]
     boundary point falls into. `n_edges` is computed with the same `ceil` formula so the
     edge COUNT matches the numpy reference exactly (verified: identical for every (n, L)
     tested, including the p=8/512^2 canonical case).
+
+    The binning itself is CACHED per (n, L, device, dtype) by `_raps_bins`, so a per-step
+    call does no host work and no host-to-device transfer. The arithmetic is unchanged
+    and the returned `k_centers` is the cached (read-only) array, not a fresh copy. This
+    is deliberately NOT `observables.raps_torch`, whose bins come from a float-step arange
+    and `floor` rather than F-D6-1's integer edges and `digitize`.
     """
     if field.shape[-2] != field.shape[-1]:
         # observables.raps assumes a square periodic box (one fftfreq grid for both axes);
         # a non-square field would bin silently wrongly there AND here. Refuse.
         raise ValueError(f"raps_torch: field must be square, got {tuple(field.shape)}")
     n = field.shape[-1]
+    idx, counts, k_centers = _raps_bins(n, L, field.device, field.dtype)
     f = field - field.mean()
     P = torch.abs(torch.fft.fft2(f)) ** 2
-    k = 2.0 * np.pi * np.fft.fftfreq(n, d=L / n)
-    KX, KY = np.meshgrid(k, k)
-    KR = np.sqrt(KX ** 2 + KY ** 2)
-    dk = 2.0 * np.pi / L
-    n_edges = int(np.ceil((KR.max() + dk) / dk))
-    kbins = np.arange(n_edges) * dk
-    which = np.clip(np.digitize(KR.ravel(), kbins) - 1, 0, len(kbins) - 2)
-    counts = np.bincount(which, minlength=len(kbins) - 1)
-    # binning tensors live on the field's device (GPU-port unit: a CUDA u_star must not
-    # crash here; on CPU the .to() calls are no-ops and the arithmetic is unchanged)
-    idx = torch.from_numpy(which).to(field.device)
-    power = torch.zeros(len(kbins) - 1, dtype=field.dtype,
+    power = torch.zeros(k_centers.shape[0], dtype=field.dtype,
                         device=field.device).scatter_add_(0, idx, P.reshape(-1))
-    power = power / torch.from_numpy(np.maximum(counts, 1)).to(field.dtype).to(field.device)
+    power = power / counts
     power = power.clone()
     power[0] = 0.0
-    k_centers = 0.5 * (kbins[:-1] + kbins[1:])
     return k_centers, power
 
 
@@ -147,13 +177,19 @@ def band_mask(k_centers: np.ndarray, kstar_obs: float, lo: float, hi: float) -> 
 # fixed targets from the observed frame
 # --------------------------------------------------------------------------------------
 def build_frame_targets(frame: np.ndarray, L: float, kstar_obs: float,
-                        cfg: SpectralConfig) -> dict:
+                        cfg: SpectralConfig, device=None) -> dict:
     """Statistics of the OBSERVED frame, computed ONCE. Every entry is a constant (a
     detached tensor or a float) — never something a term function differentiates through.
 
     Firewall: `frame` is the observed image, `L` and `kstar_obs` are already-legal recovery
     quantities (SPEC §7); nothing else is read. Fails loud (ValueError) rather than
     returning a NaN or an undefined target (CLAUDE.md §4).
+
+    `device`: where the tensor-valued targets are PLACED. The statistics are always
+    computed on the host (the frame is a numpy array, and this runs once), so the values
+    do not depend on it; passing the model's device moves the one-off transfer here
+    instead of paying it inside every term function on every training step. None keeps
+    them on the CPU, which is what every existing caller gets.
     """
     if frame.ndim != 3:
         raise ValueError(f"frame must be (C, H, W); got shape {frame.shape}")
@@ -171,16 +207,21 @@ def build_frame_targets(frame: np.ndarray, L: float, kstar_obs: float,
             f"B_train=[{cfg.b_lo}, {cfg.b_hi}]*k*_obs (k*_obs={kstar_obs}) contains no RAPS "
             f"bins — k_centers span [{k_centers.min():.4g}, {k_centers.max():.4g}], "
             f"dk={k_centers[1] - k_centers[0]:.4g}")
-    mask_t = torch.from_numpy(mask)
-    band_power = power[mask_t]
+    # Integer bin indices, not the boolean mask: `power[mask]` is data-dependent
+    # indexing, whose output size CUDA cannot know without a device-to-host sync, and the
+    # term functions index the band on every training step. torch.nonzero here (once) and
+    # index_select there (per step) does the same selection, in the same bin order.
+    band_idx = torch.from_numpy(np.nonzero(mask)[0])
+    band_power = power.index_select(0, band_idx)
     band_sum = band_power.sum()
     if not torch.isfinite(band_sum) or float(band_sum) <= 0.0:
         raise ValueError(
             "B_train RAPS power is zero or non-finite for frame channel 0 — cannot build a "
             "normalised spec_shape target")
-    raps_band_target = (band_power / band_sum).detach()
+    raps_band_target = (band_power / band_sum).detach().to(device)
+    band_idx = band_idx.to(device)
 
-    block_target = spectral_block_torch(ch0, cfg.nblk).detach()
+    block_target = spectral_block_torch(ch0, cfg.nblk).detach().to(device)
     if not torch.isfinite(block_target).all():
         raise ValueError("spectral block target for frame channel 0 has non-finite entries")
 
@@ -211,7 +252,8 @@ def build_frame_targets(frame: np.ndarray, L: float, kstar_obs: float,
         skew[c] = skv
 
     return dict(k_centers=k_centers, kstar_obs=float(kstar_obs), L=float(L),
-                raps_band_target=raps_band_target, block_target=block_target,
+                raps_band_target=raps_band_target, band_idx=band_idx,
+                block_target=block_target,
                 log_mean=log_mean, log_std=log_std, skew=skew)
 
 
@@ -223,15 +265,19 @@ def spec_shape(u_star: torch.Tensor, targets: dict, cfg: SpectralConfig
     """Gain-invariant spectral shape on channel 0's B_train (SPEC §5, diag reference
     formula: `make_loss_terms::spec_shape`). Channel 0 only — `build_frame_targets` builds
     a single un-indexed `raps_band_target` for the training channel, matching Stage 0's
-    "channel 0 only" fit (SPEC §5)."""
+    "channel 0 only" fit (SPEC §5).
+
+    The band selection reuses `targets["band_idx"]`, built by `build_frame_targets` from
+    the same (n, L, k*_obs, b_lo, b_hi): the bin grid is a function of the geometry alone,
+    and the shape check below is what pins that the two grids ARE the same. Rebuilding
+    the boolean mask here per step would repeat that host work and index by a
+    data-dependent mask, which forces a size sync on CUDA."""
     k_centers, power = raps_torch(u_star[0], targets["L"])
     if k_centers.shape != targets["k_centers"].shape:
         raise ValueError(
             "u_star's spatial grid does not match the observed frame's grid — RAPS bin "
             f"counts differ ({k_centers.shape[0]} vs {targets['k_centers'].shape[0]})")
-    mask = torch.from_numpy(band_mask(k_centers, targets["kstar_obs"],
-                                      cfg.b_lo, cfg.b_hi)).to(power.device)
-    band_power = power[mask]
+    band_power = power.index_select(0, targets["band_idx"].to(power.device))
     norm = band_power.sum()
     # Fail loud, mirroring build_frame_targets' guard on the observed side: a solved
     # pattern with (near-)zero B_train power would otherwise hand Adam a silent NaN.

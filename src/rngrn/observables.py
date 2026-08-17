@@ -65,45 +65,88 @@ def kstar_of(field: np.ndarray, L: float = 1.0) -> float:
     return raps(field, L)[2]
 
 
+#: Cache of `raps_torch`'s binning, keyed (n, L, device, dtype). The binning depends on
+#: nothing but the grid geometry, while building it costs an fftfreq/meshgrid/sqrt pass,
+#: two host-to-device transfers, and a `KR.max()` device sync. Uncached that ran on EVERY
+#: call — and `forward.relax_to_pattern_torch` calls it once per 500-step relax chunk, up
+#: to 400 times per solve, where it dominated the detector (measured 2026-08-17: at 96^2
+#: the uncached device path was SLOWER than pulling the frame back to the host). Entries
+#: are one (n^2,) int64 index tensor plus two small vectors; a run touches one geometry.
+_RAPS_TORCH_BINS: dict = {}
+
+
+def _raps_torch_bins(n: int, L: float, device, dtype):
+    """(idx, counts, kcent) for `raps_torch` — built once per (n, L, device, dtype).
+
+    Built on the HOST in numpy, from the same fftfreq/meshgrid/arange expressions `raps`
+    uses, then transferred once. Doing it here rather than on the device also removes the
+    `KR.max().item()` sync that used to decide the bin count, and makes the edges
+    bit-identical to `raps`'s on every device instead of depending on whether the device's
+    `sqrt` rounds a lattice radius the way numpy's does.
+    """
+    import torch
+    key = (int(n), float(L), device, dtype)
+    ent = _RAPS_TORCH_BINS.get(key)
+    if ent is not None:
+        return ent
+    kfreq = np.fft.fftfreq(n, d=L / n) * 2 * np.pi              # rad/length
+    KX, KY = np.meshgrid(kfreq, kfreq)
+    KR = np.sqrt(KX ** 2 + KY ** 2)
+    dk = 2 * np.pi / L                                          # fundamental
+    kbins = np.arange(0, KR.max() + dk, dk)
+    nbins = len(kbins) - 1
+    which = np.clip(np.floor(KR.ravel() / dk).astype(np.int64), 0, nbins - 1)
+    counts = np.maximum(np.bincount(which, minlength=nbins), 1).astype(np.float64)
+    kcent = 0.5 * (kbins[:-1] + kbins[1:])
+    ent = (torch.from_numpy(which).to(device),
+           torch.from_numpy(counts).to(device=device, dtype=dtype),
+           torch.from_numpy(kcent).to(device=device, dtype=dtype))
+    _RAPS_TORCH_BINS[key] = ent
+    return ent
+
+
 def raps_torch(field, L: float = 1.0):
     """Torch parity port of `raps`, for a device-resident 2-D field. `field` stays on its
     own device throughout except for the final scalar; `k_centers`/`power` are returned as
     device tensors (real, same device/dtype as `field`) and `k_star` as a plain python
     float, mirroring `raps`'s (ndarray, ndarray, float) return.
 
-    Same binning as `raps`: bins of width `dk = 2*pi/L` starting at k=0 (built from
-    `np.fft.fftfreq`, then moved to `field`'s device — the on-device k-grid pattern
-    `forward.py::make_spatial_F`/`translation_modes` already use), a power-weighted
+    Same binning as `raps`: bins of width `dk = 2*pi/L` starting at k=0, a power-weighted
     centroid over the 5 bins around the peak, k=0 bin dropped before the peak search.
-    `np.digitize(x, kbins) - 1, clipped` is replaced by `floor(x / dk), clamped` — exactly
-    equal for these bins (uniform width, starting at 0, x = |k| >= 0 always) — since
-    torch has no digitize; accumulation is `scatter_add_` in place of numpy's `bincount`.
+    `np.digitize(x, kbins) - 1, clipped` is replaced by `floor(x / dk), clamped`, and
+    accumulation is `scatter_add_` in place of numpy's `bincount`.
 
-    PARITY PORT: numerically faithful by construction, but not yet PINNED against `raps` by
-    a test (matching values on a shared field is the natural anchor) — do that before any
-    caller relies on it. NOT wired into any caller here; forward.py owns that integration
-    decision.
+    The bin assignment is built ONCE per (n, L, device, dtype) by `_raps_torch_bins` and
+    cached, so a call does no host work, no host-to-device transfer and no `KR.max()`
+    sync; only the FFT, the scatter and the peak `argmax` remain. The arithmetic is
+    otherwise unchanged.
+
+    KNIFE EDGE — `floor` and `digitize` are NOT exactly equal here, contrary to what this
+    docstring used to claim. On these grids every lattice radius lying on an axis is an
+    exact multiple of `dk`, i.e. exactly ON a bin edge, and `x / dk` can evaluate 1 ulp
+    low there, putting the point one bin down where `digitize` puts it up. Measured
+    2026-08-17: on a saturated 64^2 pattern `kstar_of_torch` and `kstar_of` agree to 3e-16
+    relative — the regime `forward.relax_to_pattern_torch`'s detector runs in — but on a
+    pure-noise 16^2 field one bin differed by 14% and k* by 0.24%, where the RAPS has no
+    real peak and the centroid is ill-posed anyway. Same class as finding F-D6-1
+    (`docs/DIAGNOSTICS_fft.md`), which is why `losses/spectral.py::raps_torch` keeps its
+    OWN integer-arange/`digitize` binning instead of calling this one. Now that the
+    binning is computed host-side, `np.digitize` is available here too and the original
+    "torch has no digitize" justification no longer applies; switching would change values
+    for a shared observable, so it is left as a flagged follow-up, not taken here.
+
+    PARITY PORT: faithful by construction and now MEASURED against `raps` on patterned and
+    noise fields (above), but still not PINNED by a test — add one before any further
+    caller relies on it. Wired into `forward.relax_to_pattern_torch`'s saturation detector.
     """
     import torch
     f = field - field.mean()
     N = f.shape[0]
-    device, dtype = f.device, f.dtype
+    idx, counts, kcent = _raps_torch_bins(N, L, f.device, f.dtype)
     F = torch.abs(torch.fft.fft2(f)) ** 2
-    kfreq_np = np.fft.fftfreq(N, d=L / N) * 2 * np.pi          # rad/length
-    kfreq = torch.from_numpy(kfreq_np).to(device=device, dtype=dtype)
-    KX, KY = torch.meshgrid(kfreq, kfreq, indexing="ij")
-    KR = torch.sqrt(KX ** 2 + KY ** 2)
-    dk = 2 * np.pi / L                                          # fundamental
-    kbins_np = np.arange(0, float(KR.max().item()) + dk, dk)
-    kbins = torch.from_numpy(kbins_np).to(device=device, dtype=dtype)
-    nbins = kbins.shape[0] - 1
-    idx = torch.clamp((KR.reshape(-1) / dk).floor().long(), 0, nbins - 1)
-    Fflat = F.reshape(-1)
-    power = torch.zeros(nbins, device=device, dtype=dtype).scatter_add_(0, idx, Fflat)
-    counts = torch.zeros(nbins, device=device, dtype=dtype).scatter_add_(
-        0, idx, torch.ones_like(Fflat))
-    power = power / torch.clamp(counts, min=1.0)
-    kcent = 0.5 * (kbins[:-1] + kbins[1:])
+    power = torch.zeros(kcent.shape[0], device=f.device,
+                        dtype=f.dtype).scatter_add_(0, idx, F.reshape(-1))
+    power = power / counts
     power[0] = 0.0                                              # drop k=0
     pk = int(torch.argmax(power).item())
     lo, hi = max(1, pk - 2), min(power.shape[0], pk + 3)
@@ -113,7 +156,9 @@ def raps_torch(field, L: float = 1.0):
 
 
 def kstar_of_torch(field, L: float = 1.0) -> float:
-    """Torch parity port of `kstar_of`: `raps_torch(field, L)[2]`. See `raps_torch`."""
+    """Torch parity port of `kstar_of`: `raps_torch(field, L)[2]`. See `raps_torch` — it
+    shares that function's cached binning, so this costs one FFT, one scatter and two
+    scalar syncs (the peak `argmax` and the returned k*), with no host rebuild."""
     return raps_torch(field, L)[2]
 
 

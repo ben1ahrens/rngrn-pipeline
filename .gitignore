@@ -60,6 +60,12 @@ experiments/**/*.png
 # a 96-run wave would add ~100 MB of PNGs to the repo.
 !experiments/figures_report/**/*.png
 
+# Same exception for `experiments/figures_paper/` — the finished paper figures (RECOVERY
+# PANELS et al.), where the PNG is the deliverable handed to the paper, not per-run sweep
+# bulk. Also deliberately scoped, not a global un-ignore.
+!experiments/figures_paper/**/figures/
+!experiments/figures_paper/**/*.png
+
 # tidy CSV exports (`rngrn export`) — a pure projection of the tracked indexes
 exports/
 

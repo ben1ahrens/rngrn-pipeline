@@ -1,0 +1,35 @@
+B: 256
+L: 185.00615234487148
+arm: r2
+bio_box_path: configs/bio_box.yaml
+dataset_id: turing_labyrinth
+device: cuda
+dispersion_backend: cubic
+grad_clip: 10.0
+history_every: 100
+kstar_obs: 0.28387817575592444
+lr: 0.05
+model_seed: 0
+param_boxes:
+  alpha:
+  - 0.5
+  - 10.0
+  delta:
+  - 0.4
+  - 5.0
+pin_xstar:
+- 0.4193849837438677
+- 0.754671536968317
+- 0.3504568664953922
+sample_key: sample_0000
+staging:
+  keys:
+  - turing
+  off_frac: 0.25
+  ramp_frac: 0.25
+steps: 1500
+weights:
+  beta_hinge: 1.0
+  kstar_si: 1.0
+  param_prior: 1.0
+  turing: 1.0

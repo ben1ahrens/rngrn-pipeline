@@ -1,0 +1,72 @@
+{
+  "arm": "a0",
+  "B": 128,
+  "steps": 1500,
+  "wall_s": 2758.5338640213013,
+  "s_per_step": 1.839022576014201,
+  "member_steps_per_s": 69.60219067969267,
+  "peak_rss_mb": 1990.52734375,
+  "rss_mb_end": 1990.52734375,
+  "mem_available_mb_after": 7494.76171875,
+  "cuda_max_alloc_mb": 113.4296875,
+  "n_alive": 128,
+  "n_members": 128,
+  "n_turing": 11,
+  "turing_frac": 0.0859375,
+  "turing_frac_of_alive": 0.0859375,
+  "population_all": {
+    "n": 128,
+    "n_distinct_structures": 62,
+    "topology_consistency": 0.09375,
+    "modal_fraction": 0.09375,
+    "mean_agreement": 0.5867508748906387
+  },
+  "population_ignited": {
+    "n": 11,
+    "n_distinct_structures": 9,
+    "topology_consistency": 0.2727272727272727,
+    "modal_fraction": 0.2727272727272727,
+    "mean_agreement": 0.46262626262626255
+  },
+  "kstar_rel_err_vs_obs_median": 0.9764773621736255,
+  "kstar_rel_err_vs_obs_mean": 0.8944227060108277,
+  "n_distinct_structures_all": 62,
+  "kstar_fft": 0.28867729226361033,
+  "kstar_fft_rel_err_median": 0.976868414336446,
+  "kstar_fft_rel_err_mean": 0.8960829178340728,
+  "kstar_fft_rel_err_median_ignited": 0.03324466811861473,
+  "run_id": "phase1_a0_B128",
+  "run_dir": "experiments/redesign_r2/phase1/phase1_a0_B128",
+  "dataset_id": "turing_labyrinth",
+  "sample_key": "sample_0000",
+  "L": 185.00615234487148,
+  "kstar_obs": 0.28387817575592444,
+  "x_pin": [
+    0.4193849837438677,
+    0.754671536968317,
+    0.3504568664953922
+  ],
+  "device": "cuda",
+  "backend": "cubic",
+  "lr": 0.05,
+  "grad_clip": 10.0,
+  "model_seed": 0,
+  "weights": {
+    "kstar": 1.0,
+    "turing": 1.0,
+    "resid": 0.0,
+    "anticollapse": 0.5,
+    "anchor": 2.0,
+    "morphology": 0.1,
+    "param_prior": 0.0
+  },
+  "staging": {
+    "keys": [
+      "turing"
+    ],
+    "off_frac": 0.25,
+    "ramp_frac": 0.25
+  },
+  "git_sha": "1676d52",
+  "torch": "2.13.0+cu130"
+}

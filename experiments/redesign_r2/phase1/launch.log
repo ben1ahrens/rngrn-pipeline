@@ -1,0 +1,74 @@
+guarded_run: START MemAvailable=9471MB oom_score_adj=500 -- .venv/bin/python -u scripts/r2_ignition_run.py --out experiments/redesign_r2/phase1
+target      turing_labyrinth/sample_0000  L=185.00615  frame=(3, 512, 512)
+kstar_obs   0.283878   x*_pin [0.4193849837438677, 0.754671536968317, 0.3504568664953922]
+box         {'alpha': (0.5, 10.0), 'delta': (0.4, 5.0)}
+device      cuda  backend=cubic  git=1676d52
+
+=== phase1_r2_B64 ===  MemAvailable=9066MB
+  [r2 B=64] step 0: alive=64 ignited=0 mean_total=2.6117
+  [r2 B=64] step 250: alive=64 ignited=0 mean_total=0.4301
+  [r2 B=64] step 500: alive=64 ignited=0 mean_total=0.7555
+  [r2 B=64] step 750: alive=64 ignited=0 mean_total=0.8027
+  [r2 B=64] step 1000: alive=64 ignited=0 mean_total=0.7991
+  [r2 B=64] step 1250: alive=64 ignited=0 mean_total=0.7977
+--- phase1_r2_B64: turing 0/64 (0.000), distinct(all) 3, kstar_fft_rel_err median 0.9769, 2168 member-steps/s, peak RSS 1915 MB
+
+=== phase1_a0_B64 ===  MemAvailable=7703MB
+  [a0 B=64] step 0: alive=64 ignited=0 mean_total=0.5158
+  [a0 B=64] step 250: alive=64 ignited=0 mean_total=0.0769
+  [a0 B=64] step 500: alive=64 ignited=2 mean_total=0.1660
+  [a0 B=64] step 750: alive=64 ignited=3 mean_total=0.2557
+  [a0 B=64] step 1000: alive=64 ignited=3 mean_total=0.2426
+  [a0 B=64] step 1250: alive=64 ignited=3 mean_total=0.2389
+--- phase1_a0_B64: turing 3/64 (0.047), distinct(all) 44, kstar_fft_rel_err median 0.9769, 60 member-steps/s, peak RSS 1989 MB
+
+=== phase1_r2_B128 ===  MemAvailable=9073MB
+  [r2 B=128] step 0: alive=128 ignited=0 mean_total=2.6376
+  [r2 B=128] step 250: alive=128 ignited=0 mean_total=0.4305
+  [r2 B=128] step 500: alive=128 ignited=0 mean_total=0.7535
+  [r2 B=128] step 750: alive=128 ignited=0 mean_total=0.8030
+  [r2 B=128] step 1000: alive=128 ignited=0 mean_total=0.7994
+  [r2 B=128] step 1250: alive=128 ignited=0 mean_total=0.7981
+--- phase1_r2_B128: turing 0/128 (0.000), distinct(all) 3, kstar_fft_rel_err median 0.9769, 3737 member-steps/s, peak RSS 1989 MB
+
+=== phase1_a0_B128 ===  MemAvailable=9123MB
+  [a0 B=128] step 0: alive=128 ignited=0 mean_total=0.4828
+  [a0 B=128] step 250: alive=128 ignited=0 mean_total=0.0768
+  [a0 B=128] step 500: alive=128 ignited=7 mean_total=0.1694
+  [a0 B=128] step 750: alive=128 ignited=9 mean_total=0.2469
+  [a0 B=128] step 1000: alive=128 ignited=11 mean_total=0.2355
+  [a0 B=128] step 1250: alive=128 ignited=11 mean_total=0.2296
+--- phase1_a0_B128: turing 11/128 (0.086), distinct(all) 62, kstar_fft_rel_err median 0.9769, 70 member-steps/s, peak RSS 1991 MB
+
+=== phase1_r2_B256 ===  MemAvailable=7515MB
+  [r2 B=256] step 0: alive=256 ignited=0 mean_total=2.6544
+  [r2 B=256] step 250: alive=256 ignited=0 mean_total=0.4303
+  [r2 B=256] step 500: alive=256 ignited=0 mean_total=0.7585
+  [r2 B=256] step 750: alive=256 ignited=0 mean_total=0.8021
+  [r2 B=256] step 1000: alive=256 ignited=0 mean_total=0.7986
+  [r2 B=256] step 1250: alive=256 ignited=0 mean_total=0.7972
+--- phase1_r2_B256: turing 0/256 (0.000), distinct(all) 3, kstar_fft_rel_err median 0.9769, 5527 member-steps/s, peak RSS 1991 MB
+
+=== phase1_a0_B256 ===  MemAvailable=7461MB
+  [a0 B=256] step 0: alive=256 ignited=0 mean_total=0.4695
+  [a0 B=256] step 250: alive=256 ignited=0 mean_total=0.0767
+  [a0 B=256] step 500: alive=256 ignited=14 mean_total=0.1737
+  [a0 B=256] step 750: alive=256 ignited=18 mean_total=0.2464
+  [a0 B=256] step 1000: alive=256 ignited=20 mean_total=0.2340
+guarded_run: START MemAvailable=10350MB oom_score_adj=500 -- .venv/bin/python -u scripts/r2_ignition_run.py --out experiments/redesign_r2/phase1 --B 512 --arms r2
+target      turing_labyrinth/sample_0000  L=185.00615  frame=(3, 512, 512)
+kstar_obs   0.283878   x*_pin [0.4193849837438677, 0.754671536968317, 0.3504568664953922]
+box         {'alpha': (0.5, 10.0), 'delta': (0.4, 5.0)}
+device      cuda  backend=cubic  git=1676d52
+
+=== phase1_r2_B512 ===  MemAvailable=9946MB
+  [r2 B=512] step 0: alive=512 ignited=0 mean_total=2.6620
+  [r2 B=512] step 250: alive=512 ignited=0 mean_total=0.4304
+  [r2 B=512] step 500: alive=512 ignited=0 mean_total=0.7572
+  [r2 B=512] step 750: alive=512 ignited=0 mean_total=0.8022
+  [r2 B=512] step 1000: alive=512 ignited=0 mean_total=0.7987
+  [r2 B=512] step 1250: alive=512 ignited=0 mean_total=0.7974
+--- phase1_r2_B512: turing 0/512 (0.000), distinct(all) 3, kstar_fft_rel_err median 0.9769, 4885 member-steps/s, peak RSS 1923 MB
+
+wrote experiments/redesign_r2/phase1/results/phase1_summary.json
+guarded_run: END rc=0 MemAvailable=10479MB

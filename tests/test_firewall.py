@@ -105,7 +105,10 @@ FORBIDDEN = ["rd_models", "data.solver", "data.cache", "data.gate", "data.regist
              "exp05_pixel_minibatch", "exp06_residual_sweep", "exp07_long_training",
              "exp08_trivial_baseline", "exp09_anchor_and_ensemble",
              "exp10_cubic_dispersion", "exp11_robustness_baseline",
-             "exp12_spectral_amplitude", "measure_frame_bias"]
+             "exp12_spectral_amplitude", "measure_frame_bias",
+             # Task 16: opens payload.h5 for the observed frame AND reads
+             # AnswerKey.kstar_fft post-training for the D5-comparable k* column.
+             "r2_ignition_run"]
 
 
 def _imports(path):

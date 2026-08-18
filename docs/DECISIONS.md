@@ -3344,3 +3344,168 @@ reproducible from the run directory).
 R2 deliverables, the noise arm an R4 deliverable.
 
 **Where it lives:** `docs/REDESIGN_rngrn.md` §4.7–§4.8, §6, §7 (R2, R4), §8 item 16.
+
+### D-R2-1 — the box-sigmoid reparameterization silently RE-CENTRES the default init: α 7.6× and δ 3.9× higher than legacy
+
+**Date found:** 2026-08-18 (Task 16, branch `feature/redesign-model`).
+**Status:** OPEN — measured, deliberately NOT fixed here (see "what was rejected").
+
+**The defect.** `RNGRN.__init__` draws `theta_alpha ~ N(0, 0.5)` and `theta_delta ~ N(0, 0.3)`
+— raw scales chosen for the SOFTPLUS map, where `softplus(0) = 0.693`. Task 13's
+`param_boxes` replaces that map with `low + (high−low)·sigmoid(raw)`, where a raw near 0
+lands at the box **midpoint**. The raw init distribution was not adjusted, so switching the
+box on moves the physical starting point without any caller asking it to.
+
+**Measured**, over the exact 512 member seeds the Phase-I run uses
+(`recover._restart_seed(0, r)`, r = 0..511; N=3, form=competitive, init='default',
+box = `configs/bio_box.yaml` α∈[0.5,10], δ∈[0.4,5]; 4608 α entries and 1536 δ entries):
+
+| parameter | legacy (softplus) median [5th, 95th] | boxed median [5th, 95th] | ratio |
+|---|---|---|---|
+| α | 0.692 [0.365, 1.194] | 5.246 [3.407, 7.121] | **7.58×** |
+| δ | 0.698 [0.468, 0.982] | 2.710 [2.121, 3.277] | **3.88×** |
+
+**Why it matters for Turing, mechanistically.** The Jacobian diagonal is
+`J_ii = ∂prod_i/∂x_i − δ_i`, and Turing instability requires at least one positive diagonal
+(`docs/STATE_OF_THE_SCIENCE.md` §10: 0/200 default-init diagonals are positive, 88/88 true
+systems' are). The box **floors δ at 0.4 and starts it at 2.71**, so self-activation must
+overcome a decay rate ~3.9× larger than under the legacy init before the optimiser has moved
+anything. Measured Jacobian diagonals at the pinned x* for three boxed members are −2.90 /
+−3.01 / −1.99, −2.18 / −2.33 / −1.65 and −2.68 / −1.34 / −2.92 — uniformly negative and of
+the order of the re-centred δ.
+
+**This is the same argument Task 13 already accepted for a different init.** `RNGRN.__init__`
+refuses `param_boxes` with `init='low_basal'` on the grounds that "the same raws would land
+at a DIFFERENT alpha/delta value under a box, silently defeating the low-basal Jacobian
+diagonal prior it exists to provide". The identical reasoning applies to `init='default'`,
+where it was not caught because the default init carries no *stated* prior to defeat — only
+an unstated one, namely the scales `TUNING.md` records as "they set where recovery starts".
+
+**What was rejected and why.** Fixing it inside Task 16 was rejected: the Phase-I run's job
+is to measure the code as reviewed, and re-centring the init mid-task would have made the
+measured ignition rate a number about an unreviewed init rather than about the ratified
+design. The two candidate repairs, both untested, for whoever takes this:
+(a) shift `theta_alpha`/`theta_delta` by `logit((legacy_median − low)/(high − low))` so the
+boxed init starts where the legacy init did — cheap, and keeps the box's guarantee; or
+(b) declare the box midpoint the intended starting point and re-derive the raw scales from
+the box — defensible, but it changes what every boxed number means and needs its own
+control arm. Choosing between them is a science decision with a live pre-registration
+consequence (§3.3 makes α/δ plausibility `structural`), so it is RETURNED, not ruled.
+
+**Where it lives:** `src/rngrn/model.py::_box_sigmoid` and `RNGRN.__init__` (the raw draws);
+`docs/REDESIGN_rngrn.md` §3.3; the measurement is reproducible from the table above with no
+run directory required (it is a property of the init, not of a run).
+
+### D-R2-2 — Phase-I run configuration: the four ignition weights, the arms, and the device/backend
+
+**Date:** 2026-08-18 (Task 16). **Status:** DECIDED (every threshold UNCALIBRATED, marked).
+**Decided by:** the implementing agent under CLAUDE.md §10.
+
+**The decision, and what each part rests on.**
+
+1. **Ignition weights `kstar_si=1.0, turing=1.0, param_prior=1.0, beta_hinge=1.0`. ALL FOUR
+   UNCALIBRATED.** `kstar_si` inherits `kstar`'s shipped 1.0 verbatim so the §4.4 swap is a
+   substitution and not simultaneously a re-weighting; `turing` is unchanged from the shipped
+   default and from D5's frozen config; `param_prior` is the §3.3/§4.4 "promoted to nonzero
+   weight" with no calibrated value in existence, so 1.0 is the neutral promotion; `beta_hinge`
+   is born with this task and has no prior art at all. Rejected: tuning any of them before the
+   first measurement existed, which would have made the first Phase-I number a tuned one.
+2. **A0 control = D5's own weight dict, quoted** from
+   `experiments/diag_fft/d5/target_reports.jsonl`'s `frozen_config`, including its inert
+   `morphology: 0.1` — so the control is the objective the baseline row was measured under
+   rather than a re-derivation of it. Rejected: using `terms.DEFAULT_WEIGHTS` (which carries
+   `morphology: 0.0`), because then the control would differ from D5 by an edit nobody asked
+   for, however inert.
+3. **Budget 1500 Adam steps, lr 0.05, grad-clip 10.0, no LBFGS, both arms**, per
+   `docs/REDESIGN_rngrn.md` §4.5. This is NOT D5's budget (2000 Adam + 50 LBFGS, serial), so
+   A0 is the matched control and D5 is context, never the control. Rejected: matching D5's
+   budget instead, which would have unmatched the two arms actually being compared.
+4. **`dispersion_backend='cubic'` on CUDA.** The `eig` backend has no batched cuSOLVER kernel
+   for small non-symmetric matrices (~700 µs per matrix, flat in B — measured 2500× worse
+   than cubic at B=8, `model.BatchedRNGRN` docstring), so `eig` on CUDA is refused by the
+   driver rather than merely discouraged. `cubic` is exact for N=3 and was validated against
+   `eig` on 127 real Jacobians (σ_max MAE 9.2e-13, k* MAE 0, 0/127 verdict flips), so this
+   changes the arithmetic path but not the answer. D5 ran `eig`; the difference is recorded.
+5. **Ignition EVENTS use the training k-grid; the reported Turing FRACTION uses
+   `eval.analysis.turing_ok`.** The event flag is `sig0 < 0 and sig_max_pos > 1e-3` read off
+   the quantities `turing_hinges_split_batched` already computes on `recover._kgrid_for`'s
+   k*_obs-anchored grid; the final verdict is the strict D-EVID-11 criterion on `turing_ok`'s
+   own `linspace(1e-3, 50, 4000)`. The two can disagree near the boundary, so only the second
+   is ever reported as a Turing fraction. Rejected: reporting the cheap in-loop flag as the
+   headline, which would not be comparable to D5's `turing_frac`.
+6. **`n_distinct_structures` / `topology_consistency` use `scoring.reproducibility` at
+   `sign_zero_rtol = 0.05`** — the same function and the same threshold that produced D5's
+   10/10 and 0.1. Rejected: `recover._topology`'s KA/KR-gate signs, which are a different
+   quantity and would not be comparable to the D5 row.
+7. **History (the `arrays/plot_arrays.npz` trajectory) is recorded for the LARGEST B only, at
+   stride 100.** An npz per sweep rung would add tens of MB to a tracked tree for a curve
+   whose scientific content is one scalar per rung. Rejected: recording every rung.
+
+**Where it lives:** `scripts/r2_ignition_run.py` (the constants carry these reasons at their
+definition); `experiments/redesign_r2/phase1/` (the runs); `docs/HANDOFF_redesign_r2.md`.
+
+### D-R2-3 — the R2 ignition objective does not ignite: the pinned, β-derived model makes a DECOUPLED network free, and `param_prior` at 1.0 overwhelms the k\* anchor
+
+**Date:** 2026-08-19 (Task 16, the first Phase-I population run).
+**Status:** OPEN — two causes measured and attributed; neither fixed here (Task 16's job was
+to measure the design as ratified, not to redesign the objective mid-measurement).
+
+**The measurement.** Phase-I, `turing_labyrinth/sample_0000`, CUDA, cubic backend, 1500 Adam
+steps at lr 0.05, member seeds `recover._restart_seed(0, r)` shared across arms. Run dirs
+under `experiments/redesign_r2/phase1/` and `.../phase1_ablation/`.
+
+| arm | B | Turing (strict, `eval.analysis.turing_ok`) | distinct sign structures | median `kstar_fft_rel_err` |
+|---|---|---|---|---|
+| r2 (pin + box + prior) | 64/128/256/512 | **0** at every B | 3 at every B | 0.9769 |
+| a0 (legacy objective, control) | 64 | 3 (4.7 %) | 44 | 0.9769 |
+| a0 | 128 | 11 (8.6 %) | 62 | 0.9769 |
+| r2_nobox (pin, softplus α/δ) | 64 | 0 | 3 | 0.9769 |
+| r2_noprior (pin + box, prior 0) | 64 | 0 | 5 | **0.0332** |
+
+**Cause 1 — `param_prior` at the promoted weight 1.0 wins against `kstar_si`.** Removing it
+moves the median k\* error from 0.977 to **0.0332 (29×)**. The B=512 invariant trace shows
+`d_ratio` driven to **exactly 7.500** (5th and 95th percentile both 7.5000 over 512 members)
+while `L_kstar_si` moves 0.0809 → 0.0791 (**2 %**) across the whole run. `docs/REDESIGN_rngrn.md`
+§3.3 promoted the prior on the stated grounds that "the prior's role is to make the viability
+tension measurable, not to fix a failure" — the measurement is that at weight 1.0 it does not
+measure the tension, it resolves it in the prior's favour and takes the wavenumber with it.
+The generator's own D-ratio median is ~135 (`configs/bio_box.yaml` header) against the prior's
+centre 7.5, so the two objectives are pulling in opposite directions by design; what was not
+anticipated is the margin.
+
+**Cause 2 — the decoupled network is an exactly feasible, unpenalised optimum.** Ignition fails
+in all three r2 variants, so neither the box nor the prior causes it. Measured at B=512:
+median `max|off-diag J| / max|diag J|` = **0.0027** for r2 against **0.582** for a0; the binding
+budget `s = KA+KR` collapses 0.314 → **0.0133**; promoter occupancy collapses 0.0244 → **5.7e-05**;
+and β/δ converges to **0.4193 / 0.2674 / 0.3504** against the pin x\* = (0.41938, 0.75467,
+0.35046) — a 0.03 % match on species 0 and 2. That is the analytic signature: as `prod(x*) → 0`
+the derived β is exactly `δ_i·x*_i`, which satisfies the pinned fixed point exactly, clears the
+β ≥ 0 hinge comfortably, and costs nothing in any other term. **No term in the R2 ignition
+objective requires non-zero cross-regulation**, and §3.2/§3.3 retired the two terms
+(`frame_scale_anchor`, `anticollapse`) that incidentally discouraged the trivial network.
+
+**`anticollapse` would not have caught it, computed rather than assumed.** It floors ‖J‖_F at
+`jac_floor = 1.0`; the r2 arm's ‖J‖_F is **6.66**, so `softplus(1.0 − 6.66) ≈ 0.003` — inactive.
+§3.3's structural argument for retiring it ("box-confined rates cannot let ‖J‖ collapse to
+zero") is correct about ‖J‖ and *irrelevant to this failure*: what collapses is the
+off-diagonal, through the binding budget `s`, which §3.3 explicitly leaves unboxed ("D and s/g
+are NOT boxed in this design"). This does not reopen owner-decision item 11 in `anticollapse`'s
+favour — it says the term that is missing bounds COUPLING, not NORM, and no such term has ever
+existed in this repo.
+
+**What was rejected and why.** (a) Adding a coupling term inside Task 16 — rejected: the run's
+purpose was to measure the ratified objective, and inventing a term mid-run would have produced
+a number about an unreviewed objective. (b) Extending the budget past 1500 steps to chase
+ignition — rejected: `sig_max_pos` rises −1.149 → −0.0329 and does approach the +1e-3 margin,
+but a longer run cannot fix an objective whose optimum is the trivial network, and §4.5's
+budget-saturation citation is on a different sample family and flagged there as not
+like-for-like. (c) Reporting r2's "3 distinct structures vs D5's 10" as a reproducibility
+improvement — rejected as actively misleading: it is a collapse onto the trivial solution, and
+its sign structures are diagonal-only.
+
+**Not independently validated:** the three candidate repairs named in
+`docs/HANDOFF_redesign_r2.md` §7 (an off-diagonal ‖J‖ floor, an occupancy floor, boxing `s`)
+are untested; so is any claim about what the redesign arm would do with them.
+
+**Where it lives:** `experiments/redesign_r2/phase1/`, `experiments/redesign_r2/phase1_ablation/`;
+`docs/HANDOFF_redesign_r2.md` §4c; `docs/REDESIGN_rngrn.md` §3.2, §3.3, §4.4, §4.5.

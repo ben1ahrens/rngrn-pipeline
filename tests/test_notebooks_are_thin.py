@@ -1,10 +1,11 @@
 """test_notebooks_are_thin.py — the "thin drivers" contract of spec §4.8, made checkable.
 
 Parses notebook JSON only — this suite NEVER executes a notebook. `redesign_pipeline.ipynb`
-shells out to `scripts/r2_ignition_run.py`, which does not exist yet (Task 16's deliverable),
-and `redesign_plots.ipynb` needs a real run's `arrays/plot_arrays.npz` to load, so executing
-either here would either error on a missing script or need a live run directory that a test
-run cannot provide. "Thin" is therefore checked structurally instead: per code cell,
+shells out to `scripts/r2_ignition_run.py` (which Task 16 built, so the reason is no longer
+"the script is missing"): executing it here would launch a ~2-hour guarded GPU run from
+inside a unit test. `redesign_plots.ipynb` needs a real run's `arrays/plot_arrays.npz`, which
+now exists under `experiments/redesign_r2/phase1/` but is a run artefact a test must not
+depend on. "Thin" is therefore checked structurally instead: per code cell,
   - no defined function is longer than ~10 lines (a notebook cell that hides real logic
     inside a helper function is not a thin driver, it is the module in disguise);
   - no cell imports `data.gate` or `AnswerKey` — the firewall boundary (CLAUDE.md §5) a
@@ -96,10 +97,12 @@ def test_no_cell_imports_the_firewall_boundary(notebook):
 
 @pytest.mark.parametrize("notebook", ["redesign_pipeline.ipynb", "redesign_plots.ipynb"])
 def test_notebooks_are_committed_unexecuted(notebook):
-    """Neither notebook can actually be run yet: the pipeline notebook's launch cell shells
-    out to scripts/r2_ignition_run.py (Task 16, not built), and the plots notebook needs a
-    real run's arrays/ that no run has produced yet. Both are committed with no outputs and
-    no execution_count, rather than carrying stale/fabricated output."""
+    """Both notebooks are committed with no outputs and no execution_count, rather than
+    carrying stale or fabricated output. UPDATED at Task 16: the original reason was that
+    neither could be run at all (the launch script did not exist and no run directory did
+    either). Both now exist, and the contract is kept anyway — a committed output is a
+    snapshot that silently ages out of agreement with the run directory it came from, and
+    `experiments/redesign_r2/phase1/` is the tracked record instead."""
     path = os.path.join(NOTEBOOKS_DIR, notebook)
     if not os.path.isfile(path):
         pytest.fail(f"missing {path}")

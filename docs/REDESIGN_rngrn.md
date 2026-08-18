@@ -641,15 +641,17 @@ accuracy trap the design states loudly:
 > and gated rollouts use dt = min(0.2/jac_rate, μ/2) with a dt-halving convergence
 > check, plus at least one anchor run per gated model with dt refined below μ.
 
-Cost, measured (2026-08-18, PLAN_redesign Task 5): the GPU port
-(`eval/lifted_torch.py`, `feature/lift-ladder` commit b45f256) runs **6.378 ms/step at
-512², μ = 7.2e-4, float64** (RTX 5070 Ti Laptop, torch 2.13.0+cu130) — 1.96× the
-measured 3.25 ms/step QSS ETDRK4, inside the ≈2–3× this paragraph previously estimated
-(3 diffusing fields + 18 elementwise gate fields, no extra FFTs), and 40.1× the numpy
-path's 255.86 ms/step. That is ~10.6 min/field at 1e5 steps and ~1.8 h/field at 1e6.
-Provenance: `experiments/lift_ladder/gpu_port/results/cost.json` (generating script
-`scripts/lift_gpu_cost.py`, both in commit b45f256); CPU/CUDA bit-equivalence measured
-at max |ΔX| ≤ 5.3e-16 on the equivalence tests. The GPU-port precondition (§7) is met,
+Cost, measured twice (2026-08-18, PLAN_redesign Tasks 5 and 6): the GPU port
+(`eval/lifted_torch.py`) runs **6.1–6.4 ms/step at 512², μ = 7.2e-4, float64**
+(RTX 5070 Ti Laptop, torch 2.13.0+cu130) — ≈1.9–2.0× the measured 3.25 ms/step QSS
+ETDRK4, inside the ≈2–3× this paragraph previously estimated (3 diffusing fields + 18
+elementwise gate fields, no extra FFTs), and **30.8–40.1×** the numpy path (186.9–255.9
+ms/step; the spread on both sides is host-load variance across the two runs, not a code
+change). That is ~10–11 min/field at 1e5 steps and ~1.7–1.8 h/field at 1e6. Provenance:
+`experiments/lift_ladder/gpu_port/results/cost.json` — the T5 run (6.378 ms CUDA /
+255.86 ms numpy / 40.1×) is preserved in the file's history at commit b45f256; the
+current file holds the T6 re-emit (6.076 / 186.85 / 30.75×, commit 0c4a19c). CPU/CUDA
+bit-equivalence measured at max |ΔX| ≤ 5.3e-16 on the equivalence tests. The GPU-port precondition (§7) is met,
 consistent with §4.1. Independent
 cross-check: implement the `integrate_bdf1_newton_krylov` stub
 (`src/rngrn/eval/numerics.py`) for one 128² gated field; its current **silent fallback

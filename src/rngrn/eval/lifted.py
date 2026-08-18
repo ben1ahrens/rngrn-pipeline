@@ -615,6 +615,33 @@ def _reaction_from_gates_np(model, GA, GR):
             * np.prod(1.0 - GR, axis=1))
 
 
+def step_policy(model, xstar, D, L, n, dt, T, max_steps):
+    """dt, horizon and step budget for a lifted spatial run.
+
+    eval/rollout.py::simulate's growth-rate-aware policy, evaluated on the QSS Jacobian, so
+    the lifted and QSS runs of the same model use the SAME dt and horizon. Extracted from
+    `simulate_lifted` (unchanged arithmetic) so `lifted_torch.simulate_lifted_torch` picks
+    the identical step sequence from the identical inputs — two copies of this block would
+    make a CPU/GPU disagreement look like a numerics defect when it was a policy drift.
+
+    Returns (dt, sig_max, horizon_rate, nsteps, hit_budget).
+    """
+    xs_t = torch.tensor(np.asarray(xstar, float), device=model.device, dtype=model.dtype)
+    Jn = model.jacobian(xs_t, create_graph=False).detach().cpu().numpy()
+    kg = np.linspace(1e-3, 2 * np.pi * (n // 2) / L, 2000)
+    sigd = np.array([np.max(np.real(np.linalg.eigvals(Jn - kk ** 2 * np.diag(D))))
+                     for kk in kg])
+    sig_max = float(sigd.max())
+    horizon_rate = max(abs(sig_max), 1e-12)
+    jac_rate = float(np.max(np.abs(np.linalg.eigvals(Jn))))
+    if dt is None:
+        dt = 0.2 / (jac_rate + 1e-9)
+    if T is None:
+        T = 40.0 / horizon_rate
+    nsteps = int(np.clip(T / dt, 200, max_steps))
+    return float(dt), sig_max, float(horizon_rate), nsteps, bool((T / dt) > max_steps)
+
+
 def simulate_lifted(model, L, mu, n=64, T=None, dt=None, seed=0, noise=1e-2, xstar=None,
                     max_steps=200000, record_every=0):
     """Integrate the FULL lifted spatial system on an n x n periodic grid.
@@ -642,20 +669,8 @@ def simulate_lifted(model, L, mu, n=64, T=None, dt=None, seed=0, noise=1e-2, xst
         xstar = xs.detach().cpu().numpy()
     xstar = np.asarray(xstar, float).reshape(N)
 
-    xs_t = torch.tensor(xstar, device=model.device, dtype=model.dtype)
-    Jn = model.jacobian(xs_t, create_graph=False).detach().cpu().numpy()
-    kg = np.linspace(1e-3, 2 * np.pi * (n // 2) / L, 2000)
-    sigd = np.array([np.max(np.real(np.linalg.eigvals(Jn - kk ** 2 * np.diag(D))))
-                     for kk in kg])
-    sig_max = float(sigd.max())
-    horizon_rate = max(abs(sig_max), 1e-12)
-    jac_rate = float(np.max(np.abs(np.linalg.eigvals(Jn))))
-    if dt is None:
-        dt = 0.2 / (jac_rate + 1e-9)
-    if T is None:
-        T = 40.0 / horizon_rate
-    nsteps = int(np.clip(T / dt, 200, max_steps))
-    hit_budget = (T / dt) > max_steps
+    dt, sig_max, horizon_rate, nsteps, hit_budget = step_policy(
+        model, xstar, D, L, n, dt, T, max_steps)
 
     rng = np.random.default_rng(seed)
     X = xstar[:, None, None] + noise * rng.standard_normal((N, n, n))

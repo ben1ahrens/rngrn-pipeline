@@ -42,6 +42,10 @@ RECOVERY_SIDE = [
     # own algebraic invariants at the resulting x*. Same character as eval/lifted.py itself
     # (which it wraps, not reimplements): reads only the model's own parameters, no frame,
     # no ground-truth quantity.
+    "eval/lifted_torch.py",                         # 2026-08-18, R1 Task 5 GPU port: torch
+    # transcription of eval/lifted.py's spatial Strang integrator, x substep delegated to
+    # etdrk4_torch. Same character as both parents: the model's own parameters plus
+    # caller-supplied grid geometry only — no frame, no ground-truth quantity.
 ]
 
 # SCORING-side modules under losses/ and eval/. These MAY read the answer key; they are

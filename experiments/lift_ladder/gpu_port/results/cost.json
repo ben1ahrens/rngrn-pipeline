@@ -1,0 +1,34 @@
+{
+  "what": "per-step wall cost of the lifted Strang integrator: eval/lifted_torch.simulate_lifted_torch (CUDA) vs eval/lifted.simulate_lifted (numpy CPU)",
+  "replaces": "docs/REDESIGN_rngrn.md \u00a75.2 ESTIMATE \u2014 this is the measured value",
+  "timed": "the Strang loop only (`seconds`/`nsteps_run` from the run), one warmup run discarded; setup (coeffs, transfers, steady state) excluded",
+  "date": "2026-08-18",
+  "git_commit": "f367c436377b8d71b7fed1aa03600b7ae47016e2",
+  "device": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+  "host": "BensStudio",
+  "torch_version": "2.13.0+cu130",
+  "cuda_version": "13.0",
+  "dtype": "float64",
+  "model": {
+    "form": "competitive",
+    "draw_seed": 23,
+    "N": 3,
+    "n_hill": 2
+  },
+  "grid": {
+    "n": 512,
+    "L": 20.0
+  },
+  "mu": 0.00072,
+  "dt": 0.5641592703771617,
+  "sig_max": 0.14557341042579447,
+  "cuda": {
+    "steps_timed": 200,
+    "ms_per_step": 6.378431185003137
+  },
+  "cpu": {
+    "steps_timed": 200,
+    "ms_per_step": 255.85969029503758
+  },
+  "speedup_cpu_over_cuda": 40.11326341446008
+}

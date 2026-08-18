@@ -91,9 +91,11 @@ V3_N_ANCHOR = 128        # V3(b)'s torch grid
 FORMS = ("competitive", "nc1")
 
 # V3(b)'S HORIZON IS A STEP BUDGET, NOT A GROWTH TIME, AND THAT IS FORCED BY ITS OWN dt
-# POLICY. The §5.2 policy dt = min(0.2/jac_rate, mu/2) is mu/2 = 3.6e-4 at mu_central, some
-# 1500x finer than the QSS rollout's growth-rate-aware dt (~0.56 on these systems), while
-# the pattern-formation horizon 40/|sigma_max| is ~700 time units. Running that horizon at
+# POLICY. The §5.2 policy dt = min(0.2/jac_rate, mu/2) is mu/2 = 3.6e-4 at mu_central, up to
+# 702x finer than the QSS rollout's growth-rate-aware dt (measured 0.0264-0.2528 on the 23
+# harvest systems, experiments/lift_ladder/v3/results/v3.json -- dt/mu spans 26.4-2.528e5
+# over the V3_MUS set), while the pattern-formation horizon 40/|sigma_max| is ~700 time
+# units. Running that horizon at
 # that dt is ~2e6 steps per field, i.e. past `simulate_lifted`'s own 200000 max_steps, and a
 # step_budget run is TRUNCATED -- its field is not a statement about the attractor
 # (eval/rollout.py::simulate). So V3(b) is scoped to what its dt can actually pay for: a
@@ -209,7 +211,12 @@ def run_v0(_args):
 def run_v1(_args):
     """V1 over the low_basal population, PLUS the controller rider: the Turing-positive
     systems where k* is INTERIOR, where `kstar_grid_offset` is a real measurement rather
-    than two grid floors agreeing by construction (`v1_continuation`'s docstring)."""
+    than two grid floors agreeing by construction (`v1_continuation`'s docstring). The
+    Turing-positive population is the union of three sources -- `draw_models` survivors
+    (measured 0 of 398 for this init, D-EVID-11; re-measured here as `draw_models_turing_rate`),
+    the 23 harvest systems (T3 ruling: V1 must also cover the harvest survivors, not the D5
+    four alone), and the D5 four -- each row tagged `population` so the three are never
+    silently pooled as one."""
     out = {"mus": list(V1_MUS), "seeds": list(V1_SEEDS), "per_seed": V1_PER_SEED,
            "low_basal": [], "turing_positive": []}
     for form in FORMS:
@@ -220,16 +227,37 @@ def run_v1(_args):
                 out["low_basal"].append(r)
 
     surv, surv_labels, n_seen = draw_models_turing_survivors(V0_N_DRAWS, seed=V0_SEED)
+    hv, hv_labels = harvest_models()
     d5, d5_labels = d5_models()
     out["draw_models_turing_rate"] = dict(
         n_drawn=n_seen, n_strictly_turing=len(surv),
         rate=(len(surv) / n_seen if n_seen else float("nan")),
         note="strict verdict (ladder.qss_verdict), NOT analysis.turing_ok's trace test")
-    for m, label in zip(surv + d5, surv_labels + d5_labels):
+    pops = (["draw_survivor"] * len(surv) + ["harvest"] * len(hv) + ["d5"] * len(d5))
+    for m, label, pop in zip(surv + hv + d5, surv_labels + hv_labels + d5_labels, pops):
         r = ladder.v1_continuation(m, ladder.default_kgrid(m), mus=V1_MUS)
-        r.update(label=label, form=m.form)
+        r.update(label=label, form=m.form, population=pop)
         out["turing_positive"].append(r)
-    return out, {}
+
+    # arrays the viz needs: the per-row scalars stacked, so a figure does not have to
+    # re-walk the JSON's row lists (docs/PLAN_redesign.md Task 6 interface: "the arrays the
+    # viz needs under arrays/"). All quantities are already in `out`; nothing is recomputed.
+    lb, tp = out["low_basal"], out["turing_positive"]
+    arrays = dict(
+        low_basal_labels=np.array([r["label"] for r in lb], dtype=object),
+        low_basal_slow_branch_order=np.array([r["slow_branch_order"] for r in lb]),
+        low_basal_kstar_grid_offset=np.array([r["kstar_grid_offset"] for r in lb], dtype=int),
+        low_basal_min_fast_mu_product=np.array([r["min_fast_mu_product"] for r in lb]),
+        turing_positive_labels=np.array([r["label"] for r in tp], dtype=object),
+        turing_positive_population=np.array([r["population"] for r in tp], dtype=object),
+        turing_positive_slow_branch_order=np.array([r["slow_branch_order"] for r in tp]),
+        turing_positive_kstar_grid_offset=np.array([r["kstar_grid_offset"] for r in tp],
+                                                    dtype=int),
+        turing_positive_kstar_qss=np.array([r["kstar_qss"] for r in tp]),
+        turing_positive_min_qss_overlap=np.array([r["min_qss_overlap"] for r in tp]),
+        turing_positive_frac_k_separated=np.array([r["frac_k_separated"] for r in tp]),
+        turing_positive_max_mu_D_k2=np.array([r["max_mu_D_k2"] for r in tp]))
+    return out, arrays
 
 
 def _v2_horizon(mu):

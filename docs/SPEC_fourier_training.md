@@ -381,7 +381,10 @@ independent `train.fit` runs (distinct `train.seed`), identical config otherwise
 
 ### 9.1 Wavelength: one radial bin (BINDING)
 `|k*_sim − k*_obs| ≤ 2π/L` — equivalently rel-err ≤ 1/p for a sample with p periods
-per box: 12.5% for `turing_labyrinth/sample_0000` (p=8), 2.9% at p=35.
+per box: nominally 12.5% at p=8 — measured ≈12.0% for `turing_labyrinth/sample_0000`,
+whose k*_obs does not sit exactly on the p=8 geometry — and 2.9% at p=35. The formula
+is the bar; the percentages are derived consequences (owner-approved wording alignment
+with REDESIGN V3/L3 and PREREGISTRATION §3.7, 2026-08-18).
 Reasoning: the RAPS estimator's resolution IS Δk = 2π/L; the pre-registered 8.3%
 was derived on the three_gene sets and D-EVID-8 records it is not
 dataset-independent; at p=8 it demands sub-bin precision the measurement does not

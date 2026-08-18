@@ -77,6 +77,13 @@ experiments/**/*.png
 !experiments/lift_paper_demo/figures/
 !experiments/lift_paper_demo/figures/*.png
 
+# Same exception, one directory deeper, for `experiments/lift_paper_demo/domain_size/` — the
+# domain-size-independence panel (same 4 recovered models, boxes p=4/8/16). Line 77-78's
+# negation is anchored to `lift_paper_demo/figures/` only and does not reach this nested
+# `domain_size/figures/`, so it needs its own pair of un-ignore lines for the same reason.
+!experiments/lift_paper_demo/domain_size/figures/
+!experiments/lift_paper_demo/domain_size/figures/*.png
+
 # tidy CSV exports (`rngrn export`) — a pure projection of the tracked indexes
 exports/
 

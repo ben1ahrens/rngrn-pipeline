@@ -180,3 +180,21 @@ guard.
 
 Sanity gate for this branch: `pytest tests/test_lift_ladder.py -q` → **40 passed** (134 s,
 unsandboxed, in-tree `.venv`).
+
+---
+
+## 6. Extension — domain-size independence
+
+`domain_size/` (read its own README) answers the question this demo raises but does not
+answer: does the recovered model pattern at the **same physical wavelength** in a box the
+training process never constructed? p = 8 above is the training target's own geometry; that
+subdirectory reruns the same 4 models at p = 4 and p = 16 (μ = 1e-3 only) and pulls this run's
+p = 8 fields as the middle reference column rather than re-simulating them.
+
+Headline: **24/24 runs patterned** (4 models × 3 box sizes × {QSS, lifted}), and every lifted
+run stays within one radial bin of its own box's QSS control. k*, measured in physical units,
+drifts 0.4–3.6% from the p=8 reference at the fine-lattice p=16 box and 3.5–12.7% at the
+coarse-lattice p=4 box — the larger drift at p=4 is the mode-quantization effect CLAUDE.md §7c
+describes (a coarser admissible-wavenumber lattice sits farther from the continuous unstable
+peak), observed directly rather than assumed. No model failed to pattern at either new box
+size.

@@ -3,7 +3,7 @@
   "replaces": "docs/REDESIGN_rngrn.md \u00a75.2 ESTIMATE \u2014 this is the measured value",
   "timed": "the Strang loop only (`seconds`/`nsteps_run` from the run), one warmup run discarded; setup (coeffs, transfers, steady state) excluded",
   "date": "2026-08-18",
-  "git_commit": "f367c436377b8d71b7fed1aa03600b7ae47016e2",
+  "git_commit": "fa7380fe8f794ac661c194ca818b2d560b68d2a4",
   "device": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
   "host": "BensStudio",
   "torch_version": "2.13.0+cu130",
@@ -24,11 +24,11 @@
   "sig_max": 0.14557341042579447,
   "cuda": {
     "steps_timed": 200,
-    "ms_per_step": 6.378431185003137
+    "ms_per_step": 6.075827835011296
   },
   "cpu": {
     "steps_timed": 200,
-    "ms_per_step": 255.85969029503758
+    "ms_per_step": 186.85050239000702
   },
-  "speedup_cpu_over_cuda": 40.11326341446008
+  "speedup_cpu_over_cuda": 30.753093646482437
 }

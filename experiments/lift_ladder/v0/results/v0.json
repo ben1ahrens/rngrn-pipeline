@@ -1,0 +1,41 @@
+{
+  "mus": [
+    1e-06,
+    0.0001,
+    0.01,
+    1.0,
+    100.0
+  ],
+  "n_draws": 20,
+  "seed": 101,
+  "forms": {
+    "competitive": {
+      "max_fixed_point_residual": 2.5635049638594865e-07,
+      "max_rescale_mu_err": 2.328184876657126e-16,
+      "max_gate_qss_err": 1.7763568394002505e-15,
+      "n_models": 20,
+      "exclusion_rate": 0.0,
+      "residual_floor_F": 6.266787089259651e-11,
+      "amplification_C": 1154.5
+    },
+    "nc1": {
+      "max_fixed_point_residual": 1.3322676295501878e-09,
+      "max_rescale_mu_err": 2.3282858635706863e-16,
+      "max_gate_qss_err": 0.0,
+      "n_models": 20,
+      "exclusion_rate": 0.047619047619047616,
+      "residual_floor_F": 2.7958968473740242e-11,
+      "amplification_C": 12.591600000000001
+    }
+  },
+  "provenance": {
+    "git_commit": "b45f256c93a0525aa73c4ca63e14969e0c6c79a5",
+    "host": "BensStudio",
+    "torch_version": "2.13.0+cu130",
+    "cuda_available": true,
+    "device_name": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+    "date": "2026-08-18 10:16:05"
+  },
+  "wall_seconds": 15.097127506000106,
+  "rung": "v0"
+}

@@ -659,21 +659,37 @@ to ETDRK4 is removed** (made loud) regardless of anything else in this document.
 
 ### 5.3 The validation ladder V0–V4 (strictly ordered; each rung licenses the next)
 
-- **V0 — algebraic invariants** (extend existing tests): fixed-point residual of the
-  lifted system **at or below the bar the existing tests already hold, 1e-7**
-  (`tests/test_lifted.py`); the achievable floor is **UNCALIBRATED** — the only number
-  on record is 1.28e-8 over 8 systems × 7 μ, in a parked artefact its own docs mark
-  do-not-cite — so V0 *measures* the floor and records it rather than asserting one.
-  `rescale_mu` equals a fresh autodiff Jacobian to round-off; gates-at-QSS reproduce
-  `model.reaction` exactly. The algebraic and linear claims are already tested at N=3
-  on both forms (at tolerance 1e-7); extend to ≥20 generator draws.
+- **V0 — algebraic invariants** (extend existing tests): the fixed-point residual of the
+  lifted system is **MEASURED, and the single 1e-7 bar is superseded by a two-mechanism,
+  μ-aware bound that is tighter than it in both regimes** —
+  `residual(μ) ≤ max(1e-9, 10·F_form, 10·C_form·eps/μ)` (controller ruling, ledger
+  2026-08-17 round 2; frozen per form in `tests/test_lift_ladder.py`). Measured over 20
+  Newton-tight draws per form at μ ∈ {1e-6, 1e-4, 1e-2, 1, 1e2}: the flat x-block
+  round-off floor **F = 6.267e-11 (competitive) / 2.796e-11 (nc1)**, and the 1/μ-amplified
+  gate-reconstruction constant **C = 1154.5 / 12.59** — worst-case residual 2.564e-7 /
+  1.332e-9, at μ = 1e-6 (`experiments/lift_ladder/v0/results/v0.json`; D-LIFT-2;
+  `docs/DIAGNOSTICS_lift.md` V0). `rescale_mu` equals a fresh autodiff Jacobian to
+  **2.328e-16** relative; gates-at-QSS reproduce `model.reaction` to **1.776e-15 / 0.0**
+  absolute. Draws are filtered to a Newton-tight steady state (‖f(x\*)‖ ≤ 1e-10) with the
+  exclusion rate reported (0/20 competitive, 1/21 nc1): `steady_state`'s relaxation
+  fallback accepts states three orders looser, and admitting them would have measured
+  solver quality rather than lift algebra.
 - **V1 — linear: eigenvalue continuation, all 21 branches.** `lifted_dispersion` at
   μ ∈ {1e-7, 1e-6, 1e-5} vs QSS dispersion on the same k-grid: N slow branches converge
   to the QSS eigenvalues at empirical order ≈ 1 in μ (slope check across the triplet);
   2N² fast branches ≈ −(1+u)/μ, all Re < 0; k* of the lifted dispersion within one grid
   point of the QSS k*. Branches tracked by eigenvector overlap between adjacent μ, not
   by sorting real parts — branch crossings are exactly what the re-entrant band is made
-  of. Absolute error constants: UNCALIBRATED — measured and recorded, not invented.
+  of. Absolute error constants: **MEASURED** over 43 systems in three populations (16
+  `low_basal` draws, the 23 Turing-positive harvest draws, the 4 D5 recovered models) —
+  slow-branch order **0.811 – 1.071**; `kstar_grid_offset` **0 on 41 of 43** (1 on two
+  harvest systems); `min_fast_mu_product` (the −(1+u)/μ claim, ≈ 1 when it holds)
+  **0.976 – 1.008 on low_basal and on 21 of the 23 harvest systems**, 0.349 – 0.998 on the
+  4 D5 models, and 5.4e-6 / 6.5e-6 on two harvest systems where branch identification
+  demonstrably fails; every fast branch stable at every k and μ on all 43
+  (`experiments/lift_ladder/v1/results/v1.json`; D-LIFT-2; `docs/DIAGNOSTICS_lift.md` V1
+  and F-L5). `max_slow_err` stays an unmasked floor measurement and is **not** a
+  tolerance: read it with `frac_k_separated` and `max_mu_D_k2`.
 - **V2 — temporal, 0-D.** The 21-dim well-mixed lifted ODE against a trusted stiff
   reference (scipy Radau, rtol 1e-10): (i) trajectories converge to the QSS 3-dim ODE
   as μ → 0; (ii) the Strang stepper itself matches the reference at
@@ -690,8 +706,22 @@ to ETDRK4 is removed** (made loud) regardless of anything else in this document.
   of k* on this target** (measured 8.36 periods in the box; 12.5% at the nominal
   p = 8). The pre-registered 8.3% figure is *half* a bin, derived on the legacy
   `three_gene` sets, and D-FFT-3 records rejecting its import here as sub-resolution —
-  and field relative L2 difference decreasing with μ (absolute bound
-  UNCALIBRATED — the measured curve becomes the calibration). (b) Then at μ_gate
+  and field relative L2 difference decreasing with μ — **MEASURED, and the campaign curve
+  cannot supply an absolute bound**: at the QSS growth-rate dt (measured dt/μ ∈ [26.4,
+  2.528e5]) the difference is identical to all printed digits across
+  μ ∈ {1e-3, 1e-4, 1e-5, 1e-6} on all 23 harvest rows (median 2.757e-2 / max 0.176 at 128²;
+  median 4.134e-2 / max 0.188 at 512²), because only the O(dt) Strang-vs-per-stage scheme
+  term survives there. The μ-dependence is measured in the dt ≲ μ regime instead: the
+  difference halves with dt at μ = 1e-6 and is dt-independent at μ = 1e-3 (32²,
+  `tests/test_lift_ladder.py`), and V3(b)'s dt-halving pair gives a median ratio of
+  **0.99324** — dt-independent, i.e. O(μ)-dominated
+  (`experiments/lift_ladder/v3/results/v3.json`; D-LIFT-2; `docs/DIAGNOSTICS_lift.md` V3
+  and F-L9). The recorded definition is the raw ‖X_lift − X_qss‖_F / ‖X_qss‖_F; the
+  pattern-amplitude-normalised `l2_diff_dev_by_mu` is reported beside it and is not the
+  definition. *Deviation on record (F-L13): the V3(b) anchor pair ran at
+  μ_central = 7.2e-4, not the μ_gate = 1e-3 this clause names; the μ_gate anchor re-run
+  rides with R3's gate-licensing task rather than editing this spec to fit the
+  deviation.* (b) Then at μ_gate
   with the §5.2 dt policy and a dt-halving pair — the first run in territory where the
   lift can say something new; report-only until the ladder completes.
 - **V4 — re-entrant-band survey.** `mu_critical` (with its re-entrance detection) and

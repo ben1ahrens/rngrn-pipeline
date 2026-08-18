@@ -641,12 +641,16 @@ accuracy trap the design states loudly:
 > and gated rollouts use dt = min(0.2/jac_rate, μ/2) with a dt-halving convergence
 > check, plus at least one anchor run per gated model with dt refined below μ.
 
-Cost, estimated and unmeasured: per step ≈ 2–3× the QSS ETDRK4 (3 diffusing fields +
-18 elementwise gate fields, no extra FFTs — an estimate, not a measurement). At the
-measured 3.25 ms/step 512² CUDA scaling that is ~11–16 min/field at 1e5 steps and
-~2–3 h/field at 1e6 — a projection for a GPU port that does not exist
-(`simulate_lifted` is numpy today); the port's own cost measurement replaces this.
-The GPU port is therefore a precondition (§7), consistent with §4.1. Independent
+Cost, measured (2026-08-18, PLAN_redesign Task 5): the GPU port
+(`eval/lifted_torch.py`, `feature/lift-ladder` commit b45f256) runs **6.378 ms/step at
+512², μ = 7.2e-4, float64** (RTX 5070 Ti Laptop, torch 2.13.0+cu130) — 1.96× the
+measured 3.25 ms/step QSS ETDRK4, inside the ≈2–3× this paragraph previously estimated
+(3 diffusing fields + 18 elementwise gate fields, no extra FFTs), and 40.1× the numpy
+path's 255.86 ms/step. That is ~10.6 min/field at 1e5 steps and ~1.8 h/field at 1e6.
+Provenance: `experiments/lift_ladder/gpu_port/results/cost.json` (generating script
+`scripts/lift_gpu_cost.py`, both in commit b45f256); CPU/CUDA bit-equivalence measured
+at max |ΔX| ≤ 5.3e-16 on the equivalence tests. The GPU-port precondition (§7) is met,
+consistent with §4.1. Independent
 cross-check: implement the `integrate_bdf1_newton_krylov` stub
 (`src/rngrn/eval/numerics.py`) for one 128² gated field; its current **silent fallback
 to ETDRK4 is removed** (made loud) regardless of anything else in this document.

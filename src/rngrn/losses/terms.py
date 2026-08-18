@@ -13,6 +13,11 @@ inequalities on the model's own J and D. This is the Section-12 firewall in code
   turing_hinges_split   the same two conditions on DISJOINT k-support (the promoted default)
   frame_scale_anchor    log-scale anchor of x* to the frame's own mean intensity
   kstar_anchor          soft tolerance-band penalty |k*_model - k*_FFT| / k*_FFT
+  kstar_anchor_si       scale-invariant twin of kstar_anchor (Task 14, R2 redesign):
+                         normalises sigma by its own range before the logsumexp/anchor
+                         comparison, closing the "flatten sigma" degenerate direction
+                         (docs/REDESIGN_rngrn.md §4.4). Born registered, not yet wired
+                         into compute_terms/total_loss.
   stationarity_residual full RHS D lap(x) + f(x) = 0 on observed channels (latent inferred if m<N)
   anticollapse          margin penalty excluding the f==0, D==0 trivial minimum
   morphology_consistency weak regulariser matching simulated to observed morphology (optional)
@@ -304,6 +309,40 @@ def kstar_anchor(model, xstar, kgrid, kstar_obs, tau=0.12, temp=60.0):
     lse = torch.logsumexp(sig * temp, dim=0) / temp        # smooth max of sigma
     sig_obs = _sigma_at(sig, kgrid, kstar_obs)
     L = torch.clamp(lse - sig_obs, min=0.0)
+    kstar_model = float(kgrid[torch.argmax(sig)].detach())
+    r = abs(kstar_model - kstar_obs) / (kstar_obs + 1e-9)
+    return L, dict(kstar_model=kstar_model, kstar_obs=float(kstar_obs), rel_err=float(r))
+
+
+def kstar_anchor_si(model, xstar, kgrid, kstar_obs, tau=0.12, temp=60.0, eps=1e-12):
+    """Scale-invariant twin of `kstar_anchor` (Task 14, R2 redesign; docs/REDESIGN_rngrn.md
+    §4.4). Signature mirrors `kstar_anchor` exactly, plus `eps`; `tau` is accepted-but-unused
+    for the same reason it is in `kstar_anchor` itself -- call-site parity so a caller can
+    swap the two without changing its kwargs (item 11, §4.4: `kstar_anchor` -> `kstar_si` is
+    a drop-in objective recomposition, not yet made here -- this function is BORN
+    REGISTERED, not wired into compute_terms/total_loss).
+
+    Normalises sigma by its own range before the logsumexp/anchor comparison:
+
+        sigbar = sigma / (max(sigma) - min(sigma) + eps)
+        L = lse(temp * sigbar) / temp  -  sigbar(k*_obs)
+
+    Invariant under sigma -> c*sigma for c > 0 (exactly at eps = 0), so the "flatten sigma
+    to shrink the raw gap" degenerate direction the legacy anchor is exposed to is no longer
+    profitable -- only relocating the argmax reduces the loss. The eps-degenerate direction
+    (range -> 0) is left to the split Turing hinges to close (design argument, not measured
+    here; §4.4).
+
+    UNCALIBRATED (item 14, §8/§4.4; docs/DECISIONS.md is not touched by this task -- the
+    plan pre-rules the marking, it is not a fresh decision): `temp` starts at
+    `kstar_anchor`'s own inherited default 60.0 (itself never swept); `eps` at the smallest
+    value keeping the gradient finite while the hinges are inactive. Both are swept at R2.
+    """
+    sig = model.dispersion(xstar, kgrid, J=None)
+    sigbar = sig / (sig.max() - sig.min() + eps)
+    lse = torch.logsumexp(sigbar * temp, dim=0) / temp
+    sigbar_obs = _sigma_at(sigbar, kgrid, kstar_obs)
+    L = torch.clamp(lse - sigbar_obs, min=0.0)
     kstar_model = float(kgrid[torch.argmax(sig)].detach())
     r = abs(kstar_model - kstar_obs) / (kstar_obs + 1e-9)
     return L, dict(kstar_model=kstar_model, kstar_obs=float(kstar_obs), rel_err=float(r))
@@ -743,6 +782,28 @@ def kstar_anchor_batched(model, xstar, kgrid, kstar_obs, tau=0.12, temp=60.0):
     t = (kstar_obs - k0) / (k1 - k0 + 1e-12)
     sig_obs = s0 + t * (s1 - s0)
     L = torch.clamp(lse - sig_obs, min=0.0)
+    kstar_model = kgrid[torch.argmax(sig, dim=1)].detach()
+    r = (kstar_model - float(kstar_obs)).abs() / (float(kstar_obs) + 1e-9)
+    return L, dict(kstar_model=_np(kstar_model), kstar_obs=float(kstar_obs), rel_err=_np(r))
+
+
+def kstar_anchor_si_batched(model, xstar, kgrid, kstar_obs, tau=0.12, temp=60.0, eps=1e-12):
+    """Batched twin of `kstar_anchor_si`. Returns ((B,), parts), each member normalised by
+    its OWN sigma range (dim=1) before the shared-kgrid interpolation -- same per-row
+    normalisation `kstar_anchor_si` applies, batched the way `kstar_anchor_batched` batches
+    the unnormalised anchor."""
+    sig = model.dispersion(xstar, kgrid, J=None)              # (B,K)
+    sig_max = sig.max(dim=1, keepdim=True).values
+    sig_min = sig.min(dim=1, keepdim=True).values
+    sigbar = sig / (sig_max - sig_min + eps)                  # (B,K)
+    lse = torch.logsumexp(sigbar * temp, dim=1) / temp
+    idx = int(torch.searchsorted(kgrid, torch.as_tensor(float(kstar_obs), device=kgrid.device))
+              .clamp(1, len(kgrid) - 1))
+    k0, k1 = kgrid[idx - 1], kgrid[idx]
+    s0, s1 = sigbar[:, idx - 1], sigbar[:, idx]
+    t = (kstar_obs - k0) / (k1 - k0 + 1e-12)
+    sigbar_obs = s0 + t * (s1 - s0)
+    L = torch.clamp(lse - sigbar_obs, min=0.0)
     kstar_model = kgrid[torch.argmax(sig, dim=1)].detach()
     r = (kstar_model - float(kstar_obs)).abs() / (float(kstar_obs) + 1e-9)
     return L, dict(kstar_model=_np(kstar_model), kstar_obs=float(kstar_obs), rel_err=_np(r))

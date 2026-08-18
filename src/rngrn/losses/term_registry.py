@@ -1,13 +1,18 @@
 """term_registry.py — the loss-term registry (Task 8, R2 redesign; RECOVERY SIDE).
 
-Names the 12 loss terms `losses/terms.py::DEFAULT_WEIGHTS` and `losses/total.py`
-already implement, pairing each with its serial callable, its batched twin (or the
+Names the loss terms `losses/terms.py::DEFAULT_WEIGHTS` and `losses/total.py`
+implement, pairing each with its serial callable, its batched twin (or the
 reason batching is refused), its current default weight, and an honest calibration
-tag. This module adds no new behaviour and changes no default: `default_weights()`
-must equal the legacy `DEFAULT_WEIGHTS` dict bit-for-bit (pinned by
-tests/test_term_registry.py::test_default_weights_are_bit_identical_to_the_legacy_dict).
-`terms.py` now derives `DEFAULT_WEIGHTS` from `default_weights()` at import time,
-rather than carrying a second literal.
+tag. At Task 8 this covered exactly the 12 terms `total.py` wires into
+compute_terms/compute_terms_batched, and `default_weights()` was required to equal
+the legacy `DEFAULT_WEIGHTS` dict bit-for-bit
+(tests/test_term_registry.py::test_default_weights_are_bit_identical_to_the_legacy_dict)
+-- that pin still holds because `terms.py` now derives `DEFAULT_WEIGHTS` from
+`default_weights()` at import time, rather than carrying a second literal, so the two
+are tautologically equal. Task 14 added a 13th entry, `kstar_si`, BORN REGISTERED:
+present here with a real serial+batched callable, but not yet wired into
+compute_terms/total_loss (docs/REDESIGN_rngrn.md §4.4) -- so a caller that only reads
+compute_terms's own term_vals dict still sees the original 12.
 
 Two terms refuse a batched form: `resid` (losses/total.py::compute_terms_batched raises
 if compute_resid=True — the batched reaction takes one state vector per member, not
@@ -81,6 +86,8 @@ def _register(name, fn, batched_fn, refusal_reason, default_weight, calibration)
 
 _register("kstar", T.kstar_anchor, T.kstar_anchor_batched, None,
            default_weight=1.0, calibration="UNCALIBRATED")
+_register("kstar_si", T.kstar_anchor_si, T.kstar_anchor_si_batched, None,
+           default_weight=0.0, calibration="UNCALIBRATED")
 _register("turing", T.turing_hinges_split, T.turing_hinges_split_batched, None,
            default_weight=1.0, calibration="UNCALIBRATED")
 _register("resid", T.stationarity_residual, None, _RESID_REFUSAL,

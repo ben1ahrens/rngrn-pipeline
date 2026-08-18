@@ -107,7 +107,7 @@ del _key
 
 
 def default_weights() -> dict[str, float]:
-    """The 12 term default weights, keyed by name. Replaces the `DEFAULT_WEIGHTS`
+    """Every registered term's default weight, keyed by name. Replaces the `DEFAULT_WEIGHTS`
     literal that used to live in `terms.py`; that name now aliases this function's
     result at import time, so `terms.DEFAULT_WEIGHTS` stays a valid, bit-identical
     plain dict for every existing caller."""

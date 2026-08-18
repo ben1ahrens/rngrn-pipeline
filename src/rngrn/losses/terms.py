@@ -834,7 +834,7 @@ def _np(t):
 # pixel-level term and a future arm may re-enable it — but it is off by default.
 #
 # DEFAULT_WEIGHTS is DERIVED from losses/term_registry.py (Task 8, R2 redesign), not a
-# second literal: the registry pairs each of these 12 defaults with its serial/batched
+# second literal: the registry pairs each registered term's default with its serial/batched
 # callables and an honest calibration tag (CALIBRATED(<source>) or UNCALIBRATED). This
 # name stays a plain dict, bit-identical to the pre-registry literal
 # (tests/test_term_registry.py::test_default_weights_are_bit_identical_to_the_legacy_dict

@@ -832,3 +832,338 @@ def v2_rhs_mirror_error(model, mus=(1e-6, 1e-3, 1.0), n_states: int = 25,
             worst = max(worst, float(np.max(np.abs(a - b)))
                         / max(float(np.max(np.abs(b))), 1e-300))
     return worst
+
+
+# ======================================================================================
+# V3 — spatial: the lifted PDE against the QSS rollout, on the same box and the same steps
+# ======================================================================================
+# ONE RADIAL BIN is the k* tolerance, docs/SPEC_fourier_training.md §9.1 (BINDING) and
+# docs/REDESIGN_rngrn.md §5.3 V3: |k*_lift - k*_qss| <= 2*pi/L. Equivalently rel-err <= 1/p
+# for a field with p periods across the box — 12.5% at the target's p = 8. It is INHERITED
+# here, not invented: the RAPS estimator's own resolution IS dk = 2*pi/L, and D-EVID-8/
+# D-FFT-3 record why the pre-registered 8.3% (half a bin, derived on the legacy three_gene
+# sets) is not imported. Nothing in V3 may loosen it.
+def one_radial_bin(L: float) -> float:
+    """The k* tolerance at box size L: 2*pi/L, one radial FFT bin. SPEC §9.1, BINDING."""
+    return 2.0 * np.pi / float(L)
+
+
+# MORPHOLOGY CLASS IS A 512^2-ONLY CLAIM (§5.3 V3: "morphology class equal (512^2 only)").
+# `v3_spatial` computes the comparison at any n — it is cheap and a reader wants to see it —
+# but reports `morphology_claimable` so the flag is never mistaken for the spec's claim at a
+# grid the spec does not license.
+V3_MORPHOLOGY_MIN_N = 512
+
+
+def _rel_l2(a, b):
+    """||a - b||_F / ||b||_F, the RELATIVE L2 field difference of §5.3 V3(a), with b (the QSS
+    control) as the denominator — an arm is read against its control, never against zero."""
+    return float(np.linalg.norm(np.asarray(a) - np.asarray(b))
+                 / max(float(np.linalg.norm(np.asarray(b))), 1e-300))
+
+
+def _rel_l2_dev(a, b):
+    """The same difference normalised by the control's DEVIATION from its channel means.
+
+    Reported beside `_rel_l2` rather than instead of it, because the two answer different
+    questions and the choice of denominator is not obvious: the raw field is dominated by the
+    uniform offset x*, so `_rel_l2` is small for any two runs that share a fixed point, while
+    this one measures the difference against the PATTERN amplitude alone. Neither is a bar —
+    §5.3 V3 marks the absolute bound UNCALIBRATED and says the measured curve becomes the
+    calibration — so both curves are recorded and the calibration can be taken from whichever
+    the caller argues for.
+    """
+    b = np.asarray(b)
+    dev = b - b.mean(axis=tuple(range(1, b.ndim)), keepdims=True)
+    return float(np.linalg.norm(np.asarray(a) - b) / max(float(np.linalg.norm(dev)), 1e-300))
+
+
+def v3_spatial(model, mus, n: int = 128, L: float = 20.0, seed: int = 0, *, dt=None, T=None,
+               backend: str = "numpy", device: str = "cuda", xstar=None, noise: float = 1e-2,
+               max_steps: int = 200000) -> dict:
+    """V3 rung (a): `simulate_lifted` against the QSS rollout at matched seed, dt and horizon.
+
+    THE MATCH IS STRUCTURAL, NOT ARRANGED. `lifted.step_policy` is `eval/rollout.py::
+    simulate`'s own growth-rate-aware policy evaluated on the QSS Jacobian, and both sides
+    draw the initial field from `np.random.default_rng(seed).standard_normal((N, n, n))`
+    around the same x*. So the two runs take the SAME dt, the same step count and start from
+    the BIT-IDENTICAL field; the only difference between them is how the gates are handled.
+    That is what makes the field difference attributable to the lift.
+
+    THE THREE BRIEFED FLAGS, each the AND over every mu in `mus`:
+      `patterned_agree`        — the lifted `patterned` flag equals the QSS one;
+      `morphology_agree`       — `observables.classify` gives the same label on channel 0.
+                                 A 512^2-ONLY claim (§5.3 V3); `morphology_claimable` says
+                                 whether this call is at a grid that licenses it. The
+                                 classifier is `observables.classify`, not
+                                 `scoring/morphology.py::classify_morphology`: the latter
+                                 needs a labelled reference bank, and this module is
+                                 RECOVERY-SIDE (tests/test_firewall.py) so it may not import
+                                 the scoring package at all. Both fields here are the model's
+                                 own, so no ground truth is involved either way;
+      `kstar_within_one_bin`   — |k*_lift - k*_qss| <= `one_radial_bin(L)`, SPEC §9.1.
+
+    `l2_diff_by_mu[mu]` is the relative L2 field difference (`_rel_l2`), the quantity §5.3
+    V3(a) requires to DECREASE with mu, with `l2_diff_dev_by_mu` beside it under the
+    pattern-amplitude normalisation (see `_rel_l2_dev`). `l2_monotone` reports whether the
+    measured curve is non-increasing as mu falls over the mus GIVEN — a measurement, not a
+    bar. IT IS NOT MONOTONE AT ARBITRARILY SMALL mu AND FIXED dt, and that is a property of
+    the comparison rather than a defect: the difference is O(mu) + O(dt), the second term
+    being the Strang scheme's frozen production over the ETDRK4 step against the QSS
+    rollout's per-stage re-evaluation. Measured on this branch 2026-08-18 (competitive seed
+    23, 32^2, L=20, T=0.2): at mu = 1e-6 the difference halves with dt (2.04e-7, 9.70e-8,
+    4.70e-8 at dt = 5e-4, 2.5e-4, 1.25e-4) while at mu = 1e-3 it does not (5.01e-7, 5.36e-7,
+    5.45e-7). §5.3 V3(b)'s dt = min(0.2/jac_rate, mu/2) ties the two together, which is why
+    it is the arm that can push the difference down without bound.
+
+    `claim_scope_ok` is False when either side failed to pattern: k* and morphology are then
+    read off a decayed field and neither flag means anything, exactly as `plotdata.py`
+    records for a false `morphology_match`. `patterned_agree` remains meaningful there and is
+    the only flag that does.
+
+    `backend` selects the integrator: 'numpy' (`lifted.simulate_lifted`) or 'torch'
+    (`lifted_torch.simulate_lifted_torch` on `device`, bit-equal on CPU, round-off on CUDA —
+    tests/test_lifted_torch.py). The QSS control is numpy either way; it is the same
+    `eval/rollout.py` every other rollout number in this project came from, and swapping it
+    would make V3 non-comparable to all of them.
+    """
+    if backend not in ("numpy", "torch"):
+        raise ValueError(f"v3_spatial: unknown backend {backend!r}; use 'numpy' or 'torch'")
+    mus = [float(mu) for mu in mus]
+    if not mus:
+        raise ValueError("v3_spatial needs at least one mu")
+    if any(mu <= 0.0 for mu in mus):
+        raise ValueError(f"v3_spatial needs strictly positive mu; got {mus}")
+
+    from .. import observables as obs
+    from . import rollout
+
+    if xstar is None:
+        xs, converged = steady_state(model)
+        if not converged:
+            raise RuntimeError("v3_spatial: model has no converged steady state -- "
+                               "draw_models should already have filtered this out")
+        xstar = xs.detach().cpu().numpy()
+    xstar = np.asarray(xstar, float).reshape(model.N)
+
+    q = rollout.simulate(model, L=L, n=n, T=T, dt=dt, seed=seed, noise=noise, xstar=xstar,
+                         max_steps=max_steps)
+    if q["blew_up"]:
+        raise RuntimeError(
+            f"v3_spatial: the QSS control rollout blew up at L={L}, n={n}, dt={q['dt']} -- "
+            "there is no control to read the lifted arms against, so this raises rather "
+            "than reporting agreement with a diverged field.")
+    qf = q["fields"]
+    q_class = obs.classify(qf[0])
+    bin_width = one_radial_bin(L)
+
+    if backend == "torch":
+        from .lifted_torch import simulate_lifted_torch
+        run = lambda mu: simulate_lifted_torch(model, L=L, mu=mu, n=n, T=T, dt=dt, seed=seed,
+                                               noise=noise, xstar=xstar, max_steps=max_steps,
+                                               device=device)
+    else:
+        run = lambda mu: lifted.simulate_lifted(model, L=L, mu=mu, n=n, T=T, dt=dt, seed=seed,
+                                                noise=noise, xstar=xstar, max_steps=max_steps)
+
+    out = {k: {} for k in ("l2_diff_by_mu", "l2_diff_dev_by_mu", "patterned_by_mu",
+                           "morphology_by_mu", "kstar_by_mu", "kstar_abs_diff_by_mu",
+                           "amplitude_by_mu", "blew_up_by_mu", "stopped_reason_by_mu",
+                           "nsteps_run_by_mu", "seconds_by_mu", "dt_by_mu")}
+    for mu in sorted(mus)[::-1]:                     # coarse mu first, the cheap-to-read order
+        r = run(mu)
+        f = r["fields"]
+        out["l2_diff_by_mu"][mu] = _rel_l2(f, qf)
+        out["l2_diff_dev_by_mu"][mu] = _rel_l2_dev(f, qf)
+        out["patterned_by_mu"][mu] = bool(r["patterned"])
+        out["morphology_by_mu"][mu] = obs.classify(f[0]) if not r["blew_up"] else None
+        out["kstar_by_mu"][mu] = float(r["kstar"])
+        out["kstar_abs_diff_by_mu"][mu] = float(abs(r["kstar"] - q["kstar"]))
+        out["amplitude_by_mu"][mu] = float(r["amplitude"])
+        out["blew_up_by_mu"][mu] = bool(r["blew_up"])
+        out["stopped_reason_by_mu"][mu] = r["stopped_reason"]
+        out["nsteps_run_by_mu"][mu] = int(r["nsteps_run"])
+        out["seconds_by_mu"][mu] = float(r["seconds"])
+        out["dt_by_mu"][mu] = float(r["dt"])
+
+    desc = sorted(mus)[::-1]
+    curve = [out["l2_diff_by_mu"][mu] for mu in desc]
+    claim_scope_ok = bool(q["patterned"] and all(out["patterned_by_mu"][mu] for mu in mus))
+    out.update(
+        patterned_agree=bool(all(out["patterned_by_mu"][mu] == bool(q["patterned"])
+                                 for mu in mus)),
+        morphology_agree=bool(all(out["morphology_by_mu"][mu] == q_class for mu in mus)),
+        morphology_claimable=bool(claim_scope_ok and n >= V3_MORPHOLOGY_MIN_N),
+        kstar_within_one_bin=bool(all(out["kstar_abs_diff_by_mu"][mu] <= bin_width
+                                      for mu in mus)),
+        l2_monotone=bool(all(b <= a for a, b in zip(curve, curve[1:]))),
+        claim_scope_ok=claim_scope_ok,
+        one_bin=float(bin_width),
+        periods_per_box=(float(L * q["kstar"] / (2.0 * np.pi))
+                         if np.isfinite(q["kstar"]) else float("nan")),
+        patterned_qss=bool(q["patterned"]), morphology_qss=q_class,
+        kstar_qss=float(q["kstar"]), amplitude_qss=float(q["amplitude"]),
+        stopped_reason_qss=q["stopped_reason"], seconds_qss=float(q["seconds"]),
+        pattern_floor=float(max(1e-3, 0.02 * abs(xstar[0]))),
+        sig_max=float(q["sig_max"]), dt=float(q["dt"]), nsteps=int(q["nsteps"]),
+        nsteps_run_qss=int(q["nsteps_run"]), n=int(n), L=float(L), seed=int(seed),
+        mus=[float(mu) for mu in desc], backend=backend,
+        device=(device if backend == "torch" else "cpu"), form=model.form, N=int(model.N),
+        xstar=[float(v) for v in xstar])
+    return out
+
+
+# ======================================================================================
+# V4 — the re-entrant-band survey
+# ======================================================================================
+def qss_verdict(model, xstar, kgrid=lifted.KGRID, tol: float = 1e-9) -> dict:
+    """STRICT Turing verdict on the REDUCED (QSS) N x N system — V4's CONTROL.
+
+    Deliberately the SAME pair of conditions `lifted.turing_verdict_lifted` applies to the
+    lifted system, evaluated on the mu -> 0 limit:
+
+        stable_uniform : max Re eig(J_qss) < 0
+        unstable_k     : max_{k>0} sigma_qss(k) > tol
+
+    NOT `eval/analysis.py::turing_ok`'s trace test, which Stage 0 measured overcounting by
+    64x (every extra draw a uniform instability rather than a pattern) and which
+    `turing_verdict_lifted` already rejects for the lifted side. Conditioning V4's
+    P(lifted-Turing | QSS-Turing) on a looser control than its numerator would inflate the
+    denominator and deflate the ratio.
+
+    `kgrid` must contain k = 0 as its first entry (`lifted.KGRID` does): the k > 0 scan skips
+    index 0, exactly as `turing_verdict_lifted` does, so the two verdicts are read off the
+    same grid in the same way.
+    """
+    xs = torch.as_tensor(np.asarray(xstar, float), device=model.device, dtype=model.dtype)
+    J = model.jacobian(xs, create_graph=False).detach().cpu().numpy()
+    sig, om = lifted.qss_dispersion(model, xstar, kgrid)
+    ev0 = np.linalg.eigvals(J)
+    max_re0 = float(ev0.real.max())
+    i0 = int(np.argmax(ev0.real))
+    i = 1 + int(np.argmax(sig[1:]))
+    return dict(
+        max_re_eig_J=max_re0, omega_uniform=float(abs(ev0[i0].imag)),
+        stable_uniform=bool(max_re0 < 0.0),
+        sig_max_pos=float(sig[i]), kstar=float(np.asarray(kgrid, float)[i]),
+        omega_at_kstar=float(om[i]), unstable_k=bool(sig[i] > tol),
+        turing_strict=bool(max_re0 < 0.0 and sig[i] > tol),
+        oscillatory=bool(om[i] > 1e-9))
+
+
+def v4_survey(models, mu_band=(lifted.MU_BIO_LO, lifted.MU_BIO_HI), n_mu: int = 9, *,
+              labels=None, kgrid=lifted.KGRID, robustness: bool = False,
+              robustness_n_samples: int = 200, robustness_sigma_log: float = 0.10,
+              seed: int = 0, mu_crit_lo: float = 1e-6, mu_crit_hi: float = 1e4) -> dict:
+    """V4 rung: `lifted.mu_critical` and `lifted.robustness_vs_mu` over a population.
+
+    V4 IS A MEASUREMENT, NOT A GATE (§5.3 V4: "no pass threshold, by design"). Nothing here
+    returns a pass/fail; every number is a fraction of a stated denominator.
+
+    THE DECISION-RELEVANT NUMBER is `p_lifted_given_qss` = P(strictly lifted-Turing at EVERY
+    mu on the band grid | strictly QSS-Turing). Both sides use the same strict criterion —
+    `qss_verdict` for the condition, `lifted.turing_verdict_lifted` for the event — so the
+    ratio is not inflated by a looser denominator. "Across the band" is read as the
+    CONJUNCTION over the grid, which is the conservative reading and the one §5.3's phrasing
+    ("P(lifted-Turing across [1.1e-5, 9.2e-3] | QSS-Turing)") calls for; the per-mu marginals
+    are reported separately as `frac_turing_by_mu` so a reader can see which end of the band
+    does the damage. NaN when no model in the population is QSS-Turing — a 0/0 is reported as
+    undefined, never as 0.0, with `n_qss_turing` beside it.
+
+    `frac_reentrant` is over the SAME QSS-Turing denominator (`frac_reentrant_all` over the
+    whole population). Re-entrance is `mu_critical`'s own flag: the verdict returning at
+    larger mu after the first loss. It is not monotone in mu and the scan, not a bisection,
+    is what detects that — see `lifted.mu_critical`.
+
+    `edges` is one row per model: the first Turing-loss edge `mu_crit` (inf when the scan
+    never loses it up to `mu_crit_hi`, NaN when the model is not Turing at `mu_crit_lo`),
+    which condition failed there, the re-entrance flag, the QSS control verdict, and the
+    per-mu lifted verdicts on the band. `edge_in_band` / `edge_above_band` place that edge
+    against the biological band, which is the "distribution of the first Turing-loss edge vs
+    the biological band" deliverable.
+
+    `robustness` additionally runs `lifted.robustness_vs_mu` per model (a 200-draw lognormal
+    parameter cloud, evaluated on the SAME draws at every mu, with the model's own mu -> 0
+    QSS volume as the baseline every finite-mu number is read against). Off by default
+    because it costs ~2 s per mu per model; the campaign turns it on.
+    """
+    lo, hi = float(mu_band[0]), float(mu_band[1])
+    if not (0.0 < lo < hi):
+        raise ValueError(f"v4_survey needs 0 < mu_band[0] < mu_band[1]; got {mu_band}")
+    if int(n_mu) < 2:
+        raise ValueError(f"v4_survey needs n_mu >= 2 to span the band; got {n_mu}")
+    mu_grid = np.logspace(np.log10(lo), np.log10(hi), int(n_mu))
+    if labels is None:
+        labels = [f"model_{i}" for i in range(len(models))]
+    if len(labels) != len(models):
+        raise ValueError(f"v4_survey: {len(labels)} labels for {len(models)} models")
+
+    edges = []
+    robustness_rows = []
+    for label, m in zip(labels, models):
+        xs, converged = steady_state(m)
+        if not converged:
+            raise RuntimeError(
+                f"v4_survey: model {label!r} has no converged steady state. A survey row "
+                "computed at a non-converged x* would be a verdict about nothing, so this "
+                "raises rather than recording it.")
+        xstar = xs.detach().cpu().numpy()
+        qv = qss_verdict(m, xstar, kgrid)
+
+        J1 = lifted.lifted_jacobian(m, xstar, 1.0)
+        band = [lifted.turing_verdict_lifted(m, xstar, float(mu), kgrid, J1=J1)
+                for mu in mu_grid]
+        mc = lifted.mu_critical(m, xstar, lo=mu_crit_lo, hi=mu_crit_hi, kgrid=kgrid)
+
+        edges.append(dict(
+            label=label, form=m.form, N=int(m.N),
+            qss_turing=bool(qv["turing_strict"]), qss_kstar=qv["kstar"],
+            qss_sig_max_pos=qv["sig_max_pos"], qss_oscillatory=qv["oscillatory"],
+            mu_crit=float(mc["mu_crit"]), status=mc["status"], failure=mc["failure"],
+            reentrant=bool(mc["reentrant"]),
+            edge_in_band=bool(np.isfinite(mc["mu_crit"]) and lo <= mc["mu_crit"] <= hi),
+            edge_above_band=bool(mc["mu_crit"] > hi),          # inf compares True, as intended
+            lifted_turing_band_all=bool(all(v["turing_strict"] for v in band)),
+            lifted_turing_by_mu={float(mu): bool(v["turing_strict"])
+                                 for mu, v in zip(mu_grid, band)},
+            lifted_stationary_by_mu={float(mu): bool(v["turing_strict"]
+                                                     and not v["oscillatory"])
+                                     for mu, v in zip(mu_grid, band)},
+            lifted_kstar_by_mu={float(mu): v["kstar"] for mu, v in zip(mu_grid, band)}))
+
+        if robustness:
+            rb = lifted.robustness_vs_mu(m, mus=mu_grid, sigma_log=robustness_sigma_log,
+                                         n_samples=robustness_n_samples, seed=seed,
+                                         mu_draw=lifted.draw_mu_bio(
+                                             np.random.default_rng(seed),
+                                             robustness_n_samples, lo=lo, hi=hi))
+            robustness_rows.append(dict(
+                label=label, qss=rb["qss"], mu_drawn=rb["mu_drawn"],
+                rows=[{k: v for k, v in r.items()} for r in rb["rows"]],
+                n=rb["n"], n_converged=rb["n_converged"], sigma_log=rb["sigma_log"],
+                seed=rb["seed"], form=rb["form"]))
+
+    tur = [e for e in edges if e["qss_turing"]]
+    nan = float("nan")
+    return dict(
+        p_lifted_given_qss=(float(np.mean([e["lifted_turing_band_all"] for e in tur]))
+                            if tur else nan),
+        frac_reentrant=(float(np.mean([e["reentrant"] for e in tur])) if tur else nan),
+        edges=edges,
+        frac_reentrant_all=(float(np.mean([e["reentrant"] for e in edges]))
+                            if edges else nan),
+        frac_turing_by_mu={float(mu): (float(np.mean([e["lifted_turing_by_mu"][float(mu)]
+                                                      for e in tur])) if tur else nan)
+                           for mu in mu_grid},
+        frac_stationary_by_mu={float(mu): (float(np.mean([e["lifted_stationary_by_mu"][
+                                                              float(mu)] for e in tur]))
+                                           if tur else nan)
+                               for mu in mu_grid},
+        frac_edge_in_band=(float(np.mean([e["edge_in_band"] for e in tur])) if tur else nan),
+        frac_edge_above_band=(float(np.mean([e["edge_above_band"] for e in tur]))
+                              if tur else nan),
+        mu_crit_median=(float(np.median([e["mu_crit"] for e in tur])) if tur else nan),
+        n_models=len(edges), n_qss_turing=len(tur),
+        n_lifted_turing_band_all=int(sum(e["lifted_turing_band_all"] for e in tur)),
+        mu_grid=[float(mu) for mu in mu_grid], mu_band=[lo, hi], n_mu=int(n_mu),
+        robustness=robustness_rows)

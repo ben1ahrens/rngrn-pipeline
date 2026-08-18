@@ -29,6 +29,10 @@ docstring and `v0_invariants`'s docstring for the full mechanism writeup:
   - `amplification_C` = max of `residual(mu) * mu / eps` over the GATE-AMPLIFICATION region
     (mu in {1e-6, 1e-4}) -- the C/mu mechanism proper.
 """
+import os
+import sys
+
+import numpy as np
 import pytest
 
 from rngrn.eval import ladder
@@ -374,3 +378,206 @@ def test_v2_temporal_requires_at_least_two_dt_values():
     m = ladder.draw_models(n=1, form="competitive", seed=11)[0]
     with pytest.raises(ValueError, match=">=2 dt values"):
         ladder.v2_temporal(m, mu=1e-3, T=1.0, dts=[1e-4])
+
+
+# ======================================================================================
+# V3 — spatial: the lifted PDE against the QSS rollout
+# ======================================================================================
+# THE FIXTURE IS tests/test_lifted_torch.py's, VERBATIM: draw_models(n=1, form, seed=23)[0]
+# on a 32x32 box of L = 20 with dt = 5e-4, T = 0.2, seed = 5. It is reused rather than
+# reinvented so a V3 number is directly comparable to the CPU/GPU equivalence the Task 5
+# tests pin on the same 400 steps, and because a SHORT horizon keeps the field in the
+# growing-from-noise regime where the lifted-vs-QSS difference is a measurement rather than
+# two independently saturated attractors compared at the end.
+V3_KW = dict(L=20.0, n=32, dt=5e-4, T=0.2, seed=5)
+
+# THE FULL mu SET the campaign runs V3(a) at: the spec's {1e-4, 1e-5, 1e-6} plus mu_gate =
+# 1e-3 (owner decision D-REDESIGN-5, ledger 2026-08-18).
+V3_MUS = [1e-3, 1e-4, 1e-5, 1e-6]
+
+# The mu range over which the lifted-vs-QSS field difference is dominated by the LIFT, and
+# the step-by-step monotonicity claim is therefore a claim at all. See
+# `test_v3_l2_difference_floors_at_an_O_dt_scheme_difference` for the measurement that
+# establishes the other regime and why this scoping is not a weakened bar.
+V3_LIFT_DOMINATED_MUS = [1e-2, 1e-3, 1e-4]
+
+
+@pytest.mark.parametrize("form", ["competitive", "nc1"])
+def test_v3_returns_the_briefed_keys_and_agrees_with_the_qss_rollout(form):
+    m = ladder.draw_models(n=1, form=form, seed=23)[0]
+    out = ladder.v3_spatial(m, mus=V3_MUS, **V3_KW)
+    for key in ("patterned_agree", "morphology_agree", "kstar_within_one_bin",
+                "l2_diff_by_mu"):
+        assert key in out, (key, sorted(out))
+    assert isinstance(out["patterned_agree"], bool)
+    assert isinstance(out["morphology_agree"], bool)
+    assert isinstance(out["kstar_within_one_bin"], bool)
+    assert sorted(out["l2_diff_by_mu"]) == sorted(float(mu) for mu in V3_MUS)
+    # the fixture grows a real field from noise on both sides, so the flag is not vacuous
+    assert out["patterned_qss"] is True, out
+    assert out["patterned_agree"] is True, out
+    assert out["kstar_within_one_bin"] is True, out
+    assert out["one_bin"] == pytest.approx(2 * np.pi / V3_KW["L"])
+
+
+def test_v3_l2_difference_falls_with_mu():
+    """§5.3 V3(a): 'field relative L2 difference decreasing with mu'.
+
+    TWO claims, because the measurement supports two different strengths (see the floor test
+    below): end-to-end over the whole campaign mu set, and step-by-step over the mu range
+    where the lift term dominates the O(dt) scheme term.
+    """
+    m = ladder.draw_models(n=1, form="competitive", seed=23)[0]
+    full = ladder.v3_spatial(m, mus=V3_MUS, **V3_KW)
+    d = full["l2_diff_by_mu"]
+    assert d[min(V3_MUS)] < d[max(V3_MUS)], d          # end-to-end, the whole campaign set
+
+    lift = ladder.v3_spatial(m, mus=V3_LIFT_DOMINATED_MUS, **V3_KW)
+    vals = [lift["l2_diff_by_mu"][float(mu)] for mu in sorted(V3_LIFT_DOMINATED_MUS)[::-1]]
+    assert all(b <= a for a, b in zip(vals, vals[1:])), vals   # non-increasing as mu falls
+    assert lift["l2_monotone"] is True, lift["l2_diff_by_mu"]
+
+
+def test_v3_l2_difference_floors_at_an_O_dt_scheme_difference():
+    """WHY THE MONOTONICITY CLAIM IS SCOPED, measured rather than asserted.
+
+    The lifted-vs-QSS field difference has TWO components, and only one of them is the lift:
+
+      * an O(mu) term -- the gate-tracking lag the lift is *about*, which vanishes as mu -> 0;
+      * an O(dt) term that does NOT -- at mu -> 0 the exact gate substep sets G = G_qss(x)
+        and the two runs still differ, because `simulate_lifted` FREEZES the production over
+        the ETDRK4 step (Strang) while `rollout.simulate` re-evaluates the QSS reaction at
+        every ETDRK4 stage. That is a difference of SCHEME at fixed dt, not of physics.
+
+    Measured on this branch 2026-08-18, competitive seed 23, V3_KW with dt varied:
+        mu = 1e-3:  5.01e-7, 5.36e-7, 5.45e-7  at dt = 5e-4, 2.5e-4, 1.25e-4  (dt-INDEPENDENT)
+        mu = 1e-6:  2.04e-7, 9.70e-8, 4.70e-8  at the same dt                 (HALVES with dt)
+
+    So at fixed dt the curve falls with mu until it reaches the O(dt) floor and then flattens
+    (measured 1.63e-7 at mu = 1e-4 and 2.04e-7 at mu = 1e-5 and 1e-6 -- a 25% RISE, which is
+    why step-by-step monotonicity is claimed only above the floor). V3(b)'s dt policy
+    dt = min(0.2/jac_rate, mu/2) ties dt to mu precisely so both terms vanish together.
+    """
+    m = ladder.draw_models(n=1, form="competitive", seed=23)[0]
+    kw = dict(V3_KW)
+    kw.pop("dt")
+    a = ladder.v3_spatial(m, mus=[1e-6], dt=5e-4, **kw)["l2_diff_by_mu"][1e-6]
+    b = ladder.v3_spatial(m, mus=[1e-6], dt=2.5e-4, **kw)["l2_diff_by_mu"][1e-6]
+    assert 1.7 < a / b < 2.3, (a, b)      # first order in dt at the mu -> 0 limit
+
+
+def test_v3_torch_backend_reproduces_the_numpy_one_on_cpu():
+    """V3(b) runs on the GPU (Task 5's port); this pins the driver's backend switch to the
+    numpy path it is supposed to be a faster way of computing, on the CPU where the contract
+    is bit-equality (tests/test_lifted_torch.py)."""
+    m = ladder.draw_models(n=1, form="competitive", seed=23)[0]
+    a = ladder.v3_spatial(m, mus=[1e-3], **V3_KW)
+    b = ladder.v3_spatial(m, mus=[1e-3], backend="torch", device="cpu", **V3_KW)
+    assert b["backend"] == "torch"
+    assert b["patterned_by_mu"][1e-3] == a["patterned_by_mu"][1e-3]
+    assert b["l2_diff_by_mu"][1e-3] == pytest.approx(a["l2_diff_by_mu"][1e-3], rel=1e-12)
+
+
+def test_v3_rejects_an_unknown_backend():
+    m = ladder.draw_models(n=1, form="competitive", seed=23)[0]
+    with pytest.raises(ValueError, match="backend"):
+        ladder.v3_spatial(m, mus=[1e-3], backend="jax", **V3_KW)
+
+
+# ======================================================================================
+# V4 — the re-entrant-band survey
+# ======================================================================================
+def test_v4_survey_returns_the_briefed_keys_on_a_low_basal_population():
+    """SHAPE and the empty-numerator contract. `draw_models` samples init='low_basal', of
+    which 0 of 398 N=3 draws are STRICTLY Turing (eval/analysis.py, quoted in
+    `v1_continuation`'s docstring), so this population has no QSS-Turing member and
+    `p_lifted_given_qss` is a 0/0 -- reported NaN, with `n_qss_turing` beside it, never 0.0.
+    """
+    models = ladder.draw_models(n=3, form="competitive", seed=101)
+    out = ladder.v4_survey(models, n_mu=3)
+    for key in ("p_lifted_given_qss", "frac_reentrant", "edges"):
+        assert key in out, (key, sorted(out))
+    assert len(out["edges"]) == 3
+    assert out["n_models"] == 3
+    assert out["n_qss_turing"] == 0, out
+    assert np.isnan(out["p_lifted_given_qss"]), out
+    assert np.isnan(out["frac_reentrant"]), out
+    for row in out["edges"]:
+        for key in ("qss_turing", "mu_crit", "reentrant", "status",
+                    "lifted_turing_band_all"):
+            assert key in row, (key, sorted(row))
+
+
+def test_v4_qss_verdict_is_strict_and_not_the_trace_test():
+    """The QSS control V4 conditions on is the SAME strict pair
+    `lifted.turing_verdict_lifted` applies to the lifted system -- max Re eig(J) < 0 AND
+    max_{k>0} sigma(k) > tol -- evaluated on the REDUCED N x N Jacobian. Not
+    eval/analysis.py::turing_ok's trace test, which Stage 0 measured overcounting by 64x.
+    """
+    m = ladder.draw_models(n=1, form="competitive", seed=101)[0]
+    from rngrn.losses.terms import steady_state
+    xs, _ = steady_state(m)
+    v = ladder.qss_verdict(m, xs.detach().cpu().numpy())
+    for key in ("turing_strict", "stable_uniform", "unstable_k", "kstar", "sig_max_pos",
+                "max_re_eig_J", "oscillatory"):
+        assert key in v, (key, sorted(v))
+    assert v["turing_strict"] == (v["stable_uniform"] and v["unstable_k"])
+
+
+# --------------------------------------------------------------------------------------
+# the campaign driver's populations — the part of scripts/lift_ladder.py that is not a CLI
+# --------------------------------------------------------------------------------------
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
+import lift_ladder as LL                                            # noqa: E402
+
+
+def test_harvest_population_is_the_23_strictly_turing_stage0_draws():
+    """The rebuild inverts `model.py`'s link functions on the STORED constrained parameters,
+    so this checks the round trip against the npz's own recorded verdict rather than trusting
+    the transcription: every rebuilt model must still be strictly Turing under
+    `ladder.qss_verdict`, which is the criterion docs/BIO_VIABILITY.md §1 harvested them by.
+    """
+    from rngrn.losses.terms import steady_state
+
+    models, labels = LL.harvest_models()
+    assert len(models) == 23, labels
+    assert len(labels) == len(set(labels))
+    assert {m.form for m in models} == {"competitive", "nc1"}
+    for m, label in zip(models[:4], labels[:4]):
+        xs, converged = steady_state(m)
+        assert converged, label
+        assert ladder.qss_verdict(m, xs.detach().cpu().numpy())["turing_strict"], label
+
+
+def test_d5_population_is_the_four_turing_unstable_recovered_models():
+    from rngrn.losses.terms import steady_state
+
+    models, labels = LL.d5_models()
+    assert labels == ["d5/seed1", "d5/seed3", "d5/seed5", "d5/seed6"]
+    for m, label in zip(models, labels):
+        xs, converged = steady_state(m)
+        assert converged, label
+        assert ladder.qss_verdict(m, xs.detach().cpu().numpy())["turing_strict"], label
+
+
+def test_box_size_puts_exactly_p_periods_across_the_box():
+    """`L = p * 2*pi / k*` is what makes the BINDING one-radial-bin k* tolerance 2*pi/L equal
+    1/p of k* — 12.5% at the target's p = 8 (SPEC §9.1). If this drifts, every V3 k* number
+    is judged at a different precision than the target's."""
+    m = LL.harvest_models()[0][0]
+    L, k, _ = LL.box_size(m, periods=8)
+    assert L * k / (2 * np.pi) == pytest.approx(8.0)
+    assert ladder.one_radial_bin(L) / k == pytest.approx(1.0 / 8.0)
+
+
+def test_v4_survey_on_a_turing_positive_pair_reports_a_real_conditional():
+    """The shape test above has an EMPTY QSS-Turing denominator by construction; this one
+    does not, so it exercises the branch the campaign's headline number comes from."""
+    models, labels = LL.harvest_models()
+    out = ladder.v4_survey(models[:2], labels=labels[:2], n_mu=3)
+    assert out["n_qss_turing"] == 2, out["edges"]
+    assert 0.0 <= out["p_lifted_given_qss"] <= 1.0, out
+    assert 0.0 <= out["frac_reentrant"] <= 1.0, out
+    assert sorted(out["frac_turing_by_mu"]) == sorted(out["mu_grid"])
+    assert out["mu_grid"][0] == pytest.approx(1.1e-5)      # MU_BIO_LO
+    assert out["mu_grid"][-1] == pytest.approx(9.2e-3)     # MU_BIO_HI

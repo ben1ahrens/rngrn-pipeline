@@ -157,7 +157,8 @@ free rescaling variable. Two claims often attached to that paper's PINN are not 
 corrected here per this project's audited record (`docs/STATE_OF_THE_SCIENCE.md` §2.7). The
 *"<10 % parameter error"* figure and the treatment of the inverse map's stochasticity as a
 *feature* yielding parameter alternatives belong to Kho et al. (*Design of Turing Systems with
-Physics-Informed Neural Networks*); Matas-Gil & Endres quote no percentage PINN error at all.
+Physics-Informed Neural Networks*, IEEE SSCI 2022, doi:10.1109/SSCI51031.2022.10022026,
+arXiv:2211.13464); Matas-Gil & Endres quote no percentage PINN error at all.
 The *"3×3 pixel region suffices"* claim and the $N^{-1/2}$ error scaling **are** theirs, but are
 least-squares results — ordinary $\sqrt{N}$ averaging of a linear estimator, licensing no
 inference about PINN data efficiency — and the paper is self-inconsistent on the pixel count

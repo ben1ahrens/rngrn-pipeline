@@ -212,7 +212,8 @@ for the PINN at all — their only quantitative anchor is comparative ("10–20x
 than LS", up to 40x for Brusselator). **"Reported errors <10 % on inferred parameters"
 was a misattribution in an earlier version of this section** — that figure belongs to
 Kho et al. (NTU/A\*STAR, *Design of Turing Systems with Physics-Informed Neural
-Networks*, reference [32] in Endres), not to Endres/Matas-Gil. The local file that was
+Networks*, IEEE SSCI 2022, doi:10.1109/SSCI51031.2022.10022026, arXiv:2211.13464;
+reference [32] in Endres), not to Endres/Matas-Gil. The local file that was
 misread is `papers/endres_pinn_turing_design.pdf`, which is itself mis-named — it is
 Kho et al., not Endres (see PR notes; renaming is local hygiene, not part of this diff
 since `papers/` is gitignored).

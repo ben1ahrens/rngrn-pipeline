@@ -1,0 +1,7 @@
+# Intermediate single-model panels that the grid figures are composed from (~4 MB, 28
+# files). Pure regenerable output: every one of them is embedded in a committed grid in
+# figures/, and `make_topology_figures.py` recreates them in ~2 min. The root .gitignore
+# un-ignores experiments/figures_paper/**/*.png (line 67), so they would otherwise be
+# tracked; this re-ignores just the intermediates. The FINAL figures under figures/ stay
+# tracked.
+data/panels/

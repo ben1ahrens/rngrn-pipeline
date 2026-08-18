@@ -1,0 +1,233 @@
+{
+  "D5": {
+    "label": "D5 / turing_labyrinth sample_0000",
+    "n_runs": 10,
+    "n_distinct_sign_structures": 10,
+    "n_distinct_sign_structures_rtol0.05": 10,
+    "n_distinct_sign_structures_rtol1e-9": 10,
+    "true_sign_vector": [
+      1,
+      -1,
+      -1,
+      1,
+      -1,
+      0,
+      1,
+      0,
+      -1
+    ],
+    "true_sign_vector_rtol0.05": [
+      1,
+      -1,
+      -1,
+      1,
+      -1,
+      0,
+      1,
+      0,
+      -1
+    ],
+    "sign_match_frac_identity": [
+      0.3333333333333333,
+      0.2222222222222222,
+      0.4444444444444444,
+      0.2222222222222222,
+      0.3333333333333333,
+      0.4444444444444444,
+      0.3333333333333333,
+      0.5555555555555556,
+      0.4444444444444444,
+      0.5555555555555556
+    ],
+    "median_sign_match_frac": 0.38888888888888884,
+    "min_sign_match_frac": 0.2222222222222222,
+    "max_sign_match_frac": 0.5555555555555556,
+    "sign_match_frac_structural": [
+      0.2222222222222222,
+      0.1111111111111111,
+      0.4444444444444444,
+      0.2222222222222222,
+      0.2222222222222222,
+      0.4444444444444444,
+      0.2222222222222222,
+      0.5555555555555556,
+      0.4444444444444444,
+      0.5555555555555556
+    ],
+    "median_sign_match_frac_structural": 0.3333333333333333,
+    "sign_match_frac_free6": [
+      0.5555555555555556,
+      0.6666666666666666,
+      0.4444444444444444,
+      0.7777777777777778,
+      0.5555555555555556,
+      0.5555555555555556,
+      0.6666666666666666,
+      0.5555555555555556,
+      0.5555555555555556,
+      0.5555555555555556
+    ],
+    "median_sign_match_frac_free6": 0.5555555555555556,
+    "n_turing": 4,
+    "n_patterned": 4,
+    "n_patterned_given_turing": 4,
+    "n_turing_denominator": 4,
+    "kstar_rel_err_median": 0.975422690232474
+  },
+  "c2P_A": {
+    "label": "c2_P target A / three_gene_qvar sample_0001",
+    "n_runs": 8,
+    "n_distinct_sign_structures": 8,
+    "n_distinct_sign_structures_rtol0.05": 8,
+    "n_distinct_sign_structures_rtol1e-9": 6,
+    "true_sign_vector": [
+      1,
+      -1,
+      -1,
+      1,
+      -1,
+      0,
+      1,
+      0,
+      -1
+    ],
+    "true_sign_vector_rtol0.05": [
+      1,
+      -1,
+      -1,
+      1,
+      -1,
+      0,
+      1,
+      0,
+      -1
+    ],
+    "sign_match_frac_identity": [
+      0.3333333333333333,
+      0.7777777777777778,
+      0.3333333333333333,
+      0.2222222222222222,
+      0.7777777777777778,
+      0.3333333333333333,
+      0.2222222222222222,
+      0.7777777777777778
+    ],
+    "median_sign_match_frac": 0.3333333333333333,
+    "min_sign_match_frac": 0.2222222222222222,
+    "max_sign_match_frac": 0.7777777777777778,
+    "sign_match_frac_structural": [
+      0.2222222222222222,
+      0.7777777777777778,
+      0.3333333333333333,
+      0.1111111111111111,
+      0.8888888888888888,
+      0.1111111111111111,
+      0.2222222222222222,
+      0.6666666666666666
+    ],
+    "median_sign_match_frac_structural": 0.2777777777777778,
+    "sign_match_frac_free6": [
+      0.6666666666666666,
+      0.7777777777777778,
+      0.7777777777777778,
+      0.6666666666666666,
+      0.7777777777777778,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.7777777777777778
+    ],
+    "median_sign_match_frac_free6": 0.7222222222222222,
+    "n_turing": 8,
+    "n_patterned": 7,
+    "n_patterned_given_turing": 7,
+    "n_turing_denominator": 8,
+    "kstar_rel_err_median": 0.031204360415916885
+  },
+  "c2P_B": {
+    "label": "c2_P target B / three_gene_qvar sample_0004",
+    "n_runs": 8,
+    "n_distinct_sign_structures": 8,
+    "n_distinct_sign_structures_rtol0.05": 8,
+    "n_distinct_sign_structures_rtol1e-9": 8,
+    "true_sign_vector": [
+      1,
+      -1,
+      -1,
+      1,
+      -1,
+      0,
+      1,
+      0,
+      -1
+    ],
+    "true_sign_vector_rtol0.05": [
+      1,
+      0,
+      -1,
+      1,
+      -1,
+      0,
+      1,
+      0,
+      -1
+    ],
+    "sign_match_frac_identity": [
+      0.3333333333333333,
+      0.6666666666666666,
+      0.4444444444444444,
+      0.2222222222222222,
+      0.6666666666666666,
+      0.1111111111111111,
+      0.2222222222222222,
+      0.2222222222222222
+    ],
+    "median_sign_match_frac": 0.2777777777777778,
+    "min_sign_match_frac": 0.1111111111111111,
+    "max_sign_match_frac": 0.6666666666666666,
+    "sign_match_frac_structural": [
+      0.2222222222222222,
+      0.6666666666666666,
+      0.2222222222222222,
+      0.3333333333333333,
+      0.8888888888888888,
+      0.1111111111111111,
+      0.3333333333333333,
+      0.1111111111111111
+    ],
+    "median_sign_match_frac_structural": 0.2777777777777778,
+    "sign_match_frac_free6": [
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.7777777777777778,
+      0.7777777777777778
+    ],
+    "median_sign_match_frac_free6": 0.6666666666666666,
+    "n_turing": 8,
+    "n_patterned": 8,
+    "n_patterned_given_turing": 8,
+    "n_turing_denominator": 8,
+    "kstar_rel_err_median": 0.06484085631145822
+  },
+  "baselines": {
+    "uniform_chance": 0.3333333333333333,
+    "best_constant_guess": 0.4444444444444444,
+    "best_constant_guess_symbol": -1,
+    "true_sign_counts": {
+      "-1": 4,
+      "0": 2,
+      "1": 3
+    },
+    "shuffled_null_mean": 0.3885553418803418,
+    "shuffled_null_n_draws": 200000,
+    "rng_seed": 20260818
+  },
+  "pooled": {
+    "n_runs": 26,
+    "median_sign_match_frac": 0.3333333333333333,
+    "mean_sign_match_frac": 0.40598290598290593
+  }
+}

@@ -3448,3 +3448,38 @@ V4's conditional beyond n = 27 on a non-random population (Wilson 95 % LB 0.875)
 UNCALIBRATED marks this entry closes); `src/rngrn/eval/ladder.py` (`v0_invariants`,
 `v1_continuation`, `v2_temporal`, `v3_spatial`, `v4_survey` docstrings);
 `tests/test_lift_ladder.py` (`F_FORM`, `C_FORM`); `docs/HANDOFF_lift_ladder.md`.
+
+### D-EVID-18 — PREREG §3.3's morphology-distance threshold, computed: pooled 75th percentile of within-class distances in `three_gene_train` = 2.1072
+
+**Date:** 2026-08-18. **Status:** DECIDED (threshold), adjudication is a reported result.
+**Decided by:** measurement, per CLAUDE.md §10 (no owner escalation needed — a calibrated
+number against real data, not a new pass condition).
+
+**The decision:** §3.3's third sub-condition — `morphology_distance` ≤ "the 75th
+percentile of within-class distances in `three_gene_train`" — had never been computed.
+Computed directly from the 88-sample `three_gene_train` payload (42 labyrinth / 42 spots /
+4 stripes, ground truth from the payload's own `morphology` attribute), using
+`scoring.morphology.morphology_distance` at its own default (data-derived) `TRAIN_SCALE`.
+The wording pools grammatically to ONE number over ONE set (not per-class), so the
+**pooled** figure over all 1,728 within-class pairs from all three classes is adopted as
+the threshold: **p75 = 2.1072**. Per-class values are reported as context, not as the
+adjudicating number: labyrinth 1.8409 (n_pairs=861), spots 2.4159 (n_pairs=861), stripes
+6.1343 (n_pairs=6 — weakly determined, flagged as such).
+
+**Adjudication (reported result, not a new decision):** the c2_P campaign
+(`experiments/c2_P_t8k8_consol/runs/`, 16 runs) scores **7/16** against this threshold on
+the distance sub-condition, and **7/16** on the full §3.3 conjunction (match + distance +
+`kstar_fft_rel_err` ≤ 8.3% + `trivial_kstar_err` reported) — identical counts, i.e. no run
+that clears the distance bar fails on the other three clauses. The 7 passes are exactly the
+`..._190648_seed*` batch (distances 0.27–0.59); every `..._192351_seed*` run fails the
+distance clause despite `morphology_match = True` (distances 2.74–3.80, 1.3–1.8× the
+threshold); one run (`..._190648_seed3`) has no model-side field to compare
+(`morphology_scored = "target_only"`) and fails by construction.
+
+**What was rejected and why:** a per-class threshold as the adjudicating number — the
+prereg sentence names one distribution, not three, and the stripes class's own p75 rests
+on only 6 pairs from 4 samples, too weak to adjudicate against alone (consistent with the
+"stripes weakly characterised" limitation already in `scoring/morphology.py`'s docstring).
+
+**Where it lives:** `experiments/figures_paper/prereg_33/` (`compute_prereg_33.py`,
+`results.json`, `README.md`, `distance_distribution.png`); `docs/PREREGISTRATION.md` §3.3.

@@ -3344,3 +3344,107 @@ reproducible from the run directory).
 R2 deliverables, the noise arm an R4 deliverable.
 
 **Where it lives:** `docs/REDESIGN_rngrn.md` §4.7–§4.8, §6, §7 (R2, R4), §8 item 16.
+
+### D-LIFT-2 — the V0–V4 ladder's UNCALIBRATED tolerances are closed by measurement: the V0 floor constants F/C, V1's error constants, V3's field-difference curve
+
+**Date:** 2026-08-18 (redesign R1, branch `feature/lift-ladder`). **Status:** DECIDED
+**Decided by:** the implementing agent under CLAUDE.md §10 (science decisions are taken
+locally, calibrated and recorded). Nothing here weakens a pre-registered pass condition:
+D-FFT-3's one-radial-bin k\* tolerance `2π/L`, V2's 0.1 × `pattern_floor` sup-norm bar and
+V0's already-ruled two-constant bound are **inherited unchanged**. This entry replaces
+placeholders with measured values; it moves no bar.
+
+**The decision — three UNCALIBRATED marks in `docs/REDESIGN_rngrn.md` §5.3 become measured
+constants, each with the run behind it.**
+
+1. **V0's achievable fixed-point-residual floor** was UNCALIBRATED ("the only number on
+   record is 1.28e-8 over 8 systems × 7 μ, in a parked artefact its own docs mark
+   do-not-cite"). It is now two constants per form, because the residual has two honestly
+   distinct mechanisms and a single bar is loose by ~5 orders in whichever regime it is not
+   set by: `residual_floor_F` (max residual over μ ≥ 1e-2 — the x-block round-off floor,
+   μ-independent) and `amplification_C` (max of `residual(μ)·μ/eps` over μ ≤ 1e-4 — the
+   gate-block reconstruction discrepancy, amplified by 1/μ). **Measured, 20 Newton-tight
+   draws per form, μ ∈ {1e-6, 1e-4, 1e-2, 1, 1e2}, seed 101:
+   competitive F = 6.267e-11, C = 1154.5; nc1 F = 2.796e-11, C = 12.59.** The operative bound
+   is `residual(μ) ≤ max(1e-9, 10·F_form, 10·C_form·eps/μ)`, frozen per form in
+   `tests/test_lift_ladder.py` with <1 % rounding-up margin.
+2. **V1's "absolute error constants: UNCALIBRATED — measured and recorded, not invented"** are
+   now recorded, on 43 systems across three populations rather than asserted:
+   slow-branch order **0.811 – 1.071** (low_basal 0.941–1.071, harvest 0.811–1.020, D5
+   1.044–1.059); `kstar_grid_offset` **0 on 41 of 43**, 1 on 2 harvest systems;
+   `min_fast_mu_product` (the −(1+u)/μ claim, ≈ 1 when it holds) **0.976 – 1.001 on low_basal
+   (16/16) and 1.000 – 1.008 on 21 of the 23 harvest systems**, 0.349 – 0.998 on the 4 D5
+   models (their large D brings slow branches up toward the gate rates — the same regime their
+   `frac_k_separated` of 0.105–0.223 reports), and **5.44e-6 / 6.55e-6 on 2 harvest systems**,
+   recorded as a branch-identification failure rather than as a lift property
+   (DIAGNOSTICS_lift F-L5); every fast branch stable at every k and μ on all 43.
+   `max_slow_err` is retained as an unmasked floor measurement and is explicitly **not** a
+   tolerance — it must be read with `frac_k_separated` and `max_mu_D_k2`.
+3. **V3's field-difference bound** was UNCALIBRATED, with §5.3 saying "the measured curve
+   becomes the calibration". The measured curve is now on record, and it says the bound cannot
+   be set from V3(a): **`l2_diff_by_mu` is identical to all printed digits across
+   μ ∈ {1e-3, 1e-4, 1e-5, 1e-6} on every one of the 23 harvest rows** (median 2.7569e-2, max
+   0.17625 at 128²; median 4.1344e-2, max 0.18789 at 512²), because with dt set by the QSS
+   growth-rate policy dt/μ ∈ [26.4, 2.528e5] and the O(dt) scheme term is all that remains.
+   **The calibration therefore comes from the dt ≲ μ regime instead**: V3(b)'s dt-halving pair
+   at μ = 7.2e-4 — the literature-central value, **not** the owner-set gate point
+   μ_gate = 1e-3 (D-REDESIGN-5; see DIAGNOSTICS_lift F-L13) — gives a median ratio of
+   **0.99324** (dt-independent, i.e. O(μ)-dominated), and the 32² suite sweep gives
+   2.04e-7 → 4.70e-8 as dt halves at μ = 1e-6
+   against 5.01e-7 → 5.45e-7 (flat) at μ = 1e-3. **The definition adopted for the recorded
+   curve is the raw relative field difference `‖X_lift − X_qss‖_F / ‖X_qss‖_F`** (the briefed
+   key, the one every campaign JSON carries); the pattern-amplitude-normalised
+   `l2_diff_dev_by_mu` is reported beside it and is **not** the definition.
+
+**Evidence:** `experiments/lift_ladder/v0/results/v0.json` (V0, 15.1 s);
+`experiments/lift_ladder/v1/results/v1.json` + `arrays/v1.npz` (V1, 64.0 s, 16 low_basal + 23
+harvest + 4 D5 rows); `experiments/lift_ladder/v2/results/v2.json` (V2, 313.8 s);
+`experiments/lift_ladder/v3/results/v3.json` + `arrays/v3.npz` (V3, 24 017 s) and
+`experiments/lift_ladder/v3/cpu_gpu_check/results/v3.json`;
+`experiments/lift_ladder/v4/results/v4.json` + `arrays/v4.npz` (V4, 1050.3 s);
+`experiments/lift_ladder/gpu_port/results/cost.json`. Method, per-rung tables, the thirteen
+findings and the run paths for every number: `docs/DIAGNOSTICS_lift.md`. Rung code
+`src/rngrn/eval/ladder.py`; driver `scripts/lift_ladder.py`; the frozen V0 constants
+`tests/test_lift_ladder.py::F_FORM`/`C_FORM`.
+
+**What was rejected and why:**
+
+- **A single V0 amplification constant** (ruling round 1) — measured floor-dominated at large
+  μ and ~5 orders loose at small μ, which is exactly where V1 lives. Rejected in favour of the
+  two-mechanism bound above.
+- **Keeping the 1e-7 one-model residual bar as the V0 pass condition** — it fails at
+  population level (competitive 2.564e-7 over 20 draws) for a reason that is not a defect, and
+  §5.3 V0's own text says V0 *measures* the floor. Superseded, not weakened: the replacement
+  is tighter than 1e-7 in both regimes it covers.
+- **Admitting `steady_state`'s relaxation-fallback steady states into V0** — a fallback-path
+  draw carries a residual up to 1e-4 constant across every μ, so the rung would have measured
+  solver quality rather than lift algebra. `draw_models` now filters at ‖f(x\*)‖ ≤ 1e-10 and
+  reports the rate it excluded at (0/20 competitive, 1/21 nc1).
+- **Calibrating V3's absolute field-difference bound from the V3(a) campaign curve** — at the
+  QSS dt that curve is a scheme floor with no μ-dependence in it, so a bound read off it would
+  be a bound on `simulate_lifted`-vs-`rollout.simulate` Strang-vs-per-stage differencing, not
+  on the lift. Rejected in favour of the dt ≲ μ measurements.
+- **`l2_diff_dev_by_mu` as the recorded definition** — it is the more sensitive statistic on
+  patterned rows but degenerates on decayed ones (measured 9.4e+288 on one row whose control
+  has zero deviation; DIAGNOSTICS_lift F-L10). Reported, never adopted.
+- **`scoring/morphology.py::classify_morphology` as V3's morphology estimator** — impossible,
+  not merely undesirable: `eval/ladder.py` is RECOVERY_SIDE in `tests/test_firewall.py` and
+  may not import the scoring package. V3 uses `observables.classify`, and **the resulting
+  `morphology_agree` numbers are not comparable to any `validate.morphology_match` number.**
+
+**Not independently validated:** the §5.4 gate's own operating point — 512²,
+**μ_gate = 1e-3**, dt = min(0.2/jac_rate, μ/2), pattern-formation horizon, with the mandated
+dt-halving check — was **not** run by this ladder (step counts 3.5e5–5.2e6 exceed
+`simulate_lifted`'s 200 000 `max_steps` default; measured cost 0.63–9.21 h per leg at 512²
+CUDA, median 0.97 h). V3(b) covers the policy dt on a 1.44-time-unit transient at 128² **and at
+μ_central = 7.2e-4 rather than at μ_gate** (F-L13 — no dt-halving pair exists at the gate point
+at all), and the 512² attractor run uses the QSS dt where dt/μ = 45–253. Whether the ladder
+as measured licenses the gate is returned to the orchestrating session with this analysis (`docs/DIAGNOSTICS_lift.md` §7), and updates
+D-LIFT-1's precondition when ruled. Also not validated: V2 at μ ≥ 1e-1 (never run); V1's
+branch tracking on 2 of 23 harvest systems (F-L5); the V3 morphology claim beyond n = 4;
+V4's conditional beyond n = 27 on a non-random population (Wilson 95 % LB 0.875).
+
+**Where it lives:** `docs/DIAGNOSTICS_lift.md`; `docs/REDESIGN_rngrn.md` §5.3 (the three
+UNCALIBRATED marks this entry closes); `src/rngrn/eval/ladder.py` (`v0_invariants`,
+`v1_continuation`, `v2_temporal`, `v3_spatial`, `v4_survey` docstrings);
+`tests/test_lift_ladder.py` (`F_FORM`, `C_FORM`); `docs/HANDOFF_lift_ladder.md`.

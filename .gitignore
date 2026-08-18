@@ -66,6 +66,17 @@ experiments/**/*.png
 !experiments/figures_paper/**/figures/
 !experiments/figures_paper/**/*.png
 
+# Same exception, same reason, for `experiments/lift_paper_demo/` — the paper's centrepiece
+# lifted-pattern figure (a recovered model's parameters simulated under the dynamical lift,
+# beside its QSS control). The IMAGE is the deliverable: "does the recovered model actually
+# form a Turing pattern" is a question a boolean in a JSON file does not answer, which is the
+# same argument `experiments/figures_report/` was carved out on. 1.6 MB, 5 PNGs. The
+# directory must be un-ignored before the *.png negation can apply — git cannot re-include a
+# file whose parent directory is excluded, which is why line 45's `**/figures/` needs the
+# first of these two lines. Deliberately scoped to this one run directory.
+!experiments/lift_paper_demo/figures/
+!experiments/lift_paper_demo/figures/*.png
+
 # tidy CSV exports (`rngrn export`) — a pure projection of the tracked indexes
 exports/
 

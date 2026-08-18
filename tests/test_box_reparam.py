@@ -114,11 +114,12 @@ def test_pin_xstar_and_param_boxes_combine_fixed_point_and_gradients():
     assert m.theta_alpha.grad is not None and torch.any(m.theta_alpha.grad != 0)
 
 
-def test_batched_rngrn_refuses_boxed_members():
+def test_batched_rngrn_supports_boxed_members():
+    """SUPERSEDED BY TASK 16, exactly as the pinned twin in tests/test_pinned_model.py was:
+    the refusal named T16 as the place support would land, and it landed. Full contract in
+    tests/test_batched_pinned_boxed.py."""
     m = RNGRN(N=3, form="competitive", seed=3, param_boxes=BOX)
-    try:
-        BatchedRNGRN([m])
-    except NotImplementedError:
-        pass
-    else:
-        raise AssertionError("BatchedRNGRN should refuse boxed members (T16 will add support)")
+    bm = BatchedRNGRN([m])
+    assert bm.param_boxes == {k: (float(lo), float(hi)) for k, (lo, hi) in BOX.items()}
+    assert torch.allclose(bm.alpha[0], m.alpha, rtol=0, atol=1e-15)
+    assert torch.allclose(bm.delta[0], m.delta, rtol=0, atol=1e-15)

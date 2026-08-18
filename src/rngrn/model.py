@@ -145,15 +145,16 @@ class RNGRN(nn.Module):
         beta_i = delta_i*xstar_i - prod_i(xstar), differentiable w.r.t. theta_delta and the
         production parameters (theta_s/theta_g/theta_alpha). Use `beta_hinge()` for the
         beta >= 0 penalty this requires in the loss. None (default) is bit-identical to
-        legacy RNGRN (free theta_beta, no pinning). Not implemented for init='low_basal' or
-        for BatchedRNGRN (T16).
+        legacy RNGRN (free theta_beta, no pinning). Not implemented for init='low_basal'.
+        SUPPORTED by BatchedRNGRN since Task 16 (the pin is shared across members).
     param_boxes : dict|None  Task 13 (docs/REDESIGN_rngrn.md 3.3): when given, maps the named
         keys' raw theta through low + (high-low)*sigmoid(raw) instead of softplus, hard-boxing
         the constrained value into [low, high]. Only "alpha"/"delta" are accepted -- D and s/g
         are NOT boxed in this design (a silent extra key would be a silent behaviour change).
-        The model takes NUMBERS, not a file path; the caller loads configs/bio_box.yaml (T16).
-        None (default) is bit-identical to legacy RNGRN (softplus). Not implemented for
-        init='low_basal' or for BatchedRNGRN (T16).
+        The model takes NUMBERS, not a file path; the caller loads configs/bio_box.yaml
+        (scripts/r2_ignition_run.py does, Task 16). None (default) is bit-identical to legacy
+        RNGRN (softplus). Not implemented for init='low_basal'. SUPPORTED by BatchedRNGRN
+        since Task 16 (the box is shared across members).
     """
 
     def __init__(self, N: int, form: str = "competitive", n_hill: int = 2,
@@ -433,6 +434,15 @@ def build_model(cfg) -> RNGRN:
 THETA_NAMES = ("theta_s", "theta_g", "theta_alpha", "theta_delta", "theta_beta", "theta_D")
 
 
+def theta_names_for(pinned: bool) -> tuple:
+    """The raw parameters a model actually registers. A `pin_xstar` model has NO
+    `theta_beta` — beta is derived from the fixed-point condition (Task 12) — so anything
+    that iterates the raw parameters must ask for the right list rather than assume
+    `THETA_NAMES`. `THETA_NAMES` itself is unchanged (it is the unpinned list) so existing
+    callers keep working."""
+    return tuple(n for n in THETA_NAMES if not (pinned and n == "theta_beta"))
+
+
 class BatchedRNGRN(nn.Module):
     """B INDEPENDENT RNGRN members carried as one leading batch dimension.
 
@@ -510,22 +520,6 @@ class BatchedRNGRN(nn.Module):
         super().__init__()
         if not models:
             raise ValueError("BatchedRNGRN needs at least one member model")
-        for i, m in enumerate(models):
-            if getattr(m, "pin_xstar", None) is not None:
-                # Not implemented: a pinned member has no theta_beta to stack, and derived
-                # beta needs a per-member x* buffer this class does not batch yet. Loud
-                # refusal rather than a silent AttributeError or a silent divergence
-                # (Task 12 scopes pin_xstar to the serial model; T16 batches it).
-                raise NotImplementedError(
-                    f"BatchedRNGRN does not support pin_xstar members yet (T16); "
-                    f"member {i} was constructed with pin_xstar set.")
-            if getattr(m, "param_boxes", None) is not None:
-                # Not implemented: same reasoning as pin_xstar above -- batching a per-member
-                # box needs box-aware stacking this class does not have yet (Task 13 scopes
-                # param_boxes to the serial model; T16 batches it).
-                raise NotImplementedError(
-                    f"BatchedRNGRN does not support param_boxes members yet (T16); "
-                    f"member {i} was constructed with param_boxes set.")
         m0 = models[0]
         for i, m in enumerate(models[1:], start=1):
             if (m.N, m.form, m.n_hill, m.dispersion_backend) != (
@@ -534,20 +528,48 @@ class BatchedRNGRN(nn.Module):
                     f"BatchedRNGRN members must share (N, form, n_hill, dispersion_backend); "
                     f"member {i} has ({m.N}, {m.form!r}, {m.n_hill}, {m.dispersion_backend!r}) "
                     f"vs member 0's ({m0.N}, {m0.form!r}, {m0.n_hill}, {m0.dispersion_backend!r})")
+        # Task 16 (R2 Phase I, docs/REDESIGN_rngrn.md §4.5): pin_xstar and param_boxes are
+        # now SUPPORTED, but they are properties of the TARGET and of the box, not of a
+        # member -- one frame gives one x*, configs/bio_box.yaml gives one box. So they must
+        # be IDENTICAL across the batch. A mismatched member is refused loudly rather than
+        # silently adopting member 0's pin, which would make that member's fixed point wrong
+        # while every reported number still looked well-formed. (Tasks 12/13 raised
+        # NotImplementedError here and named T16 as the place support would land.)
+        for i, m in enumerate(models[1:], start=1):
+            if getattr(m, "pin_xstar", None) != getattr(m0, "pin_xstar", None):
+                raise ValueError(
+                    f"BatchedRNGRN members must share pin_xstar (one target frame gives one "
+                    f"x*); member {i} has {m.pin_xstar!r} vs member 0's {m0.pin_xstar!r}")
+            if getattr(m, "param_boxes", None) != getattr(m0, "param_boxes", None):
+                raise ValueError(
+                    f"BatchedRNGRN members must share param_boxes (one plausibility box); "
+                    f"member {i} has {m.param_boxes!r} vs member 0's {m0.param_boxes!r}")
         self.B = len(models)
         self.N = m0.N
         self.form = m0.form
         self.n_hill = m0.n_hill
         self.init = m0.init
         self.dispersion_backend = m0.dispersion_backend
-        for name in THETA_NAMES:
+        self.pin_xstar = m0.pin_xstar
+        self.param_boxes = None if m0.param_boxes is None else dict(m0.param_boxes)
+        # A pinned member registers no theta_beta (beta is DERIVED), so there is nothing to
+        # stack for it -- hence the parameter list is pin-dependent, not the module constant.
+        self._theta_names = theta_names_for(self.pin_xstar is not None)
+        for name in self._theta_names:
             stacked = torch.stack([getattr(m, name).detach().clone() for m in models], dim=0)
             self.register_parameter(name, nn.Parameter(stacked))
+        if self.pin_xstar is not None:
+            # (N,), NOT (B,N): the pin is shared, and broadcasting it against the (B,N,N)
+            # parameters reproduces the serial arithmetic term for term.
+            self.register_buffer(
+                "_xstar", torch.tensor(self.pin_xstar, dtype=torch.float64))
 
     @classmethod
     def from_seeds(cls, N: int, seeds, form: str = "competitive", n_hill: int = 2,
                    dispersion_backend: str = "eig", init: str = "default",
-                   kstar_obs: float | None = None) -> "BatchedRNGRN":
+                   kstar_obs: float | None = None,
+                   pin_xstar: "Sequence[float] | None" = None,   # Task 16
+                   param_boxes: dict | None = None) -> "BatchedRNGRN":
         """One member per entry of `seeds`, in order.
 
         Takes the seeds EXPLICITLY rather than a base seed plus an offset rule. The rule
@@ -555,10 +577,14 @@ class BatchedRNGRN(nn.Module):
         paths cannot drift apart on which inits they start from. An earlier version took
         `seed0` and used `seed0 + r`, which is precisely the sliding-window scheme B1
         removed — run seed s and s+1 then shared B-1 of their B inits.
+
+        `pin_xstar` / `param_boxes` (Task 16) are passed to EVERY member, which is the only
+        configuration `__init__` accepts — see its refusal of mismatched members.
         """
         return cls([RNGRN(N=N, form=form, n_hill=n_hill, seed=s,
                           dispersion_backend=dispersion_backend, init=init,
-                          kstar_obs=kstar_obs)
+                          kstar_obs=kstar_obs, pin_xstar=pin_xstar,
+                          param_boxes=param_boxes)
                     for s in seeds])
 
     # ---- device / dtype ------------------------------------------------------------
@@ -580,13 +606,35 @@ class BatchedRNGRN(nn.Module):
     @property
     def KR(self):    return self.s * (1.0 - self.gate)
     @property
-    def alpha(self): return _softplus(self.theta_alpha)      # (B,N,N)
+    def alpha(self):                                          # (B,N,N)
+        box = self.param_boxes.get("alpha") if self.param_boxes else None
+        return _box_sigmoid(self.theta_alpha, *box) if box else _softplus(self.theta_alpha)
     @property
-    def delta(self): return _softplus(self.theta_delta)      # (B,N)
+    def delta(self):                                          # (B,N)
+        box = self.param_boxes.get("delta") if self.param_boxes else None
+        return _box_sigmoid(self.theta_delta, *box) if box else _softplus(self.theta_delta)
     @property
-    def beta(self):  return _softplus(self.theta_beta)       # (B,N)
+    def beta(self):                                           # (B,N)
+        if self.pin_xstar is None:
+            return _softplus(self.theta_beta)
+        # DERIVED beta, exactly as RNGRN.beta does it (Task 12), with the shared (N,) pin
+        # broadcasting against the (B,N,N)/(B,N) parameters. Autograd-visible through
+        # theta_delta and through prod's dependence on theta_s/theta_g/theta_alpha.
+        prod = _reaction_prod(self.KA, self.KR, self.alpha, self._xstar,
+                              self.form, self.n_hill)
+        return self.delta * self._xstar - prod
     @property
     def D(self):     return torch.exp(self.theta_D)          # (B,N)
+
+    def beta_hinge(self) -> torch.Tensor:
+        """Per-member softplus(-beta).sum(over species): (B,).
+
+        NOT a batch-wide scalar. The serial `RNGRN.beta_hinge` reduces to 0-d because it has
+        one member; reducing over the batch here would give every member the same gradient
+        contribution from every other member's beta, which is precisely the coupling
+        `recover._clip_grad_norm_per_member` exists to prevent. The caller sums over members
+        itself, after masking the dead ones."""
+        return torch.nn.functional.softplus(-self.beta).sum(dim=-1)
 
     # ---- forward -------------------------------------------------------------------
     def reaction(self, x: torch.Tensor) -> torch.Tensor:
@@ -668,8 +716,9 @@ class BatchedRNGRN(nn.Module):
         if not (0 <= b < self.B):
             raise IndexError(f"member index {b} out of range for B={self.B}")
         m = RNGRN(N=self.N, form=self.form, n_hill=self.n_hill, seed=0,
-                  dispersion_backend=self.dispersion_backend, init=self.init)
+                  dispersion_backend=self.dispersion_backend, init=self.init,
+                  pin_xstar=self.pin_xstar, param_boxes=self.param_boxes)
         with torch.no_grad():
-            for name in THETA_NAMES:
+            for name in self._theta_names:
                 getattr(m, name).copy_(getattr(self, name)[b].detach())
         return m.to(self.device)

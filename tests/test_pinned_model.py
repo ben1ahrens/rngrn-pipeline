@@ -49,11 +49,14 @@ def test_beta_hinge_is_positive_and_differentiable_when_beta_forced_negative():
     assert m.theta_s.grad is not None and torch.any(m.theta_s.grad != 0)
 
 
-def test_batched_rngrn_refuses_pinned_members():
-    m = RNGRN(N=3, form="competitive", seed=3, pin_xstar=[0.7, 1.3, 1.0])
-    try:
-        BatchedRNGRN([m])
-    except NotImplementedError:
-        pass
-    else:
-        raise AssertionError("BatchedRNGRN should refuse pinned members (T16 will add support)")
+def test_batched_rngrn_supports_pinned_members():
+    """SUPERSEDED BY TASK 16. This test used to assert BatchedRNGRN raised
+    NotImplementedError for a pinned member ("T16 will add support"); T16 added it, because
+    Phase I (docs/REDESIGN_rngrn.md §4.5) is a batched population on a pinned model. The
+    full contract is tested in tests/test_batched_pinned_boxed.py; this keeps the
+    serial-vs-batched agreement check at the site the refusal used to live."""
+    xs = [0.7, 1.3, 1.0]
+    m = RNGRN(N=3, form="competitive", seed=3, pin_xstar=xs)
+    bm = BatchedRNGRN([m])
+    assert bm.pin_xstar == tuple(xs)
+    assert torch.allclose(bm.beta[0], m.beta, rtol=0, atol=1e-15)

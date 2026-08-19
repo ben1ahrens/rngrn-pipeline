@@ -12,7 +12,7 @@ dry-run figure.
 |---|---|---|
 | `LL/` | `feature/lift-ladder` @ `2f50fff` | `worktrees/lift-ladder` |
 | `MAIN/` | `main` @ `48441e4` | `rngrn-pipeline` |
-| `C3/` | `feature/paper-claim3-hidden-channel` @ `f9d1514` | `worktrees/paper-claim3` |
+| `C3/` | `feature/paper-claim3-hidden-channel` @ `60fddfb` | `worktrees/paper-claim3` |
 | `C5/` | `feature/paper-claim5-noise` @ `4515ea1` | `worktrees/paper-claim5` |
 
 Figures are committed image files — the deliverable is the `.png` itself (scoped
@@ -179,9 +179,12 @@ Turing-unstable, and morphology matches the target on all 7 runs where a rollout
 comparison was possible**, with morphology distances 0.35–0.93 — all well under the §3.3
 threshold (2.1072). The cost of hiding the channel, read against the matched
 full-observation control (same objective, same seeds, same restarts): k\*-FFT error
-roughly doubles (mean 0.0743 vs 0.0527, median 0.0814 vs 0.0503) and one seed (6) loses
-Turing instability. All hidden-arm k\* errors (0.015–0.129) remain far below the 0.250
-trivial baseline for this target.
+increases ~40–60% (mean 0.0743 vs 0.0527, median 0.0814 vs 0.0503) and one seed (6)
+loses Turing instability. All hidden-arm k\* errors (0.015–0.129) remain far below the
+trivial-estimator baseline for this target (0.295 on the FFT metric; 0.250 on the
+linear-k\* metric). Read against the §3.3 8.3% k\*-error line used in claim 1, the
+hidden arm passes on **4/8** seeds (control: 6/8; replica: 8/8) — the pre-registered
+per-seed k\* clause is not met for half the hidden-arm seeds.
 
 **Design** (full rationale + tables in `C3/docs/DECISIONS.md` § D-PAPER-2 and
 `C3/experiments/claim3_hidden_slow/README.md`): target `three_gene_qvar/sample_0001`,
@@ -201,7 +204,8 @@ seeds 0–7, three arms —
 | morphology compared / match | 7 / 7 | 8 / 7 | 7 / 7 |
 
 Run dirs: `C3/experiments/claim3_hidden_slow/{replica_fullobs,ctrl_fullobs_resid,hidden_slow}`.
-Suite on the branch: 574 passed / 1 skipped.
+Suite on the branch: 574 passed / 1 skipped (re-verified unsandboxed 2026-08-19 at
+`f9d1514` by the controller's audit; also recorded in the branch README).
 
 **Verdict wording for the prose: supported but not cleanly attributable.** Two confounds
 are inseparable in this design and must be disclosed:
@@ -292,8 +296,9 @@ branch: 582 passed / 1 skipped (through the pre-push hook, no bypass).
 **Caveats to carry:** one target × 8 seeds — **not a general robustness claim**; targets
 are tuning-half (fact 2); one seed (3) fails to pattern on rollout at σ = 0.00 *and*
 0.05 but patterns at 0.01 and 0.20 — restart-selection variance, reported as measured,
-not smoothed; noise levels are probe points, not calibrated to any experimental noise
-model.
+not smoothed; the 0.01 row's 7/8 is a seed-5 morphology mismatch on a Turing-unstable
+recovery, the only label mismatch in the grid; noise levels are probe points, not
+calibrated to any experimental noise model.
 
 ---
 

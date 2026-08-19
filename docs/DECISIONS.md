@@ -3509,3 +3509,264 @@ are untested; so is any claim about what the redesign arm would do with them.
 
 **Where it lives:** `experiments/redesign_r2/phase1/`, `experiments/redesign_r2/phase1_ablation/`;
 `docs/HANDOFF_redesign_r2.md` §4c; `docs/REDESIGN_rngrn.md` §3.2, §3.3, §4.4, §4.5.
+
+---
+
+### D-PERF-3 — `dispersion_backend` gains `'auto'`, which resolves to the closed-form cubic at N = 3 (MECHANICS adopted on this line; the DEFAULT stays `'eig'` — see the R3 amendment at the end of this entry)
+
+**Date:** 2026-08-17 (GPU-optimisation branch `feature/gpu-optim`, orchestrating session).
+**Status:** DECIDED
+**Decided by:** the orchestrating session under delegated authority (§10).
+
+**The decision:** `RNGRN.__init__`, `BatchedRNGRN.from_seeds`, `config.ModelConfig.dispersion_backend`
+and `recover()` all default to `'auto'`, resolved at construction to `'cubic'` when `N == 3`
+and `'eig'` otherwise. The resolved concrete value is what `.dispersion_backend` reads —
+`'auto'` never survives construction. Explicit `'eig'`/`'cubic'` are respected unchanged, and
+explicit `'cubic'` still raises for N ≠ 3.
+
+**Evidence:** measured in this repo and recorded in `model.py`'s docstrings and `CLAUDE.md` §7:
+batched cubic dispersion 0.97 ms vs `torch.linalg.eigvals` 156.6 ms on 127 matrices (162×);
+on CUDA the eig backend costs ~816 ms per restart-step flat in B (~2500× the cubic at B=8),
+because small non-symmetric eigendecomposition has no batched cuSOLVER kernel. The cubic form
+is exact for N ≤ 3 by construction; per-step agreement with eig was previously measured at
+~1e-12. The dispersion relation is evaluated twice per optimiser step, so this is the dominant
+kernel cost of every N = 3 run on either device.
+
+**What was rejected and why:** (a) keeping `'eig'` as the default and only raising loudly on
+the eig+CUDA+N=3 combination — that guards the GPU path but leaves every CPU run misrouted
+away from a measured 162× win for no benefit; (b) changing the default to a bare `'cubic'` —
+breaks every N ≠ 3 construction site and every reference-system test at N = 2.
+
+**Announced loudly:** runs recorded after this change are **not bit-comparable** to runs
+recorded before it for any N = 3 config that did not pin the backend explicitly — cubic and
+eig agree to ~1e-12 per step but diverge over a full optimisation. Any cross-branch comparison
+of recovered parameters must pin `dispersion_backend` explicitly on both sides.
+
+**Not independently validated:** the ~1e-12 agreement figure is the previously measured one
+(`model.py`); no fresh cubic-vs-eig full-run comparison was made in this session, and the test
+suite had not yet been re-run when this entry was written (owner deferred testing to the end
+of the branch).
+
+**Where it lives:** `src/rngrn/model.py::RNGRN.__init__` (resolution), `::BatchedRNGRN.from_seeds`,
+`src/rngrn/config.py::ModelConfig`, `src/rngrn/recover.py::recover`.
+
+**R3 INTEGRATION AMENDMENT — 2026-08-19, `feature/r3-integration` Task 8.** The paragraphs
+above are transcribed verbatim from `feature/gpu-optim-repair`, because they are the record of
+the decision as taken there. **On this line the decision landed only in part, by controller
+ruling** (`docs/INTEGRATION_r3_collisions.md` row 26 / §2.8), and the difference is
+load-bearing:
+
+- **ADOPTED — the mechanics.** `'auto'` is accepted by `RNGRN.__init__`'s three-way assert and
+  resolved at construction by `model.resolve_dispersion_backend` (`model.py:42`, called at
+  `model.py:251`). `self.dispersion_backend` is never the string `'auto'`. Explicit
+  `'eig'`/`'cubic'` are respected; explicit `'cubic'` at N ≠ 3 still raises.
+- **NOT ADOPTED — the default flip.** `RNGRN.__init__`, `BatchedRNGRN.from_seeds`,
+  `ModelConfig.dispersion_backend` and `recover()` all still default to `'eig'`.
+  `docs/PLAN_redesign.md`'s Global Constraints require the A0 baseline objective to keep
+  bit-identical behaviour after every task, and this entry's own "Announced loudly" paragraph
+  says an `'auto'` default makes N = 3 runs not bit-comparable. The two cannot both hold, so
+  the flip is parked as a decision point returned to the controller, not taken here.
+  **Consequence: nothing in the paragraph above describing `'auto'` as "the default" is true on
+  this line.** It is an opt-in.
+- **ADOPTED and NOT in the original — the frozen-config fix.** `train.fit` resolves
+  `cfg.model.dispersion_backend` through the same helper *before* writing
+  `config/frozen_config.yaml` (`train.py:205-212`). Without it a run configured `'auto'` froze
+  the literal string `'auto'`, so the file could not say which backend produced the number —
+  against `.claude/rules/reporting-numbers.md` step 4, which says to read the frozen config
+  rather than re-derive from it. This was authorised whichever way the flip ruling went.
+
+**Pinned by:** `tests/test_dispersion_cubic.py::test_auto_resolves_at_construction_and_never_survives_it`
+(the mechanics), `::test_the_default_backend_is_eig_everywhere` (the ruling — all four
+defaults, plus the resolved effect at N = 3, so a flip must edit the test in the same commit),
+and `::test_frozen_config_records_the_resolved_backend_not_the_request` (the provenance fix).
+
+**Not independently validated (this line):** no cubic-vs-eig full-run comparison was made
+here either — the 162x and ~1e-12 figures above are inherited, not re-measured. The
+frozen-config test reproduces `train.fit`'s resolve-then-write sequence rather than running
+`fit` (which needs a dataset); the ORDERING inside `fit` is pinned by a source-order
+assertion, which is weaker than a behavioural test and is labelled as such at the site.
+
+---
+
+### D-PERF-7 — the liveness-sync cadence (25 steps) stays; its "harmless" claim is corrected, not the cadence
+
+**Date:** 2026-08-19 (R3 task 5, `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` M3 / table #8). **Status:** DECIDED
+**Decided by:** the implementing agent under delegated authority (§10), writing the entry the
+review found missing; the underlying code change itself was not authored by this task.
+
+**The decision:** `recover.py:236` (`LIVENESS_SYNC_EVERY = 25`) inside `_batched_restarts`
+stays: the host-side "is everyone dead" bookkeeping and early break are checked every 25 Adam
+steps (and on the final step), not every step. This can let the early break fire up to 24
+steps late once every member of a batch has died.
+
+**What the prior inline comment overclaimed, now corrected:** the comment at the sync point
+called the delayed break "harmless -- those extra steps optimise an all-dead, all-masked batch
+and produce nothing." That is stronger than the truth. During those extra steps `total`
+(`torch.where(alive, loss_vec, zeros).sum()`) is an exact-zero tensor **with a graph** once
+every member is dead, so the fresh gradient contribution from `total.backward()` is zero -- but
+Adam's momentum and second-moment state, accumulated from steps BEFORE the batch died, keep
+decaying and being applied to the parameters regardless of the current gradient being zero.
+The parameters DO move during the lag. What is true, and is what the comment should have said,
+is narrower: no REPORTED number depends on it, because `final_alive` is all-False for such a
+batch and every member logs `steady_state_failed` downstream, whatever its parameters drifted
+to during the lag. Separately, `verbose` printing at such a step computes
+`float(loss_vec[alive].mean())` over an empty boolean selection, which silently evaluates to
+NaN rather than raising.
+
+**Evidence:** `docs/REVIEW_gpu_optim_delta.md` M3 (§4, table #8) is the source of both the
+mechanism (Adam momentum vs. zero gradient) and the verbose-NaN observation; this entry
+restates them as the record `CLAUDE.md` §10 requires. No new run was made to measure how
+often, or by how much, parameters actually drift during the lag -- the review's own claim is
+that no reported number depends on the answer, and this task's scope is documentation only.
+
+**What was rejected and why:** (a) shortening `LIVENESS_SYNC_EVERY` to catch a fully-dead
+batch sooner -- would reintroduce the per-step host sync this cadence was introduced to
+eliminate (the same D2H sync it replaced two per-step syncs with), for a case the review
+confirms affects no reported number; (b) silencing or fixing the verbose NaN print -- a
+behaviour change, out of scope for a documentation-only task; recorded here instead as a known,
+harmless (cosmetic-only) side effect for a future task to pick up if it matters.
+
+**Not independently validated:** the magnitude of parameter drift during a lag, and how often
+a lag actually occurs in practice, are both unmeasured. The claim that "no reported number
+depends on it" rests on `final_alive`/`steady_state_failed` excluding such members from every
+downstream consumer, which was verified by reading the code, not by a run.
+
+**Where it lives:** `src/rngrn/recover.py:236` (`LIVENESS_SYNC_EVERY`), `:258-274` (the
+`is_sync_step` block and its corrected inline comment), `:298-300` (the verbose NaN-mean
+print, unchanged).
+
+---
+
+### D-PERF-8 — `lbfgs_error` recording replaces a bare `except: pass`; the serial-only asymmetry against `_batched_restarts` is recorded, not closed
+
+**Date:** 2026-08-19 (R3 task 5, `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` M4 / table #10). **Status:** DECIDED
+**Decided by:** the implementing agent under delegated authority (§10), writing the entry the
+review found missing; the underlying code change itself was not authored by this task.
+
+**The decision:** in the serial restart loop (`recover.py:679-699`), an LBFGS-polish failure
+that used to be swallowed by a bare `except: pass` is now caught, formatted as
+`lbfgs_error = f"{type(e).__name__}: {e}"`, and appended as an `lbfgs_error` key on that
+restart's `restart_log` row (`recover.py:728-731`). This stays as landed.
+
+**Why this is accepted:** CLAUDE.md §4 requires failing loud; the deleted `except: pass` was
+exactly the failure mode the house style forbids -- the code comment at the site already notes
+this is "where the FIRST async CUDA error of a GPU run would previously have been swallowed."
+The LBFGS polish stays optional (a failed polish does not abort the restart; Adam's parameters
+are kept), so recording rather than raising is the correct severity: informational, not
+fatal.
+
+**The asymmetry, now recorded:** `lbfgs_error` is added to SERIAL `restart_log` rows only. The
+batched path's row construction (`_batched_restarts`, `recover.py:322-325`) never runs an
+LBFGS polish per member and never emits the key. `recover(batched=False)` and
+`recover(batched=True)` therefore write different column sets into the run index for what is
+nominally the same log structure. `CLAUDE.md` §4's flat-scalar rule is satisfied either way (a
+`str | None` is a flat scalar) -- the asymmetry is the missing column, not the type.
+
+**Evidence:** `docs/REVIEW_gpu_optim_delta.md` M4 (§4, table #10) is the source of the
+diagnosis, including the exact line references and the flat-scalar clarification. A short
+inline comment was added at `recover.py:322` (this task) noting the missing key at the site
+where a reader would otherwise expect it.
+
+**What was rejected and why:** (a) reverting to `except: pass` -- rejected outright, it is the
+defect being fixed and doing so would violate CLAUDE.md §4 again; (b) adding a matching
+`lbfgs_error=None` key to every `_batched_restarts` row in this task -- rejected as a
+behaviour change: `_batched_restarts` has no per-member LBFGS polish step to report on, so
+adding the key would either be a dead constant or would require adding the polish itself,
+neither of which is a documentation fix and both are out of this task's no-behaviour-change
+scope.
+
+**Not independently validated:** no test asserts on the presence or absence of `lbfgs_error`
+across the two `recover()` paths; nothing currently pins the asymmetry this entry describes,
+so a future change could close or widen it silently again.
+
+**Where it lives:** `src/rngrn/recover.py:699` (`lbfgs_error` assignment), `:728-731`
+(`restart_log.append(..., lbfgs_error=lbfgs_error)`); `src/rngrn/recover.py::_batched_restarts`
+`:320-325` (the row missing the field, with the new inline comment).
+
+---
+
+### D-PERF-9 — `bdf1_newton_krylov` stub now raises instead of silently falling back to ETDRK4; independently duplicated on two branches (integration collision point 27)
+
+**Date:** 2026-08-19 (R3 task 5, `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` I3 / table #9). **Status:** DECIDED
+**Decided by:** the controller, on evidence gathered by the implementing agent under
+delegated authority (§10).
+
+**The decision:** `src/rngrn/eval/numerics.py:194-209`
+(`integrate_bdf1_newton_krylov`) raises `NotImplementedError` naming the reason, rather
+than silently running ETDRK4 under the `bdf1_newton_krylov` label as it previously did.
+This stays as landed.
+
+**Integration collision point 27** (absent from `docs/REVIEW_gpu_optim_delta.md` §10's
+list of 26): the SAME change was made independently, on two branches neither aware of the
+other:
+
+- `feature/gpu-optim`'s `numerics.py:194-209` (this branch, inherited unmodified via
+  `feature/gpu-optim-repair`);
+- R1's Task 1 stub on `feature/lift-ladder`'s own `src/rngrn/eval/numerics.py::
+  integrate_bdf1_newton_krylov`, whose docstring instead cites
+  `docs/REDESIGN_rngrn.md` §5.2 ("removed the silent ETDRK4 fallback... implemented at the
+  gate milestone (R4 plan) as the 128^2 cross-check integrator") and points forward to R4,
+  not to any DECISIONS entry. Checked directly for this entry:
+  `git -C worktrees/lift-ladder show feature/lift-ladder:docs/DECISIONS.md` (3528 lines at
+  `2f50fff`) has no `bdf1` entry — grepped case-insensitively, zero matches.
+
+Both raises share the identical reasoning, independently arrived at: "a run that actually
+executed ETDRK4 under that label would be provenance that claims an integrator which never
+ran" (`numerics.py:200-203`, and R1's docstring makes the same point in its own words) — but
+the two stubs are semantically identical, not textually identical: different docstrings,
+different `NotImplementedError` messages. Whichever branch merges first, the other's hunk at
+the same lines is this 27th collision point for Phase B's merge ledger to watch, alongside
+the 26 in `docs/REVIEW_gpu_optim_delta.md` §10 — it will merge as a CONFLICT, not a silent
+duplicate-keeps-both, and Phase B's ledger should expect that. Cite this entry there.
+
+**No relabelling occurred — stated explicitly, this is the finding.**
+`docs/REVIEW_gpu_optim_delta.md` I3 raised the possibility that the raise "silently
+re-labels prior runs: every existing run recorded with `integrator='bdf1_newton_krylov'`
+used ETDRK4," and flagged under §10.4 that a changed number's meaning must be announced.
+This task checked rather than repeated that claim: `grep -rln "bdf1_newton_krylov"
+configs/ experiments/ notebooks/ scripts/` in this worktree returns exactly one file,
+`configs/base.yaml:52`, and that line is the enum-documenting comment
+(`# 'etdrk4' | 'imex_split' | 'bdf1_newton_krylov'`), not a selection — no tracked config,
+no `frozen_config.yaml`, no notebook, and no experiment anywhere in this repository ever
+set `integrator: bdf1_newton_krylov`. **Therefore no run was ever recorded under that
+label, no number's meaning has changed, and no loud announcement is owed** — the absence
+itself, not a relabelling, is what this entry records.
+
+**What was rejected and why:** leaving the silent-ETDRK4-fallback stub in place — a run
+could otherwise complete, log `integrator='bdf1_newton_krylov'`, and report results that
+were never produced by that integrator, which is exactly the false-provenance failure mode
+CLAUDE.md §8 exists to prevent. Both branches independently rejected the silent fallback
+for this same reason, without coordinating.
+
+**Not independently validated:** no BDF1 Newton-Krylov integrator has been implemented on
+either branch; the stub raises in both and is not scheduled before R4 per R1's own
+docstring. This entry records only that the raise is correct and currently unreachable
+from any tracked config, not that a working BDF1 path exists anywhere.
+
+**Where it lives:** `src/rngrn/eval/numerics.py:194-209`
+
+**R3 INTEGRATION NOTE — 2026-08-19, `feature/r3-integration` Task 8.** D-PERF-7, D-PERF-8 and
+D-PERF-9 above are transcribed verbatim from `feature/gpu-optim-repair`. Two corrections apply
+to them on this line:
+
+1. **Line citations.** The `Where it lives` line numbers were written against
+   `feature/gpu-optim-repair`'s `recover.py`, which carries the batched-spectral hunks this
+   task did **not** transplant (they are Task 9's). On this line the same code sits at:
+   `recover.py:227` (`LIVENESS_SYNC_EVERY`), `:238-262` (the `is_sync_step` block),
+   `:279-280` (the verbose NaN-mean print), `:651` (`lbfgs_error = None`), `:671-674` (the
+   `except Exception as e` recorder), `:703` (`lbfgs_error=lbfgs_error` on the row),
+   `:302-305` (the batched row's inline note that it has no such key),
+   `eval/numerics.py:194-209` (the `bdf1_newton_krylov` raise, unchanged).
+2. **D-PERF-7's cadence landed WITHOUT the `active=` argument, deliberately.** On
+   `feature/gpu-optim-repair` the same rewrite also passes
+   `active=alive if spec_cfg is not None else None` into both `total_loss_batched` calls.
+   `spec_cfg` reaches `_batched_restarts` only through collision-ledger row 23, and
+   `total_loss_batched` gains its `active=` parameter only through row 4 — **both owned by
+   Task 9**. Neither exists here yet, so passing the mask was not possible and was not faked.
+   The liveness cadence itself is complete and behaves exactly as D-PERF-7 describes. Review
+   finding **M9** (whether the `spec_cfg is not None` conditional should be a bare
+   `active=alive`) is therefore untouched by this task and stays open for Task 9, which owns
+   both halves of it.

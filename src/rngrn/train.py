@@ -23,6 +23,7 @@ from .data.spec import spec_from_config
 from .data import cache
 from .eval.rollout import simulate
 from . import recover as R
+from . import model as M
 from .losses.weighting import build_strategy
 from . import io as IO
 from .utils import seed_everything, provenance, set_deterministic
@@ -201,6 +202,14 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     seed_everything(cfg.train.seed)
     run_id = run_id or IO.new_run_id(cfg.tracking.run_name)
     rdir = IO.run_dir(runs_root, run_id)
+    # The frozen config must record the backend that RAN, not the request: 'auto' resolves
+    # to 'cubic' at N==3 and 'eig' otherwise (model.resolve_dispersion_backend, the one
+    # definition of the rule), and cubic/eig runs are not bit-comparable (D-PERF-3). Freezing
+    # the literal 'auto' would leave the file unable to answer which backend produced the
+    # number, against .claude/rules/reporting-numbers.md step 4. Resolved here, before the
+    # write, so config/frozen_config.yaml and the model agree by construction.
+    cfg.model.dispersion_backend = M.resolve_dispersion_backend(
+        cfg.model.dispersion_backend, cfg.model.N)
     cfg.to_yaml(os.path.join(rdir, "config", "frozen_config.yaml"))
 
     ri, answer_key = _resolve_recovery_input(cfg)   # <-- the firewall boundary

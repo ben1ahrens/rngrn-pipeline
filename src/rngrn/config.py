@@ -77,7 +77,11 @@ class ModelConfig:
     observed_idx: Optional[list] = None     # which model indices the m rows map to
     nondim: bool = False                    # recover on the unit box x/L; see recover.py  # unit 12
 
-    dispersion_backend: str = "eig"         # 'eig'|'cubic' ('cubic' exact for N==3 only) # unit 10
+    # 'eig' | 'cubic' ('cubic' exact for N==3 only) | 'auto' (cubic at N==3, else eig,
+    # resolved in RNGRN.__init__). Default stays 'eig': 'auto' resolves to 'cubic' at N=3
+    # and cubic/eig runs are NOT bit-comparable (D-PERF-3), so flipping the default would
+    # silently change every N=3 run that omits the key -- including the A0 baseline arm.
+    dispersion_backend: str = "eig"                                              # unit 10
 
     init: str = "default"                   # 'default' | 'low_basal' -- see model.py (unit 2)
 

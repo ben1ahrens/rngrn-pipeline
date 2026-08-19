@@ -96,3 +96,82 @@ def test_cubic_rejects_wrong_N():
     with pytest.raises(ValueError, match="N=3 only"):
         m.dispersion(torch.full((2,), 0.7, dtype=torch.float64),
                      torch.linspace(0.0, 3.0, 16, dtype=torch.float64))
+
+
+# ======================================================================================
+# 'auto' backend resolution (R3 Task 8; collision ledger row 26, D-PERF-3 as amended)
+# ======================================================================================
+def test_auto_resolves_at_construction_and_never_survives_it():
+    """`'auto'` is a REQUEST; `.dispersion_backend` must always read the concrete backend.
+
+    Every consumer -- `member(b)`, `io.save_checkpoint`'s payload, `frozen_config.yaml` --
+    reads the attribute and would otherwise propagate a string that names no algorithm.
+    """
+    from rngrn.model import BatchedRNGRN, resolve_dispersion_backend
+
+    assert resolve_dispersion_backend("auto", 3) == "cubic"
+    assert resolve_dispersion_backend("auto", 2) == "eig"
+    assert resolve_dispersion_backend("auto", 4) == "eig"
+    # explicit requests pass through untouched -- the helper is not a second validation gate
+    assert resolve_dispersion_backend("eig", 3) == "eig"
+    assert resolve_dispersion_backend("cubic", 3) == "cubic"
+
+    assert RNGRN(N=3, seed=0, dispersion_backend="auto").dispersion_backend == "cubic"
+    assert RNGRN(N=2, seed=0, dispersion_backend="auto").dispersion_backend == "eig"
+    assert BatchedRNGRN.from_seeds(
+        3, [0, 1], dispersion_backend="auto").dispersion_backend == "cubic"
+
+
+def test_the_default_backend_is_eig_everywhere():
+    """A0 protection (docs/PLAN_redesign.md Global Constraints; ledger row 26).
+
+    D-PERF-3 flipped all four defaults to `'auto'`, which resolves to `'cubic'` at N == 3 --
+    i.e. every N = 3 run that omits the argument would change backend, and D-PERF-3 itself
+    states cubic and eig runs are not bit-comparable. The controller ruled the MECHANICS in
+    and the FLIP out. This test is that ruling; a flip must edit it in the same commit.
+    """
+    import inspect
+
+    from rngrn.config import ModelConfig
+    from rngrn.model import BatchedRNGRN
+    from rngrn import recover as R
+
+    assert ModelConfig().dispersion_backend == "eig"
+    for fn in (RNGRN.__init__, BatchedRNGRN.from_seeds, R.recover):
+        assert inspect.signature(fn).parameters["dispersion_backend"].default == "eig", fn
+    # and the resolved effect of the default, not just the string
+    assert RNGRN(N=3, seed=0).dispersion_backend == "eig"
+
+
+def test_frozen_config_records_the_resolved_backend_not_the_request(tmp_path):
+    """`config/frozen_config.yaml` must name the backend that RAN.
+
+    `.claude/rules/reporting-numbers.md` step 4 says to read the frozen config rather than
+    re-derive from it; a file recording `'auto'` cannot answer which backend produced the
+    number. `train.fit` resolves before writing -- this pins that ordering.
+    """
+    import yaml
+
+    from rngrn.config import Config
+    cfg = Config()
+    cfg.model.N = 3
+    cfg.model.dispersion_backend = "auto"
+
+    from rngrn import model as M
+    cfg.model.dispersion_backend = M.resolve_dispersion_backend(
+        cfg.model.dispersion_backend, cfg.model.N)
+    p = tmp_path / "frozen_config.yaml"
+    cfg.to_yaml(str(p))
+    frozen = yaml.safe_load(p.read_text())
+    assert frozen["model"]["dispersion_backend"] == "cubic"
+
+    # The block above reproduces what `fit` does; it does NOT prove `fit` does it in that
+    # ORDER, and the order is the whole fix (resolving after the write would freeze 'auto').
+    # Running `fit` needs a dataset, so pin the ordering in its source instead -- weaker than
+    # a behavioural test, and named as such.
+    import inspect
+
+    from rngrn import train
+    src = inspect.getsource(train.fit)
+    assert src.index("resolve_dispersion_backend") < src.index("frozen_config.yaml"), (
+        "train.fit must resolve dispersion_backend BEFORE writing frozen_config.yaml")

@@ -39,6 +39,24 @@ MODELS: "Registry[type]" = Registry("models")
 torch.set_default_dtype(torch.float64)
 
 
+def resolve_dispersion_backend(dispersion_backend: str, N: int) -> str:
+    """Map 'auto' onto the concrete backend it will run as; pass 'eig'/'cubic' through.
+
+    THE ONE definition of the rule (R3 integration of D-PERF-3). `RNGRN.__init__` calls it
+    so `self.dispersion_backend` is never the string 'auto', and `train.fit` calls it BEFORE
+    writing `config/frozen_config.yaml`, so the frozen config records the backend that
+    actually ran rather than the request. Without that, a run configured 'auto' froze
+    'auto', and `.claude/rules/reporting-numbers.md` step 4 -- read the frozen config, do
+    not re-derive -- could not tell which backend produced the number.
+
+    Unknown strings are returned unchanged; the caller's own validation rejects them
+    (RNGRN.__init__'s assert), so this helper never becomes a second, laxer gate.
+    """
+    if dispersion_backend == "auto":
+        return "cubic" if int(N) == 3 else "eig"
+    return dispersion_backend
+
+
 def _softplus(x):
     return torch.nn.functional.softplus(x)
 
@@ -164,7 +182,7 @@ class RNGRN(nn.Module):
                  param_boxes: dict | None = None):  # Task 13, REDESIGN_rngrn.md 3.3
         super().__init__()
         assert form in ("competitive", "nc1"), form
-        assert dispersion_backend in ("eig", "cubic"), dispersion_backend
+        assert dispersion_backend in ("eig", "cubic", "auto"), dispersion_backend
         assert init in ("default", "low_basal"), init
         if kstar_obs is not None and not (math.isfinite(kstar_obs) and kstar_obs > 0):
             raise ValueError(
@@ -215,11 +233,22 @@ class RNGRN(nn.Module):
         self.param_boxes = None if param_boxes is None else {
             k: (float(low), float(high)) for k, (low, high) in param_boxes.items()}
         # "eig": torch.linalg.eigvals, any N, the reference. "cubic": exact closed-form
-        # roots, N=3 ONLY, 162x faster on CUDA (see _sigma_max_cubic). Default stays "eig"
-        # so nothing silently changes; set "cubic" for GPU runs.
+        # roots, N=3 ONLY, 162x faster on CUDA (see _sigma_max_cubic). "auto": resolved
+        # HERE, at construction, to "cubic" when N==3 and "eig" otherwise.
+        # THE DEFAULT REMAINS "eig", deliberately (R3 integration of D-PERF-3): the
+        # resolution MECHANICS are adopted so a caller can opt in with one string, but the
+        # default is NOT flipped, because "auto" resolves to "cubic" at N=3 and D-PERF-3
+        # itself states cubic and eig runs are not bit-comparable -- flipping it would
+        # change every N=3 run that omits the argument, including the A0 baseline arm that
+        # docs/PLAN_redesign.md requires to stay bit-identical. Set "cubic" or "auto"
+        # explicitly for GPU runs.
+        # self.dispersion_backend is always stored as the RESOLVED concrete value
+        # ("eig"/"cubic"), never "auto", so callers -- and frozen run configs -- can read it
+        # directly and see which backend actually ran.
         # Rejected at CONSTRUCTION, not lazily at the first dispersion() call: a model that
         # can never evaluate its own dispersion is misconfigured the moment it is built, and
         # a run that only discovers that mid-optimisation has already wasted the budget.
+        dispersion_backend = resolve_dispersion_backend(dispersion_backend, N)
         if dispersion_backend == "cubic" and int(N) != 3:
             raise ValueError(
                 f"dispersion_backend='cubic' is exact for N=3 only (got N={N}). "
@@ -377,8 +406,11 @@ def _sigma_max_cubic(M: torch.Tensor, eps: float = 1e-14) -> torch.Tensor:
     Why this exists: torch.linalg.eigvals on batched small NON-SYMMETRIC matrices has no
     cuSOLVER batched kernel, costing ~700 us PER MATRIX on CUDA regardless of batch size
     (measured flat from batch 200 to 51200) versus ~1 us on CPU. That single call made a
-    GPU training step ~5x slower than CPU. This routine is arithmetic only -- no eig, svd
-    or linear solve -- so it maps onto GPU kernels: measured 162x faster than eigvals on
+    GPU training step ~5x slower than CPU. This routine avoids eig and svd entirely, but it
+    is NOT "arithmetic only" -- torch.linalg.det (for c3, below) IS an LU factorisation; see
+    BatchedRNGRN's docstring for the float32 backward bug that fact causes and for the
+    explicit-cofactor-determinant alternative that was measured and REJECTED. Even so it
+    maps onto GPU kernels far better than eigvals: measured 162x faster than eigvals on
     CUDA, and numerically EXACT rather than approximate (validated against eigvals on 127
     real answer-key Jacobians: sigma_max MAE 9.2e-13, k* MAE 0, Turing verdict flips
     0/127, d sigma_max/dJ agreeing to 2e-16).

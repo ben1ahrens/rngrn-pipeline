@@ -212,7 +212,8 @@ def simulate(model, L, n=128, T=None, dt=None, seed=0, noise=1e-2, xstar=None,
     xs_t = torch.tensor(xstar, device=model.device, dtype=model.dtype)
     Jn = model.jacobian(xs_t, create_graph=False).detach().cpu().numpy()
     kg = np.linspace(1e-3, 2 * np.pi * (n // 2) / L, 2000)
-    sigd = np.array([np.max(np.real(np.linalg.eigvals(Jn - kk**2 * np.diag(D)))) for kk in kg])
+    M = Jn[None, :, :] - kg[:, None, None] ** 2 * np.diag(D)[None, :, :]
+    sigd = np.linalg.eigvals(M).real.max(axis=1)
     # SIGNED maximum of the dispersion relation. Positive: the fastest-growing mode's
     # growth rate. Negative: the slowest DECAY rate, i.e. the uniform state is linearly
     # stable. Both are legitimate rate scales for a horizon; flooring the negative case at

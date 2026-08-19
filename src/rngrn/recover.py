@@ -221,6 +221,10 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
     opt = torch.optim.Adam(params, lr=adam_lr)
     alive = torch.ones(B, dtype=torch.bool, device=dev)
     died_at = [None] * B
+    # Per-member death step, kept on-device. Updated every step by pure tensor ops (no host
+    # sync); only read back to host on the cadence below. -1 means "still alive".
+    died_at_step = torch.full((B,), -1, dtype=torch.long, device=dev)
+    LIVENESS_SYNC_EVERY = 25   # see the comment at the sync point below
     loss_kw = dict(tau=tau, jac_floor=jac_floor, **term_kw)
 
     for step in range(adam_steps):
@@ -228,17 +232,40 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
         loss_vec, parts, conv = LT.total_loss_batched(
             bmodel, frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
             step=step, **loss_kw)
-        newly_dead = alive & ~conv
-        if bool(newly_dead.any()):
-            for b in newly_dead.nonzero().flatten().tolist():
-                died_at[b] = step
-                if history is not None:
-                    history.record_death(b, step)
-                if verbose:
-                    print(f"  member {b} step {step}: steady state diverged; member abandoned")
-            alive = alive & conv
-        if not bool(alive.any()):
-            break
+        newly_dead = alive & ~conv                               # tensor op, no host sync
+        died_at_step = torch.where(newly_dead, torch.full_like(died_at_step, step), died_at_step)
+        alive = alive & conv                                     # tensor op, no host sync
+        is_sync_step = (step % LIVENESS_SYNC_EVERY == 0) or (step == adam_steps - 1)
+        if is_sync_step:
+            # ONE D2H sync here does the work that used to cost TWO every single step
+            # (bool(newly_dead.any()) and bool(alive.any())). A member already stops
+            # contributing gradient the step it dies (`alive` masks the loss below, updated
+            # tensor-side every step), so cadencing only the host bookkeeping means: the
+            # early break can fire up to LIVENESS_SYNC_EVERY-1 steps late, and per-death
+            # logging can batch up to that many steps late (D-PERF-7). NOT "harmless" in the
+            # stronger sense a prior version of this comment claimed: during those extra
+            # steps `total` is an exact zero tensor WITH A GRAPH once every member is dead,
+            # so the fresh gradient contribution is zero, but Adam's momentum/velocity state
+            # from prior real gradients keeps decaying and being applied -- it DOES move the
+            # parameters. What is actually true is narrower: no REPORTED number depends on
+            # it, because `final_alive` is all-False for such a batch and every member logs
+            # `steady_state_failed` regardless of where its parameters drifted. Separately,
+            # `verbose` at such a step computes `float(loss_vec[alive].mean())` over an
+            # empty boolean selection, which is NaN, not an error.
+            died_at_step_host = died_at_step.tolist()
+            still_alive = False
+            for b, died_step in enumerate(died_at_step_host):
+                if died_step < 0:
+                    still_alive = True
+                elif died_at[b] is None:
+                    died_at[b] = died_step
+                    if history is not None:
+                        history.record_death(b, died_step)
+                    if verbose:
+                        print(f"  member {b} step {died_step}: steady state diverged; "
+                              "member abandoned")
+            if not still_alive:
+                break
         # Recorded BEFORE opt.step(), so the parameters in the trace are the ones that
         # produced the loss in the same row. `alive` is passed so an abandoned lane stays
         # NaN instead of logging frozen parameters nobody is optimising any more.
@@ -272,6 +299,9 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
             continue
         pm = LT.parts_member(parts, b)
         lb = float(loss_vec[b])
+        # No `lbfgs_error` key here (D-PERF-8): this batched path never runs an LBFGS
+        # polish per member, unlike the serial restart loop below, which records one.
+        # The two paths therefore emit different column sets into the run index.
         restart_log.append(dict(restart=b, total=lb, sig_max=pm.get("sig_max"),
                                 sig_max_pos=pm.get("sig_max_pos"),
                                 kstar_model=pm.get("kstar_model"),
@@ -321,7 +351,12 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         so distinct (model_seed, r) pairs give independent draws and repeats are exact.
         Defaults to `seed` when not given, for backward compatibility.
 
-    dispersion_backend: 'eig' (any N, the reference) | 'cubic' (exact for N<=3 ONLY).
+    dispersion_backend: 'eig' (the DEFAULT, any N, the reference) | 'cubic' (exact for
+        N == 3 ONLY -- model.py raises ValueError for any other N, including N=2; it is
+        not "N<=3") | 'auto' (resolves to 'cubic' when N == 3, else 'eig'). Resolution
+        happens in RNGRN.__init__; the model's .dispersion_backend always reads the
+        concrete backend, never 'auto'. The default is deliberately NOT 'auto': cubic and
+        eig runs are not bit-comparable (D-PERF-3).
 
     init: 'default' | 'low_basal' -- model raw-parameter init strategy (see model.py).
         Defaults to 'default' (OFF); callers opt in explicitly.
@@ -462,12 +497,17 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             "term igniting between refreshes would silently contribute 0 and then jump. "
             "Spectral runs require a static-weight strategy (same rule as param_prior).")
 
+    # The bio box is READ FROM DISK by losses.terms.param_prior whenever `box` is None --
+    # a file open and a yaml.safe_load on EVERY step of every restart. It is a static config
+    # file, so load it once here and pass the parsed bounds down instead of the path.
+    param_prior_kw = None
+    if use_param_prior:
+        from .losses.terms import _load_box_bounds
+        param_prior_kw = dict(dratio_centre=dratio_centre, dratio_spread=dratio_spread,
+                              box=_load_box_bounds(bio_box_path))
     term_kw = dict(split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
                    detach_xstar=detach_xstar, compute_resid=compute_resid,
-                   param_prior_kw=(dict(dratio_centre=dratio_centre,
-                                        dratio_spread=dratio_spread,
-                                        box_path=bio_box_path)
-                                   if use_param_prior else None))
+                   param_prior_kw=param_prior_kw)
 
     # The length unit the objective is written in. nondim=True sets it to the box itself,
     # which is an exact change of variables: obs.kstar_of and obs.laplacian_torch are both
@@ -476,6 +516,17 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     L_model = 1.0 if nondim else L
     kstar_obs = obs.kstar_of(frame[0].detach().cpu().numpy(), L=L_model)  # firewall: FFT of the observed image
     kgrid = _kgrid_for(kstar_obs, device=dev)
+
+    # Two per-STEP host<->device round trips the loss terms were paying for quantities that
+    # are FIXED for this whole call: the frame's mean (the scale anchor's target, a
+    # device->host sync of a frame that never changes) and the k-grid index k*_obs
+    # interpolates into (a host->device copy of the key plus a search). Resolve both once
+    # and thread them through term_kw; losses/total defaults them to the old per-step form
+    # for any other caller. Same values, same terms -- see losses/total.compute_terms.
+    term_kw["obs_scale"] = float(frame.mean())
+    term_kw["kstar_idx"] = int(
+        torch.searchsorted(kgrid, torch.as_tensor(float(kstar_obs), device=kgrid.device))
+        .clamp(1, len(kgrid) - 1))
 
     # unit U4: the observed-frame spectral targets are FIXED across every restart (the
     # frame does not change), so build them ONCE here. `spec_cfg`/`spec_targets` stay None
@@ -597,6 +648,7 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                                     failed_at="train", failed_at_step=step))
             continue
 
+        lbfgs_error = None
         if lbfgs_steps:
             lopt = torch.optim.LBFGS(params, max_iter=lbfgs_steps, line_search_fn="strong_wolfe")
             def closure():
@@ -609,8 +661,17 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                 loss.backward(); return loss
             try:
                 lopt.step(closure)
-            except Exception:
-                pass
+            except Exception as e:
+                # The LBFGS polish is optional refinement (Adam already produced a usable
+                # `model`), so a failed polish does not abort the restart -- but the failure
+                # must not vanish silently either: this is where the FIRST async CUDA error
+                # of a GPU run would previously have been swallowed by a bare `except: pass`.
+                # Recorded on the restart log (below) so it lands in the results rather than
+                # only in a log line no one reads.
+                lbfgs_error = f"{type(e).__name__}: {e}"
+                if verbose:
+                    print(f"  restart {r}: LBFGS polish failed ({lbfgs_error}); "
+                          "keeping the pre-LBFGS (Adam) parameters")
 
         try:
             with torch.no_grad():
@@ -638,7 +699,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             history.record_serial(adam_steps, r, parts, model)
         restart_log.append(dict(restart=r, total=float(loss), sig_max=parts.get("sig_max"),
                                 sig_max_pos=parts.get("sig_max_pos"),
-                                kstar_model=parts.get("kstar_model"), rel_err=parts.get("rel_err")))
+                                kstar_model=parts.get("kstar_model"), rel_err=parts.get("rel_err"),
+                                lbfgs_error=lbfgs_error))
         if best is None or float(loss) < best[0]:
             from .losses.terms import steady_state
             xs, _ = steady_state(model)

@@ -57,15 +57,30 @@ adjoint path's premise is F(u*) = 0 and a stall is exactly where that premise fa
     perturbation and the Newton budget capped, both sized so the achieved residual lands
     inside `--stall-band` (default [1e-4, 1e-2], D-FFT-10's MEASURED stall band, true residual
     5.5e-4-5.7e-3), and both HELD FIXED across every FD point. The mechanism is recorded as
-    `arms.stalled.stall_mechanism` and MUST be quoted with every stalled-arm number. A forced
-    stall still exercises both paths' gradients at the right operating point against a field
-    that misses the 1e-9 bar by a representative amount; what it does not establish is the
-    FREQUENCY of stalls, which is the separate stall-rate measurement §4.3 asks for and this
-    script does not attempt.
+    `arms.stalled.stall_mechanism` and MUST be quoted with every stalled-arm number.
 
-    Note also that the unrolled path is STRUCTURALLY insensitive to the distinction: it runs
-    no Newton polish, so "converged" and "stalled" differ for it only through the warm state
-    it is handed. That is a result, not a redundancy, and the report says so.
+    THE TWO PATHS DO NOT SEE THE SAME FIELD IN THIS ARM, and the earlier version of this
+    paragraph obscured it. It said a forced stall "exercises both paths' gradients ... against
+    a field that misses the 1e-9 bar by a representative amount". Only the ADJOINT path's does.
+    Stated with both measured numbers, from the run committed under
+    `experiments/redesign_r3/fd_ab/`:
+
+      * the ADJOINT path is handed the displaced field, runs its capped Newton, and
+        differentiates the result at residual **1.786e-03** — inside the D-FFT-10 stall band,
+        which is the representative miss the arm was constructed for;
+      * the UNROLLED path is handed the RAW displaced field, at warm residual **46.77** (the
+        displacement is eta = 2.37e-02 of the field norm), runs no Newton at all, and its 128
+        differentiable ETDRK4 steps RELAX THAT DISPLACEMENT AWAY before the loss is evaluated.
+
+    So the stalled arm does not put the unrolled path near the 1e-9 bar; it puts it at a
+    displaced start it recovers from. That is not a defect of the gate — the unrolled path is
+    STRUCTURALLY insensitive to the Newton bar, since it runs no Newton, so "converged" and
+    "stalled" can only ever differ for it through the warm state it is handed. It is a result,
+    and it is the reason the arm's headline is asymmetric: the adjoint path FAILS this arm at
+    O(0.1-1.9) and the unrolled path passes it at 1.44e-08.
+
+    What the arm does not establish either way is the FREQUENCY of stalls, which is the
+    separate stall-rate measurement §4.3 asks for and this script does not attempt.
 
 Note on the adjoint path and stalled members: `BatchedPatternSolver.solve_subset` REFUSES a
 member whose Newton misses 1e-9 ("solve_failed") — it never hands one to the optimiser. So the
@@ -119,6 +134,31 @@ CKPT = (REPO / "experiments/tune_comp/runs/m3_registry_20260803_190250_seed3/"
 EPS_SWEEP = (1e-3, 1e-4, 1e-5, 1e-6)
 FD_TOL = 1e-4                     # spec §4.2 / §7, D1's acceptance tolerance, unchanged
 NEWTON_ITER_FULL = 30             # `BatchedPatternSolver._newton_member`'s default, verbatim
+
+#: **UNCALIBRATED.** Relative channel-0 amplitude window inside which `forced_stall_warm_state`
+#: will accept a displaced field as still "saturated". Nothing measured this number: it was
+#: chosen here as a loose sanity band, and no baseline, control or gradient-error curve stands
+#: behind the value 0.05.
+#:
+#: WHAT IT IS, stated exactly, because an earlier comment overclaimed it as "D-R3-2's caller
+#: contract": it is an AMPLITUDE PROXY for that contract — a proxy D-R3-2 itself explicitly
+#: DECLINED to define. D-R3-2 rejected runtime saturation guards as "a guess dressed as a
+#: check", on the ground that saturation is a property of the TRAJECTORY that produced a
+#: field, which a single frame cannot report. That reasoning did not stop applying because
+#: this script needs a stopping rule; it means the rule here is a convenience of the FORCED
+#: STALL CONSTRUCTION and must never be cited as evidence that the contract was met.
+#:
+#: In the production path the contract is met the way D-R3-2 says it is — by construction, not
+#: by a check: `forward.relax_to_pattern_torch` RAISES unless its own flat_tol detector
+#: confirms saturation, so `recover._spectral_solve_with_stall_switch` cannot hand the
+#: unrolled path an unsaturated field. Only this script, which deliberately displaces a
+#: relaxed field, has anything to screen — and screening it on amplitude alone is weaker than
+#: what the production path gets for free.
+#:
+#: Calibrating it would mean measuring the gradient error against amplitude ratio at fixed
+#: residual, which nothing has done. Until then: UNCALIBRATED, and recorded as such in
+#: docs/DECISIONS.md D-R3-5.
+SATURATION_AMPLITUDE_TOL = 0.05   # UNCALIBRATED — proxy only, see above
 
 
 # ------------------------------------------------------------------------ fixture & theta
@@ -472,8 +512,10 @@ def forced_stall_warm_state(F_fn, X_sat: torch.Tensor, k2_full, D_np, gamma, n: 
     invented one. Both the displacement and the cap are then HELD FIXED across every FD
     point of the arm, so the map theta -> u* is deterministic and differencing it is well
     defined. The displaced field is required to stay SATURATED (channel-0 amplitude within
-    5% of the relaxed field's), which is D-R3-2's caller contract for the unrolled path —
-    both arms are handed the SAME warm state, exactly as
+    `SATURATION_AMPLITUDE_TOL` of the relaxed field's) — an **UNCALIBRATED amplitude PROXY**
+    for D-R3-2's caller contract, and NOT that contract itself; D-R3-2 explicitly declined to
+    define such a proxy. See that constant for why the distinction is load-bearing. Both arms
+    are handed the SAME warm state, exactly as
     `recover._spectral_solve_with_stall_switch` hands the unrolled path the same field the
     Newton polish was given.
 
@@ -520,13 +562,18 @@ def forced_stall_warm_state(F_fn, X_sat: torch.Tensor, k2_full, D_np, gamma, n: 
             hi_e = np.log10(row["eta"])
     usable = [r for r in rows
               if r["residual"] > PatternSolver.CONVERGENCE_TOL
-              and abs(r["amplitude_ratio"] - 1.0) <= 0.05]
+              # UNCALIBRATED amplitude proxy, NOT D-R3-2's contract — see
+              # SATURATION_AMPLITUDE_TOL.
+              and abs(r["amplitude_ratio"] - 1.0) <= SATURATION_AMPLITUDE_TOL]
     if not usable:
         raise RuntimeError(
-            "no displacement on the ladder produces a member that both misses the 1e-9 bar "
-            "and stays saturated (amplitude within 5% of the relaxed field) — refusing to "
-            "report a 'stalled' arm that is either converged or no longer a saturated "
-            "pattern (D-R3-2's caller contract)")
+            f"no displacement on the ladder produces a member that both misses the 1e-9 bar "
+            f"and passes the UNCALIBRATED amplitude proxy (channel-0 amplitude within "
+            f"{SATURATION_AMPLITUDE_TOL:.0%} of the relaxed field's) — refusing to report a "
+            f"'stalled' arm that is either converged or, so far as an amplitude can tell, no "
+            f"longer a saturated pattern. The proxy is this script's own stopping rule for "
+            f"the forced-stall construction, NOT a demonstration that D-R3-2's caller "
+            f"contract holds; D-R3-2 declined to define one.")
     centre = 0.5 * (np.log10(lo) + np.log10(hi))
     pick = min(usable, key=lambda r: abs(np.log10(r["residual"]) - centre))
     Xw = (X_sat + pick["eta"] * xi).detach()

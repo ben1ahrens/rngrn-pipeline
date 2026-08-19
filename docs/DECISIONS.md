@@ -4613,3 +4613,259 @@ every `tune_comp_seed3` arm stops at its planned 606-step horizon
 bias is conservative in direction (inflates the coarse arm's distance), so it cannot
 manufacture the "clears" verdict. The n-question itself remains an OWNER decision; this
 entry records the measurement design, not a ruling on n.
+
+### D-R3-5 — RULED: the truncated-unrolled path is PROMOTED to the primary gradient estimator for every member; the adjoint path is retained as the A/B verification path
+
+**Date:** 2026-08-19. **Task:** R3 register-item-8 promotion unit (`feature/r3-integration`).
+**Status:** OWNER-RULED. `docs/REDESIGN_rngrn.md` §8 item 8 pre-specified the promotion rule
+before the runs that judge it; Task 14 measured the two quantities the rule reads; the owner
+ruled "promote the unrolled path" on 2026-08-19. The rule was NOT re-decided at ruling time.
+
+**The decision.** `train.gradient_path` defaults to `"unrolled"`. Every ignited-member spectral
+solve takes `unrolled.unrolled_relax`'s truncated-unrolled gradient — converged members
+included, which is precisely what changed. `gradient_path="adjoint"` restores
+`forward.PatternSolve`'s implicit-function-theorem backward and is RETAINED as the A/B
+verification path: the thing the promotion was measured against, and the thing a
+re-measurement compares to. It is not a fallback for convenience.
+
+**Evidence.** `experiments/redesign_r3/fd_ab/results/fd_ab.json` (Task 14, 10 FD directions x
+the 5 active spectral terms, tol 1e-4, at the §4.3 operating point: commensurate box p=8,
+n=96, k-hat=0.17607, L_solve=285.486). Both pre-specified clauses met:
+
+| arm | adjoint worst rel. err. | unrolled worst rel. err. |
+|---|---|---|
+| converged (Newton residual 3.45e-13) | 1.70e-06 — PASSES | **1.92e-08 — PASSES** |
+| stalled (Newton residual 1.79e-03) | **1.93 — FAILS** | **1.44e-08 — PASSES** |
+
+- *Clause 1, FD-faithful at tol 1e-4 on BOTH converged and stalled members:* met, with four
+  orders of margin on the converged arm and eight on the stalled one. The adjoint path fails
+  the stalled arm by four orders — its premise F(u*) = 0 is false there by construction.
+- *Clause 2, measured cost does not exceed the adjoint path's:* met. **2.95x cheaper** per
+  member-step at B=1 — 1.543 s vs 4.562 s (`cost[]`, threads pinned to 1, relax hoisted out of
+  both timings, 3 reps after a warm-up). The B=8 adjoint figure in the same artefact (104.3
+  s/member) is contaminated in principle — `solve_subset` re-warms every member from one shared
+  converged field — and is NOT load-bearing for this ruling. The clean B=1 comparison is.
+
+**Retro-support (not part of the pre-specified rule, recorded because it explains the size of
+what was being lost).** T16's population survey measured a **25.7% pooled stall rate**
+(9/35 solved member-steps) off the known-Turing checkpoint, per-member median 16.7% and p90
+72%, rising with distance from the checkpoint (D-R3-7). Under adjoint-primary every unswitched
+stall was an O(1) gradient error. Read as a *caveat* on the rate itself: T16's genuine stalls
+sat at residuals 1.2e-7 to 1.4e-5, one to two orders closer to the 1e-9 bar than Task 14's
+forced probe at 1.79e-03, and whether the adjoint path's O(1) error also holds at that milder
+miss is UNMEASURED.
+
+**Design point resolved here — VALUE/GRADIENT CONSISTENCY.** The spec underdetermined what an
+unrolled-primary step uses as its forward loss VALUE. **Ruled: the segment endpoint**, i.e. the
+field the unrolled path returns is the one the loss is evaluated on AND the one the gradient
+differentiates — one computation, as `scripts/r3_fd_ab.py`'s `UnrolledPath` already did.
+Rejected: reporting the Newton-polished u* as the value while differentiating the segment,
+which would hand the optimiser a gradient that is not the gradient of the loss it reads. The
+swap is measurably benign where it can be checked: on the converged arm the two paths' base
+values agree to ~3e-9 relative across all five terms (`arms.converged.paths.*.base_values`).
+On a stalled member they do not agree, and there the polished value is the one premised on
+F(u*) = 0, which is false.
+
+**Riders — every one of these travels with the ruling.**
+1. **The Newton polish is STILL RUN under the promoted default, and its result is discarded.**
+   Only its residual is read, to classify the solve as a stall. The promotion therefore saves
+   the LSMR adjoint backward — NOT the relax (the unrolled path needs a saturated warm state)
+   and NOT the polish (the stall counter needs its residual). The retained polish's cost on top
+   of the 1.543 s is **UNMEASURED**, so the 2.95x is the per-member-step estimator cost, not a
+   whole-solve speedup. Dropping the polish would silence the stall rate that is this ruling's
+   own retro-support; it stays until something measures that trade.
+2. **Memory: +433 MB/process at B=1 and +516 MB at B=8 (`rss_step_increment_mb`), UNMEASURED
+   beyond B=8.** Read against `CLAUDE.md` §7a, where host RAM is the binding resource and a
+   trainer already sits at 1.47-1.68 GiB RSS: a half-GiB per-process increment is roughly a
+   third of a trainer, and the guard's 8192 MB `MemAvailable` floor was sized for the old
+   footprint. Nothing here re-sizes it; a pool launched under the promoted path must be
+   watched.
+3. **D-R3-1's S=128 conditionality now sits on the DEFAULT path.** `SEGMENT_STEPS_DEFAULT` was
+   calibrated on ONE fixture, ONE box, ONE seed, and is explicitly UNCALIBRATED beyond that
+   point (D-R3-2 condition (b)). Promotion does not calibrate it; it raises the stakes on it.
+4. **D-R3-2's caller contract now guards the default path for EVERY member.** It is satisfied
+   the way D-R3-2 says it should be — by construction, not by a runtime check:
+   `forward.relax_to_pattern_torch` RAISES unless its own detector confirms saturation, so
+   `recover._spectral_solve_with_stall_switch` cannot hand the unrolled path an unsaturated
+   field. **No runtime saturation guard was added; D-R3-2 rejected that as "a guess dressed as
+   a check" and this ruling does not reopen it.**
+5. **`stall_switch_fraction` is DIAGNOSTIC-ONLY.** T16 retired it as a threshold (D-R3-7); it
+   never gated anything, and the promotion answered its question by moving every member rather
+   than by picking a rate. The field is KEPT and still recorded. The stall counters
+   (`n_ignited_solves`, `n_stalled_solves`) stay live as instrumentation on the promoted path,
+   and the run-index row now carries `gradient_path` alongside them.
+6. **`gradient_path="unrolled"` REFUSES `batched=True` with a non-zero spectral weight.**
+   `unrolled_relax` is serial-model-only — no `BatchedRNGRN` twin exists. It raises rather than
+   silently solving through the other estimator, which would make a run non-comparable without
+   saying so. A batched spectral run must set `gradient_path="adjoint"` deliberately and report
+   that with its numbers. **This is a behaviour change for batched spectral runs**, of which
+   there are none in `configs/` today (see the A0 clause).
+7. **`stall_switch=True` with the promoted default RAISES** rather than meaning nothing: the
+   switch is the fallback away from an adjoint primary, so a caller who set it expected one.
+
+**THE A0 CLAUSE — announced loudly, because a silently non-comparable A0 would be the worst
+outcome of this unit.** `docs/PLAN_redesign.md`'s Global Constraints make A0 untouchable and
+require new behaviour to be opt-in; a flipped DEFAULT is opt-out, so the two collide unless A0
+provably never reaches the seam. **It never does, and this was MEASURED, not argued.** A0's
+objective carries no spectral weight — all five of `spec_shape`/`spec_aniso`/`spec_amp_mean`/
+`spec_amp_fluct`/`real_moments` are 0.0 in `configs/base.yaml`, which every shipped config
+composes — so `recover()` computes `use_spectral=False`, builds NO forward solver at all,
+`losses.total` never calls `_apply_spectral`, and `train.gradient_path` is never read.
+`tests/test_gradient_path.py::test_a0_recovery_is_bit_identical_under_both_gradient_paths` runs
+the A0 objective twice, identical in every argument but the estimator, and asserts bit
+identity of loss, `xstar`, `kstar_model` and all five parameter arrays.
+
+**So: nothing needed pinning, and nothing was pinned to a stale estimator.** Pinning
+`gradient_path: adjoint` into `configs/base.yaml` was CONSIDERED and REJECTED: base.yaml is
+composed by every config, so that pin would silently hold every future redesign arm on the
+estimator this ruling retired — the larger of the two risks, and the exact failure the
+promotion exists to prevent. What was done instead: an explicit A0-protection comment at
+`configs/base.yaml`'s `loss.weights` naming this entry, plus
+`test_the_a0_baseline_objective_carries_no_spectral_weight`, which FAILS the moment any of the
+five is raised. **Raising one of them is not a tweak to A0 — it is a different arm, on
+whichever estimator `train.gradient_path` then selects, and it must be reported as such.**
+
+**What was rejected.** *Keeping adjoint-primary with the Task 13 stall switch.* It forgoes a
+measured ~3x cost saving and keeps the assumption-carrying path — the one whose premise
+F(u*) = 0 fails on 25.7% of solves and whose gradient is then O(1) wrong — as the default, for
+no measured benefit on either arm. The adjoint path measured *worse* than the unrolled path on
+the converged arm too (1.70e-06 vs 1.92e-08), so there is not even a fidelity argument left for
+it as a default.
+
+**Amendment, 2026-08-19 (same unit).** `scripts/r3_fd_ab.py`'s forced-stall construction screens
+its displaced field on a 5% channel-0 amplitude window, now named `SATURATION_AMPLITUDE_TOL` and
+marked **UNCALIBRATED** at the site: it is an amplitude PROXY for D-R3-2's caller contract — a
+proxy D-R3-2 itself explicitly declined to define — and must not be cited as evidence that the
+contract was met.
+
+**Where it lives:** `src/rngrn/recover.py` (`GRADIENT_PATHS`, `uses_switch_solver`,
+`_spectral_solve_with_stall_switch`, `recover`), `src/rngrn/config.py`
+(`TrainConfig.gradient_path`), `src/rngrn/train.py` (`_stall_columns`, the `fit()` call site),
+`configs/base.yaml` (the A0-protection note), `tests/test_gradient_path.py`,
+`tests/test_stall_accounting.py`. Evidence:
+`experiments/redesign_r3/fd_ab/results/fd_ab.json`. Read with **D-R3-1** (the FD protocol),
+**D-R3-2** (the segment length and its caller contract), **D-R3-3** (why truncation is there at
+all) and **D-R3-7** (the stall rate).
+
+### D-R3-6 — RULED: n stays 96 for Phase II
+
+**Date:** 2026-08-19. **Task:** R3, arising from Task 15 (`feature/r3-raps-fidelity`), recorded
+by the register-item-8 promotion unit. **Status:** CONTROLLER-DECIDED under the owner's explicit
+delegation, per `CLAUDE.md` §10 ("You do not need to ask me for all science").
+
+**The decision.** The training solve box keeps **n = 96** (`solve_box.N_DEFAULT`) for Phase II.
+No change.
+
+**Evidence — Task 15's PAIRED measurement**
+(`experiments/redesign_r3/raps_fidelity/results/raps_fidelity_paired.json`; the design and why
+the earlier unpaired headline does NOT bear on this are D-R3-4, which must be read with this
+entry). 3 fixtures x 8 seeds x grids {96, 128, 256, 512}, every grid rolled out from a
+band-limited copy of the SAME physical 512² initial condition.
+
+1. **96² clears D3's ~31 %/bin estimation floor on every seed of every fixture.** Worst
+   per-bin distance by fixture: 16.78 % (`tune_comp_seed3`), 9.38 % (`d5_seed3`), 0.08 %
+   (`d5_seed5`); `clears_d3_floor_all_seeds: true` for all three. **Worst-case margin 1.85x**
+   (31 / 16.78). The residual coarse-IC induction bias is conservative in DIRECTION — it
+   inflates the coarse arm's distance — so it cannot manufacture the "clears" verdict
+   (D-R3-4).
+2. **n cannot buy band resolution.** `n_band_bins_by_grid` is **7 bins at 96, 128, 256 AND
+   512** — the band `[0.6, 1.55] k/k*` is resolved identically at every grid, because the bin
+   count is set by the block size `p`, not by n. So raising n cannot improve the one thing a
+   spectral objective reads off the band.
+3. **512² costs 58-69x per rollout** (`seconds_mean` at 512 vs 96: 69.1x `tune_comp_seed3`,
+   61.6x `d5_seed3`, 58.3x `d5_seed5`). *(Quoted from the artefact and recomputed here; an
+   earlier informal figure of "60-78x" circulated — this range is the one the committed JSON
+   supports, and it is the one to cite.)*
+
+**What was rejected.**
+- **n = 128 or 256.** Both show real paired gains (worst per-bin at `tune_comp_seed3`: 16.78 %
+  -> 10.21 % -> 0.98 %). Rejected anyway: the bar is D3's floor and 96² already clears it with
+  1.85x margin, while 128/256 cost 2-8x per rollout for no BAR-RELEVANT gain. A cost that buys
+  a better number nobody is judged on is not a reason.
+- **n = 512.** Trivially clears (it is the reference), and reprices the entire training loop
+  ~58-69x. Not defensible against a bar already met.
+
+**The open lever, routed to Task 17 — this is what the evidence actually reframes.** The
+quantity that does NOT shrink with n is nonlinear PATTERN-SELECTION variance across initial
+conditions: 34-45 %/bin in the unpaired sweep (`results/raps_fidelity.json`, retained and
+reframed by D-R3-4), which is *above* D3's 31 % floor. Raising n cannot touch it — it is a
+property of the dynamics, not the grid. **Averaging multiple ICs per training step is
+therefore the candidate lever that raising n is not**, and Task 17 owns whether it is worth
+its cost. Recording that here so the n-question is not silently re-opened as a proxy for it.
+
+**Scope / what is NOT established.** Three fixtures, all N=3, all p=8, one band, one estimator,
+`ic_noise=0.01`. The verdict is for the Phase II training solve box only. **Validation is
+untouched: it stays 512² on the data box** — no cheaper grid is licensed for any morphology or
+gate claim (D-FFT-9 closure 3, `docs/REDESIGN_rngrn.md` §4.3). D-R3-7's stall-rate distribution
+was measured at n=96 and is a TRANSFER CAVEAT against this ruling: the Newton residual, and so
+the stalled/converged classification, is a function of the grid, and that distribution does not
+automatically carry over if this ruling ever changes.
+
+**Where it lives:** `experiments/redesign_r3/raps_fidelity/results/raps_fidelity_paired.json`,
+`scripts/r3_raps_fidelity.py`, `src/rngrn/solve_box.py` (`N_DEFAULT`). Read with **D-R3-4**
+(the paired design and the superseded unpaired headline) and **D-R3-7** (the n=96 transfer
+caveat).
+
+### D-R3-7 — the population stall-rate distribution for register item 14 (stall_switch_fraction)
+
+**Date:** 2026-08-19, fix round 2026-08-19 (R3 Task 16, `feature/r3-integration`).
+**Status:** COMMITTED with the register-item-8 promotion unit (D-R3-5/6/7 together). The
+`stall_switch_fraction` question this measurement fed was answered by the promotion, which
+moved every member to the unrolled path rather than picking a rate — see D-R3-5 rider 5. This
+entry records the measurement.
+
+**Context.** `docs/REDESIGN_rngrn.md` §4.3 / spec §8 register item 14 leaves
+`stall_switch_fraction=0.20` UNCALIBRATED. Task 13 wired the accounting; Task 14's FD A/B gate
+measured that an unswitched stall is a genuinely wrong gradient (adjoint O(1) wrong at a forced
+residual of 5e-4 to 6e-3, worst 1.93, vs the unrolled path's ~1e-8 on both arms) but found no
+genuine stall in its own budget-limited (1 trial/scale) hunt. This task ran a population survey
+(6 perturbation scales x 2 members x 6 steps = 72 member-steps worst case, 48 attempted, 35
+solved) directly against the commensurate box (Task 11's `solve_box.geometry`/`needs_retile`)
+and Task 13's stall decision logic (a residual-capturing copy of
+`_spectral_solve_with_stall_switch`, equivalence-checked against the original).
+
+**The finding.** Pooled stall fraction 25.7% (9/35), but the per-member distribution is wide
+(median 16.7%, p90 72%, range 0-100%, n=8 members with >=1 solved step) and rises sharply with
+distance from the known-Turing checkpoint (0% at scale 0.1, 60% at scale 2.0, small-n at the
+extremes). The measured genuine-stall residuals (1.2e-7 to 1.4e-5) are 1-2 orders of magnitude
+closer to the 1e-9 bar than Task 14's forced-stall probe (5e-4 to 6e-3) — whether the adjoint
+path's O(1) gradient error also holds at that milder miss is UNMEASURED.
+
+**Two divergences from production's own counters, disclosed rather than silently absorbed
+(review findings I1/I2), because the 25.7% is not a bit-for-bit reproduction of what a real
+run's `n_stalled_solves`/`n_ignited_solves` would show:**
+1. The ignition gate used is `sig.max() > 1e-3` on this script's own fixed k-grid, not
+   `losses.spectral.is_ignited`'s real `sig_max_pos` gate (whose k-floor would have de-ignited
+   this entire population — all `khat` here fall in [0.101, 0.191], below where `sig_max_pos`
+   starts looking). This survey's gate is strictly MORE PERMISSIVE than production's.
+2. A step whose solve fails for a non-stall reason is excluded from both the numerator and
+   denominator here; production counts it in the denominator as a non-stall
+   (`recover._account_for_stall`), unconditional on the solve's outcome.
+   Zero non-"ok" solves occurred in this run, so 25.7% is unaffected by this divergence this
+   time, but the two denominators are not the same thing in general.
+
+**What was NOT decided here**: whether `stall_switch_fraction` should be set to a specific
+number, treated as a post-hoc diagnostic only (re-reading `_spectral_solve_with_stall_switch`'s
+own docstring, routing is UNCONDITIONAL on whether the given solve stalled — the fraction is
+recorded, not read as a gate, in the code as it stands today), or left for calibration against
+a real training run once R4 wires the commensurate box into `recover()`. Four options are laid
+out in `task-16-report.md`'s Step 3 section for the controller.
+
+**Scope of the finding.** One checkpoint (N=3, `m3_registry_20260803_190250_seed3`), theta
+perturbations of one known-Turing point (not a from-scratch training trajectory), an Adam loop
+driven only by the 5 spectral terms (not the full A0 objective). 4 of 12 members left the
+Turing class before any solve was attempted and are correctly excluded from the denominator —
+VERIFIED post-hoc by a cheap re-scan (`init_scan`, no training steps) of all 12 members'
+starting dispersion, which reproduces `n_init_ignited=8` exactly (review finding I3c).
+**Measured at n=96** (`solve_box.N_DEFAULT`) — the Newton residual, and therefore the
+stalled/converged classification itself, is a function of the grid, not of theta alone. The
+controller has since ruled n=96 for Phase II (D-R3-6); this distribution is a
+TRANSFER CAVEAT against that ruling — it does not automatically carry over if the ruled grid
+ever changes (review finding I4).
+
+**Where it lives:** `experiments/redesign_r3/stall_rate/results/stall_rate.json` (fix round 1
+added `init_scan` — the init-only re-scan verifying the 4/12 split — to the committed
+artifact; the full per-member per-step `all_members` trace is persisted by the FIXED code for
+future runs only and is NOT in the committed artifact, which predates the fix);
+`scripts/r3_stall_survey.py`. Read with **D-R3-1** (the FD protocol) and **D-R3-3** (the R3
+unrolled-path finding this task's residual comparison extends).

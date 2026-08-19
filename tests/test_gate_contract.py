@@ -511,6 +511,13 @@ def test_kstar_fft_lands_on_the_half_bin_grid():
     (to within 3-decimal storage rounding), so its disagreement with the linear k* is a
     grid offset of EITHER sign — which is why kstar_fft_rel_err is a diagnostic and never
     a tuning target.
+
+    Scoped to GENERATED datasets: the invariant is a property of the annotator that writes
+    k_star_fft alongside a generator's linear k_star. Real-image samples (split == "real",
+    D-REAL-1) get k_star_fft from a radially binned 2D FFT of the observed frame, where the
+    peak's `sqrt(m^2 + n^2)` radius is not half-integer in general — measured up to 0.36
+    bins off the grid on stripes_colony_2ch — and there is no linear k* for the offset to
+    be a diagnostic against.
     """
     import os
     devs = []
@@ -522,6 +529,8 @@ def test_kstar_fft_lands_on_the_half_bin_grid():
             for k in sorted(f.keys()):
                 a = f[k].attrs
                 if "k_star_fft" not in a:
+                    continue
+                if a.get("split") == "real":
                     continue
                 n = float(a["k_star_fft"]) * float(a["L"]) / TWO_PI
                 devs.append(abs(n * 2 - round(n * 2)))

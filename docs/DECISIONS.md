@@ -2640,3 +2640,10 @@ Turing-unstable models whose lifted (finite-gate μ = MU_BIO_CENTRAL) rollouts p
 lifted k\* tracking model k\* (e.g. 16.6→15.7, 19.3→21.2, 11.2→10.0) and μ_crit = inf over
 the probed gate range for all 5. `morphology_match` (QSS rollout vs observed frame class) is
 true for frame 7 only. Numbers: `experiments/real_stripes/analysis_summary.json`.
+
+Two test consequences, fixed on this branch: `tests/test_gate_contract.py::
+test_kstar_fft_lands_on_the_half_bin_grid` is now scoped to generated data (`split != "real"`)
+— the half-bin quantisation is a property of the generated-data annotator, and this dataset's
+real 2D radial FFT peaks sit up to 0.36 bins off the grid with no linear k\* to diagnose
+against; and `eval/lifted.py` was classified RECOVERY_SIDE in `tests/test_firewall.py`
+(inherited main-branch red, same line as the paper branches' fix).

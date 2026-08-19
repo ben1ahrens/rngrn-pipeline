@@ -185,15 +185,30 @@ From the same arrays. β is **derived** on a pinned model as `β = δ·x* − pr
 derived β tends to exactly `δ_i·x*_i`, which satisfies the pinned fixed point exactly and clears
 the β ≥ 0 hinge at zero cost. That is precisely what happens:
 
-| step | median \|β − δx\*\| / δx\* (species 0) | median binding budget `s` off-diag | `s` diag |
+| step | median \|β − δx\*\| / δx\* (species 0) | binding budget `s` off-diag | `s` diag |
 |---|---|---|---|
-| 0 | 0.5009 | 0.3175 | 0.3083 |
+| 0 | 0.5008 | 0.3175 | 0.3083 |
 | 100 | 0.0095 | 0.0673 | 0.0739 |
 | **400** | **0.0017** | **0.0336** | 0.0386 |
 | 1500 | 0.0003 | 0.0117 | 0.0195 |
 
+> **Statistics, named because the pooling order changes the numbers.** The two `s` columns are
+> the **pooled median of |KA+KR| over all (entry, member) pairs** — 6 off-diagonal (or 3
+> diagonal) entries × 512 members, i.e. a median over 3072 (or 1536) values. The β column is the
+> **median over members, per species**. Both are emitted by
+> `step5_supporting.r2_B512_beta_and_binding_budget`, whose `statistic` field repeats this.
+>
+> *Pooling before the median is not cosmetic.* Taking the median of the six per-entry medians
+> instead shifts the step-1500 diagonal from 0.0195 to 0.0162 (~20 %). The pooled median is
+> preferred because it medians over 3072 values rather than 6, and because the member
+> distribution is heavy-tailed — the pooled *mean* of the diagonal at step 1500 is **0.2275**
+> against a median of 0.0195, an order of magnitude apart — so a median is required, and of the
+> two median orderings the pooled one is the more robust. A first revision of the emitting
+> script used the per-entry ordering and disagreed with this table at 3 of its 4 rows; the
+> script now computes what the table reports.
+
 By step 400 — still inside the staging window — β sits on the decoupled optimum to **0.17 %**,
-and the off-diagonal binding budget has collapsed **9.4×** from its initial value. T16 reported
+and the off-diagonal binding budget has collapsed **9.46×** from its initial value. T16 reported
 the endpoint of this (s: 0.314 → 0.0133, 24×); the trajectory shows **where** it happens.
 
 ---
@@ -271,7 +286,7 @@ did not test one. See fix D below.
 2. In that window `beta_hinge` carries **99.32 %** of the gradient on off-diagonal coupling and
    pushes it **down for 100 % of members**; `param_prior` contributes exactly nothing to it; and
    `kstar_si`, the only opposing term, is **315× too weak**.
-3. Coupling falls **0.3897 → 0.0015 (264×)** and the binding budget **9.4×**, monotonically. β
+3. Coupling falls **0.3897 → 0.0015 (264×)** and the binding budget **9.46×**, monotonically. β
    lands on the analytic decoupled optimum `δ·x*` to **0.17 %**, which satisfies the pinned fixed
    point exactly and clears the β hinge at zero cost.
 4. `turing` ramps in from step 376 and reverses the direction — coupling recovers **3.94×** — but

@@ -339,19 +339,45 @@ def step5_supporting():
         return P[i, :, pn.index(k)].astype(np.float64)
 
     xp = np.array(XPIN)
+
+    def s_pooled_median(i, idx):
+        """POOLED median of |KA+KR| over ALL (entry, member) pairs.
+
+        This is the statistic the doc's section 3a names, and the one the 9.46x collapse is
+        quoted against. Pooling BEFORE taking the median matters, and a first revision of this
+        function got it wrong: it took the median of the six PER-ENTRY medians, which disagreed
+        with the doc's table at 3 of the 4 quoted steps (worst: step-1500 diagonal, 0.0162 vs
+        0.0195, ~20%) because it collapses the member axis first and then medians only 6 numbers.
+
+        Pooled median is the right choice on two grounds. It is a median over 6*B = 3072 values
+        rather than 6, so it uses the whole member distribution instead of discarding its
+        spread. And that distribution is heavy-tailed -- the pooled MEAN of the diagonal at step
+        1500 is 0.2275 against a median of 0.0195, an order of magnitude apart -- so a median is
+        required rather than a mean, and of the two median orderings the pooled one is the more
+        robust. Mean and median-of-per-entry-medians are both rejected, for those reasons.
+        """
+        M = np.abs(np.stack([pc(i, f"KA[{r},{c}]") + pc(i, f"KR[{r},{c}]") for r, c in idx]))
+        return float(np.median(M))
+
+    off_idx = [(r, c) for r in range(N) for c in range(N) if r != c]
+    dia_idx = [(r, r) for r in range(N)]
     rows = []
     for i, s in enumerate(HS):
-        soff = float(np.median([np.median(np.abs(pc(i, f"KA[{r},{c}]") + pc(i, f"KR[{r},{c}]")))
-                                for r in range(N) for c in range(N) if r != c]))
-        sdia = float(np.median([np.median(np.abs(pc(i, f"KA[{r},{r}]") + pc(i, f"KR[{r},{r}]")))
-                                for r in range(N)]))
-        row = dict(step=int(s), s_offdiag_median=soff, s_diag_median=sdia)
+        row = dict(step=int(s),
+                   s_offdiag_pooled_median=s_pooled_median(i, off_idx),
+                   s_diag_pooled_median=s_pooled_median(i, dia_idx))
         for sp in range(N):
+            # per-species median OVER MEMBERS -- one number per species, matching the doc's
+            # "median |b - dx*|/dx*" column. Unaffected by the pooling question above.
             b, dx = pc(i, f"beta[{sp}]"), pc(i, f"delta[{sp}]") * xp[sp]
             row[f"beta_rel_dev_from_delta_xstar[{sp}]"] = float(
                 np.median(np.abs(b - dx) / np.abs(dx)))
         rows.append(row)
-    out["r2_B512_beta_and_binding_budget"] = dict(run_path=ARMS["r2_B512"], by_step=rows)
+    out["r2_B512_beta_and_binding_budget"] = dict(
+        run_path=ARMS["r2_B512"], by_step=rows,
+        statistic="s columns: POOLED median of |KA+KR| over all (entry, member) pairs "
+                  "(6 off-diagonal or 3 diagonal entries x B members). beta column: median "
+                  "over members, per species.")
 
     # -- ||J||_F, for the doc's `anticollapse` argument (its floor is 1.0, so it is inactive)
     Jf = np.linalg.norm(z["J"].reshape(-1, N * N), axis=1)

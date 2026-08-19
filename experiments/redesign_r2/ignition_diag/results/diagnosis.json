@@ -598,140 +598,141 @@
           "beta_rel_dev_from_delta_xstar[0]": 0.5008499637075178,
           "beta_rel_dev_from_delta_xstar[1]": 0.27948361381220277,
           "beta_rel_dev_from_delta_xstar[2]": 0.6158993438438433,
-          "s_diag_median": 0.30932939052581787,
-          "s_offdiag_median": 0.3182395454496145,
+          "s_diag_pooled_median": 0.30830108746886253,
+          "s_offdiag_pooled_median": 0.31748567149043083,
           "step": 0
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.009473979384921064,
           "beta_rel_dev_from_delta_xstar[1]": 0.007553957367486529,
           "beta_rel_dev_from_delta_xstar[2]": 0.01038337220539164,
-          "s_diag_median": 0.07237601419910789,
-          "s_offdiag_median": 0.06751086050644517,
+          "s_diag_pooled_median": 0.07385573582723737,
+          "s_offdiag_pooled_median": 0.0673443388659507,
           "step": 100
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.004107944897310949,
           "beta_rel_dev_from_delta_xstar[1]": 0.003229880015997466,
           "beta_rel_dev_from_delta_xstar[2]": 0.004491733186580968,
-          "s_diag_median": 0.0552925793454051,
-          "s_offdiag_median": 0.04811153269838542,
+          "s_diag_pooled_median": 0.055236622458323836,
+          "s_offdiag_pooled_median": 0.048195835668593645,
           "step": 200
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.002414809278091812,
           "beta_rel_dev_from_delta_xstar[1]": 0.001858126231146783,
           "beta_rel_dev_from_delta_xstar[2]": 0.0026137395447319123,
-          "s_diag_median": 0.04497889638878405,
-          "s_offdiag_median": 0.03898416706942953,
+          "s_diag_pooled_median": 0.044725443702191114,
+          "s_offdiag_pooled_median": 0.03919124940875918,
           "step": 300
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.0016771654597480057,
           "beta_rel_dev_from_delta_xstar[1]": 0.0013980818664282232,
           "beta_rel_dev_from_delta_xstar[2]": 0.0017780308940797927,
-          "s_diag_median": 0.03855620988178998,
-          "s_offdiag_median": 0.03356149452156387,
+          "s_diag_pooled_median": 0.0385569283971563,
+          "s_offdiag_pooled_median": 0.03356245515169576,
           "step": 400
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.0013615314761694945,
           "beta_rel_dev_from_delta_xstar[1]": 0.6137157614486983,
           "beta_rel_dev_from_delta_xstar[2]": 0.0014155188701402157,
-          "s_diag_median": 0.03596767853014171,
-          "s_offdiag_median": 0.028702030365820974,
+          "s_diag_pooled_median": 0.0401482685119845,
+          "s_offdiag_pooled_median": 0.02700471505522728,
           "step": 500
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.0010657988352277133,
           "beta_rel_dev_from_delta_xstar[1]": 0.6438014670041723,
           "beta_rel_dev_from_delta_xstar[2]": 0.0011058143464024387,
-          "s_diag_median": 0.031560052040731534,
-          "s_offdiag_median": 0.025098625279497355,
+          "s_diag_pooled_median": 0.036106724524870515,
+          "s_offdiag_pooled_median": 0.023035009915474802,
           "step": 600
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.0008655617567051843,
           "beta_rel_dev_from_delta_xstar[1]": 0.6460992860702452,
           "beta_rel_dev_from_delta_xstar[2]": 0.000896438166049282,
-          "s_diag_median": 0.02837111911503598,
-          "s_offdiag_median": 0.022630076651694253,
+          "s_diag_pooled_median": 0.03304975543869659,
+          "s_offdiag_pooled_median": 0.02054531523026526,
           "step": 700
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.0007163222242351237,
           "beta_rel_dev_from_delta_xstar[1]": 0.6465087981659665,
           "beta_rel_dev_from_delta_xstar[2]": 0.000742443110034676,
-          "s_diag_median": 0.025951267802156508,
-          "s_offdiag_median": 0.02041430165991187,
+          "s_diag_pooled_median": 0.030536159116309136,
+          "s_offdiag_pooled_median": 0.0186065783345839,
           "step": 800
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.0006036764721190618,
           "beta_rel_dev_from_delta_xstar[1]": 0.6462611484204284,
           "beta_rel_dev_from_delta_xstar[2]": 0.000620695098691797,
-          "s_diag_median": 0.024050918931607157,
-          "s_offdiag_median": 0.01869920025637839,
+          "s_diag_pooled_median": 0.028418715635780245,
+          "s_offdiag_pooled_median": 0.017142576805781573,
           "step": 900
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.0005168075731041958,
           "beta_rel_dev_from_delta_xstar[1]": 0.6460851606668787,
           "beta_rel_dev_from_delta_xstar[2]": 0.0005267681651964173,
-          "s_diag_median": 0.022384364943718538,
-          "s_offdiag_median": 0.017268487659748644,
+          "s_diag_pooled_median": 0.02645732677774504,
+          "s_offdiag_pooled_median": 0.015833804529393092,
           "step": 1000
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.0004467253107509543,
           "beta_rel_dev_from_delta_xstar[1]": 0.6459797209433437,
           "beta_rel_dev_from_delta_xstar[2]": 0.0004549023406536032,
-          "s_diag_median": 0.020823476021178067,
-          "s_offdiag_median": 0.01611779043014394,
+          "s_diag_pooled_median": 0.024771527852863073,
+          "s_offdiag_pooled_median": 0.014779074728721753,
           "step": 1100
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.00038795522934640216,
           "beta_rel_dev_from_delta_xstar[1]": 0.6458916842209167,
           "beta_rel_dev_from_delta_xstar[2]": 0.00039641738802869065,
-          "s_diag_median": 0.019395175724639557,
-          "s_offdiag_median": 0.015095297727384605,
+          "s_diag_pooled_median": 0.02326142936362885,
+          "s_offdiag_pooled_median": 0.013845709094312042,
           "step": 1200
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.00034039808971893004,
           "beta_rel_dev_from_delta_xstar[1]": 0.6458100808388666,
           "beta_rel_dev_from_delta_xstar[2]": 0.000348790125094821,
-          "s_diag_median": 0.01808475868892856,
-          "s_offdiag_median": 0.014150516552035697,
+          "s_diag_pooled_median": 0.02187267897534184,
+          "s_offdiag_pooled_median": 0.013035846233833581,
           "step": 1300
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.0003023723159101783,
           "beta_rel_dev_from_delta_xstar[1]": 0.6457801543010959,
           "beta_rel_dev_from_delta_xstar[2]": 0.00030801912573785674,
-          "s_diag_median": 0.017020685132592916,
-          "s_offdiag_median": 0.013274350902065635,
+          "s_diag_pooled_median": 0.02068645099643618,
+          "s_offdiag_pooled_median": 0.012355012280750088,
           "step": 1400
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.0002697120417220416,
           "beta_rel_dev_from_delta_xstar[1]": 0.6457357888860882,
           "beta_rel_dev_from_delta_xstar[2]": 0.00027379447711850286,
-          "s_diag_median": 0.01623554613615852,
-          "s_offdiag_median": 0.012507950217695907,
+          "s_diag_pooled_median": 0.019507618068018928,
+          "s_offdiag_pooled_median": 0.011692969586874824,
           "step": 1499
         },
         {
           "beta_rel_dev_from_delta_xstar[0]": 0.00026941016138552147,
           "beta_rel_dev_from_delta_xstar[1]": 0.645739572092183,
           "beta_rel_dev_from_delta_xstar[2]": 0.0002734340011117141,
-          "s_diag_median": 0.01622804421640467,
-          "s_offdiag_median": 0.0125015805097064,
+          "s_diag_pooled_median": 0.019495219879900105,
+          "s_offdiag_pooled_median": 0.011686783029290382,
           "step": 1500
         }
       ],
-      "run_path": "experiments/redesign_r2/phase1/phase1_r2_B512"
+      "run_path": "experiments/redesign_r2/phase1/phase1_r2_B512",
+      "statistic": "s columns: POOLED median of |KA+KR| over all (entry, member) pairs (6 off-diagonal or 3 diagonal entries x B members). beta column: median over members, per species."
     },
     "r2_B512_jacobian_frobenius": {
       "anticollapse_jac_floor": 1.0,

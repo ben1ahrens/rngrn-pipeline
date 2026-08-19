@@ -9,9 +9,13 @@ CUDA throughput was measured at 3.25 ms/step at 512^2 fp64 on this machine
 (`experiments/diag_fft/gpu_probe/results.json`). The port is the GPU leg of the M1
 forward solve (`rngrn.forward.PatternSolver(device="cuda")`).
 
-Same scheme, same contour integral, same per-step isfinite check as the numpy original
-(the check forces a device sync per step on CUDA; that cost is IN the measured numbers,
-not hidden). ``tests/test_etdrk4_torch.py`` re-pins the numpy equivalence in the suite.
+Same scheme and same contour integral as the numpy original. The one departure is the
+blow-up check: the numpy original tests `isfinite` every step, which on CUDA is a blocking
+sync per step; here it runs ONCE per call, after the step loop (see
+``integrate_etdrk4_rfft_torch`` for why that is equivalent for the flag, and what it
+gives up). The 3.25 ms/step figure above was measured WITH the per-step check, so it is
+an upper bound on the current path, not a description of it.
+``tests/test_etdrk4_torch.py`` re-pins the numpy equivalence in the suite.
 
 Nothing here reads the observed frame or any answer-key quantity: inputs are the model's
 own parameters and caller-supplied grid geometry.
@@ -90,8 +94,25 @@ def integrate_etdrk4_rfft_torch(X0: torch.Tensor, reaction_t, n: int, dt: float,
     """Line-for-line torch port of numerics.integrate_etdrk4_rfft, batched over a
     leading IC dimension: X0 is (B, N, n, n), coefficients broadcast over B.
 
-    Returns (X, blew_up). The per-step isfinite check is kept from the numpy original;
-    it forces a device sync per step on CUDA (in the measured cost, not hidden).
+    Returns (X, blew_up). The blow-up check is ONE `isfinite` per CALL, after the step
+    loop — NOT the numpy original's per-step check, which costs a blocking device sync
+    per step on CUDA at a cost that does not shrink as the step's own FLOPs (n^2 log n)
+    do, so it dominates at the small training geometries. Every operation in the step is
+    linear or an FFT over the whole field, so a non-finite value cannot be erased once
+    it appears: end-of-call detection is equivalent FOR THE BOOLEAN, which is all any
+    caller uses. What is lost is WHICH step blew up — the returned field is the state
+    after `nsteps`, not the state at the first non-finite step. Callers chunk their
+    calls (the forward relax runs 500 steps at a time), so detection granularity is one
+    chunk, unchanged.
+
+    CROSS-BACKEND PARITY BREAK on a blow-up (D-PERF-6): `eval.numerics.integrate_etdrk4_rfft`
+    (the numpy original) returns the field AT THE FIRST NON-FINITE STEP, while this function
+    returns the field AFTER ALL `nsteps`. On a blow-up the two backends therefore return
+    numerically different arrays, not just a different step index — this is a real deviation
+    from the "same trajectory up to FFT-backend round-off" claim `relax_to_pattern_torch`
+    otherwise makes (forward.py), not merely lost diagnostic granularity. It does not affect
+    correctness on non-blowing-up trajectories, which is all `tests/test_etdrk4_torch.py`
+    currently pins.
     """
     E, E2, Q, f1, f2, f3 = coeffs
 
@@ -109,6 +130,5 @@ def integrate_etdrk4_rfft_torch(X0: torch.Tensor, reaction_t, n: int, dt: float,
         c = E2 * a + Q * (2.0 * Nb - Nv)
         Nc = Nfun(c)
         v = E * v + Nv * f1 + 2.0 * (Na + Nb) * f2 + Nc * f3
-        if not torch.isfinite(v).all():
-            return torch.fft.irfft2(v, s=(n, n), dim=(-2, -1)), True
-    return torch.fft.irfft2(v, s=(n, n), dim=(-2, -1)), False
+    blew = not bool(torch.isfinite(v).all())
+    return torch.fft.irfft2(v, s=(n, n), dim=(-2, -1)), blew

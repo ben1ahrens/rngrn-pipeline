@@ -18,9 +18,10 @@ import torch
 
 from rngrn import observables as OBS
 from rngrn.losses import total as LT
+from rngrn.losses import spectral as S
 from rngrn.losses.spectral import SpectralConfig, SpectralContext, build_frame_targets
 from rngrn.losses.weighting import FixedWeighting
-from rngrn.model import RNGRN
+from rngrn.model import RNGRN, BatchedRNGRN
 
 KGRID = torch.linspace(0.0, 3.0, 200, dtype=torch.float64)
 _SPEC_KEYS = ("spec_shape", "spec_aniso", "spec_amp_mean", "spec_amp_fluct", "real_moments")
@@ -71,6 +72,25 @@ class _StubSpectralSolver:
     def solve(self):
         self.n_calls += 1
         return self._result
+
+
+class _StubBatchedSpectralSolver:
+    """Batched twin of `_StubSpectralSolver`, per `losses.spectral.SpectralContext`'s
+    duck-typed `solve_subset(members, xstar_batch) -> (u_stack | None, ok_members, reasons)`
+    contract. Every member in `ok` resolves to `pattern`; every other member offered is
+    reported failed under `fail_reasons[member]`."""
+    def __init__(self, pattern, ok, fail_reasons):
+        self._pattern = pattern
+        self._ok = set(ok)
+        self._fail_reasons = dict(fail_reasons)
+        self.calls = []
+
+    def solve_subset(self, members, xstar_batch):
+        self.calls.append(list(members))
+        ok_members = [m for m in members if m in self._ok]
+        reasons = {m: self._fail_reasons[m] for m in members if m not in self._ok}
+        u_stack = torch.stack([self._pattern] * len(ok_members)) if ok_members else None
+        return u_stack, ok_members, reasons
 
 
 # ---------------------------------------------------------------------------------
@@ -153,18 +173,147 @@ def test_ignited_but_unsolved_is_skipped_with_the_solver_reason(reason):
 
 
 # ---------------------------------------------------------------------------------
-# (d) batched refuses spectral loudly
+# (d) batched + spectral: the combination is LEGAL (C1 repair, D-PERF-4) -- a batched
+# solver is accepted and wired per member; a SERIAL solver is refused loudly, at the
+# entry point, before any steady-state solve or Jacobian.
 # ---------------------------------------------------------------------------------
-def test_compute_terms_batched_refuses_spectral():
-    """Mirrors the compute_resid refusal immediately above it in losses/total.py -- the
-    check fires before the function ever touches `model`, so a placeholder is enough."""
-    with pytest.raises(ValueError, match="spectral"):
-        LT.compute_terms_batched(None, None, None, None, None, None, spectral=object())
+def test_compute_terms_batched_accepts_a_batched_spectral_context():
+    """The five spectral keys appear per member with the omitted-never-zeroed semantics
+    `_apply_spectral_batched` documents (losses/total.py, unit b2/U4): a member the forward
+    solve did not produce a pattern for gets an EXACT 0.0 loss contribution (so it cannot
+    shift another member's gradient) and a NaN in the recorded `L_<key>` (so a reader can
+    tell "not computed" from "zero loss") -- never the other way round."""
+    frame, L, obs_idx = _tiny_recovery_inputs(N=3)
+    kstar_obs = _kstar_obs(frame, L)
+    cfg = SpectralConfig(ignition_margin=-1e9)   # forces ignition for every converged member
+    targets = build_frame_targets(frame.numpy(), L, kstar_obs, cfg)
+    bmodel = BatchedRNGRN.from_seeds(N=3, seeds=[200, 201])  # both converge (verified)
+    pattern = _different_synthetic_pattern(N=3)
+    # member 0 ignites and solves; member 1 ignites but the forward solve fails.
+    solver = _StubBatchedSpectralSolver(pattern, ok=[0], fail_reasons={1: "solve_failed"})
+    ctx = SpectralContext(solver=solver, targets=targets, cfg=cfg)
+    weights = dict(kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5, anchor=2.0,
+                   spec_shape=1.0, spec_aniso=1.0, spec_amp_mean=1.0, spec_amp_fluct=1.0,
+                   real_moments=1.0)
+    strategy = FixedWeighting(weights)
+
+    term_vals, parts, conv = LT.compute_terms_batched(
+        bmodel, frame, L, obs_idx, KGRID, kstar_obs, spectral=ctx)
+    assert bool(conv[0]) and bool(conv[1]), "fixture seeds must converge for this test to hold"
+    assert solver.calls == [[0, 1]], "both members ignited (margin=-1e9) -- both must be offered"
+    assert list(parts["spec_ignited"]) == [1.0, 1.0]
+    assert list(parts["spectral_skipped"]) == ["", "solve_failed"]
+    assert list(parts["spec_computed"]) == [True, False]
+    for k in _SPEC_KEYS:
+        assert np.isfinite(float(term_vals[k][0])), f"{k}: solved member must be real"
+        assert float(term_vals[k][1]) == 0.0, f"{k}: failed member's LOSS term must be exact 0"
+
+    _, parts_lv, _ = LT.total_loss_batched(
+        bmodel, frame, L, obs_idx, KGRID, kstar_obs, strategy, spectral=ctx)
+    for k in _SPEC_KEYS:
+        assert np.isfinite(parts_lv[f"L_{k}"][0]), f"L_{k}: solved member must be real"
+        assert parts_lv[f"L_{k}"][1] != parts_lv[f"L_{k}"][1], (
+            f"L_{k}: failed member's RECORD must be NaN, never a faked 0.0")
 
 
-def test_total_loss_batched_refuses_spectral():
-    with pytest.raises(ValueError, match="spectral"):
-        LT.total_loss_batched(None, None, None, None, None, None, None, spectral=object())
+def test_compute_terms_batched_refuses_a_serial_solver():
+    """A `forward.PatternSolver` (serial) exposes `.solve()`, not `.solve_subset()`. Handing
+    one to the batched assembler is a newly plausible mistake now that both combinations are
+    legal (REVIEW_gpu_optim_delta.md C1/§8) -- must be refused at the ENTRY POINT, before any
+    steady-state solve or Jacobian, not surfaced as an AttributeError mid-step."""
+    bmodel = BatchedRNGRN.from_seeds(N=3, seeds=[200, 201])
+    frame, L, obs_idx = _tiny_recovery_inputs(N=3)
+    kstar_obs = _kstar_obs(frame, L)
+    cfg = SpectralConfig(ignition_margin=-1e9)
+    targets = build_frame_targets(frame.numpy(), L, kstar_obs, cfg)
+    serial_solver = _StubSpectralSolver((frame, "ok"))   # .solve(), no .solve_subset()
+    ctx = SpectralContext(solver=serial_solver, targets=targets, cfg=cfg)
+
+    with pytest.raises(ValueError, match="solve_subset"):
+        LT.compute_terms_batched(bmodel, frame, L, obs_idx, KGRID, kstar_obs, spectral=ctx)
+
+    assert serial_solver.n_calls == 0, "must refuse before any solve is attempted"
+
+
+def test_compute_terms_batched_refuses_a_non_batched_model():
+    """`model` must be a `model.BatchedRNGRN`: the deleted refusal used to make this check
+    unreachable-but-implicit (it always fired before `model` was ever touched); now that
+    `spectral` is legal, the check is explicit."""
+    m = RNGRN(N=3, seed=0)
+    with pytest.raises(ValueError, match="BatchedRNGRN"):
+        LT.compute_terms_batched(m, None, None, None, None, None)
+
+
+# ---------------------------------------------------------------------------------
+# (d2) `_apply_spectral_batched` directly (Task 4, R3 review §5): the per-member
+# ignite-or-omit contract at the unit it is actually implemented in, not only through
+# `compute_terms_batched`'s end-to-end path above. Two things the (d) tests above do not
+# reach: the EXACT-0-vs-NaN split in isolation (no real BatchedRNGRN needed), and the
+# "abandoned" reason `active=` produces, which nothing under tests/ exercised before this.
+# ---------------------------------------------------------------------------------
+def test_apply_spectral_batched_exact_zero_for_a_member_the_solver_could_not_pattern():
+    """A member the forward solve could not pattern gets an EXACT 0.0 entry in `term_vals`
+    -- never omitted, never a NaN placeholder there (the NaN placeholder is a
+    `total_loss_batched`-level concern, already pinned by
+    `test_compute_terms_batched_accepts_a_batched_spectral_context` above) -- while its
+    `spectral_skipped`/`spec_computed` record the failure. `term_vals` must exist as a
+    concrete zero for EVERY member because it is what the batched loss sums over."""
+    frame, L, obs_idx = _tiny_recovery_inputs(N=3)
+    kstar_obs = _kstar_obs(frame, L)
+    cfg = SpectralConfig(ignition_margin=-1e9)
+    targets = build_frame_targets(frame.numpy(), L, kstar_obs, cfg)
+    pattern = _different_synthetic_pattern(N=3)
+    solver = _StubBatchedSpectralSolver(pattern, ok=[1], fail_reasons={0: "not_patterned"})
+    ctx = SpectralContext(solver=solver, targets=targets, cfg=cfg)
+    term_vals: dict = {}
+    parts = dict(ss_converged=np.array([True, True]), sig_max_pos=np.array([5.0, 5.0]))
+    xstar_pre = torch.zeros(2, 3, dtype=torch.float64)
+    conv = torch.tensor([True, True])
+
+    LT._apply_spectral_batched(term_vals, parts, ctx, xstar_pre, conv, active=None)
+
+    assert solver.calls == [[0, 1]], "both members ignited (margin=-1e9) -- both offered"
+    assert list(parts["spectral_skipped"]) == ["not_patterned", ""]
+    assert list(parts["spec_computed"]) == [False, True]
+    assert list(parts["spec_ignited"]) == [1.0, 1.0]
+    ref_vals, _ = S.spectral_terms(pattern, targets, cfg)   # member 1's own true value
+    for k in LT.SPECTRAL_TERM_KEYS:
+        assert float(term_vals[k][0]) == 0.0, f"{k}: not-patterned member must be EXACT 0"
+        assert float(term_vals[k][1]) == pytest.approx(float(ref_vals[k]), abs=1e-12), (
+            f"{k}: patterned member's entry does not match its own computed value -- the "
+            "index_copy scatter landed it in the wrong row or dropped it")
+
+
+def test_apply_spectral_batched_abandoned_is_distinguished_from_not_ignited():
+    """The `active` mask's "abandoned" reason must never be conflated with "not_ignited"
+    (losses/total.py:222-225): an abandoned lane may well have been Turing-unstable when
+    `recover` gave up on it, and the record should say WHY the solve was skipped, not imply
+    a stability verdict nobody made. Two members, NEITHER of which reaches a solve, for two
+    DIFFERENT reasons: member 0 is Turing-unstable but INACTIVE (`recover` abandoned it);
+    member 1 is simply not Turing-unstable. If `active` were ignored (or ANDed in the wrong
+    place), member 0 would read "not_ignited" exactly like member 1 and this test would
+    fail on the `spectral_skipped` assertion below."""
+    solver = _StubBatchedSpectralSolver(_different_synthetic_pattern(N=3), ok=[0, 1],
+                                        fail_reasons={})
+    cfg = SpectralConfig(ignition_margin=1e-3)
+    ctx = SpectralContext(solver=solver, targets=None, cfg=cfg)
+    term_vals: dict = {}
+    parts = dict(ss_converged=np.array([True, True]),
+                sig_max_pos=np.array([5.0, -5.0]))    # member 0 unstable, member 1 stable
+    xstar_pre = torch.zeros(2, 3, dtype=torch.float64)
+    conv = torch.tensor([True, True])
+    active = torch.tensor([False, True])               # member 0 abandoned by the caller
+
+    LT._apply_spectral_batched(term_vals, parts, ctx, xstar_pre, conv, active)
+
+    assert list(parts["spectral_skipped"]) == ["abandoned", "not_ignited"]
+    assert list(parts["spec_ignited"]) == [0.0, 0.0]
+    assert list(parts["spec_computed"]) == [False, False]
+    assert solver.calls == [], (
+        "neither member reached a solve (one abandoned, one not ignited) -- the expensive "
+        "forward solve must not run for either")
+    for k in LT.SPECTRAL_TERM_KEYS:
+        assert term_vals[k].tolist() == [0.0, 0.0], f"{k}: nothing solved, must be all-0"
 
 
 # ---------------------------------------------------------------------------------
@@ -191,12 +340,38 @@ def test_recover_raises_on_split_hinges_off_with_a_spectral_weight():
                   adam_steps=0, n_restarts=1)
 
 
-def test_recover_raises_on_batched_with_a_spectral_weight():
+def test_recover_accepts_batched_with_a_spectral_weight():
+    """PINS THE CURRENT CONTRACT (D-PERF-4, controller ruling 2026-08-19): batched=True
+    combined with a non-zero spectral weight is LEGAL, not refused -- `recover.py:396-401`'s
+    docstring states this in place ("the refusal is now DELETED because the solve gained a
+    member axis"), and `_batched_restarts` wires a real `forward.BatchedPatternSolver` into
+    the spectral context whenever a spectral weight is on. This test used to assert the
+    OPPOSITE (`pytest.raises(ValueError, match="batched")`) without passing `lbfgs_steps`,
+    which made it pass VACUOUSLY -- it tripped `recover()`'s unrelated LBFGS guard (whose
+    message also happens to contain "batched"), never the thing its name claimed to test. Here
+    `lbfgs_steps=0` is explicit so that guard cannot fire, and `adam_steps=0` keeps this a fast
+    validation-layer check: the point is that NO ValueError fires, not that anything converges.
+
+    NOT COVERED HERE -- Task 4 completed this, but NOT as a literal `recover()` call:
+    `test_batched_forward_solve.py::
+    test_total_loss_batched_matches_serial_with_a_spectral_weight_from_identical_warm_starts`
+    explains why recover() itself is impractical to pin (its first ignited step is always a
+    FRESH relax, and on CPU the serial and batched fresh relaxes are two independently-
+    implemented integrators seeded through different RNGs -- test_batched_forward_solve.py's
+    own module docstring: "their fresh relaxes differ by FFT backend and would confound
+    it"). It instead drives `losses.total.total_loss` / `total_loss_batched` -- the exact
+    assembler `recover()` calls per step -- from an IDENTICAL preset warm start on both
+    sides, the same discipline that module already uses for its gradient checks, and closes
+    the batched-vs-serial equivalence C1/C2 of docs/REVIEW_gpu_optim_delta.md wants. This
+    test here only pins that
+    the combination is ACCEPTED at the validation layer -- it asserts nothing about the
+    recovered result's correctness.
+    """
     from rngrn import recover as R
     ri = _tiny_recovery_input_np()
-    with pytest.raises(ValueError, match="batched"):
-        R.recover(ri, strategy=_spectral_on_strategy(), batched=True,
-                  adam_steps=0, n_restarts=1)
+    result = R.recover(ri, strategy=_spectral_on_strategy(), batched=True,
+                       lbfgs_steps=0, adam_steps=0, n_restarts=1)
+    assert result is not None
 
 
 def test_recover_raises_on_non_identity_observed_idx_with_a_spectral_weight():

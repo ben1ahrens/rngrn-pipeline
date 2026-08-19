@@ -60,11 +60,12 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from .model import RNGRN, BatchedRNGRN
+from .model import RNGRN, BatchedRNGRN, THETA_NAMES
 from . import observables as obs
 from .losses import total as LT
 from .losses.total import SteadyStateError
 from .losses.weighting import build_strategy, FixedWeighting, DataFirstStaging
+from .unrolled import unrolled_relax, SEGMENT_STEPS_DEFAULT
 
 
 class FreeScaleLatent(torch.nn.Module):
@@ -113,6 +114,15 @@ class RecoveryResult:
     D_phys: object = None          # physical diffusivities, = D_model * L**2 when nondim
     kstar_model_nondim: float = float("nan")   # k*_model * L  (rad per box)
     q_model: float = float("nan")              # k*_model * L / 2pi (PERIODS per box)
+    # ---- Task 13 (R3 redesign): stall accounting, spec 4.3 (appended; both have defaults) --
+    # Only non-zero when stall_switch=True and the run used the spectral terms (serial path
+    # only -- see recover()'s stall_switch docstring). 0/0 on every other call, including
+    # every call before this task, so no pre-existing number changes.
+    n_ignited_solves: int = 0     # ignited-member forward-solve ATTEMPTS, this whole call
+    n_stalled_solves: int = 0     # ... of which missed the 1e-9 Newton bar (a "stall")
+    stall_switch_fraction: float = float("nan")   # the CONFIGURED knob this call ran with
+    # (echoed regardless of stall_switch, so Task 16 can read n_stalled_solves/
+    # n_ignited_solves against it without re-reading the run's frozen config)
 
 
 def _restart_seed(model_seed, r):
@@ -174,6 +184,138 @@ def _clip_grad_norm_per_member(params, max_norm, B):
             continue
         p.grad.mul_(coef.reshape(B, *([1] * (p.grad.dim() - 1))))
     return nrm
+
+
+def _spectral_solve_with_stall_switch(model, n, L, seed, *, device=None,
+                                      noise=1e-2, chunk=500, max_chunks=400,
+                                      newton_iter=30, segment_steps=SEGMENT_STEPS_DEFAULT):
+    """One commensurate-box forward solve (`docs/REDESIGN_rngrn.md` §4.3), returning a
+    differentiable u* on WHICHEVER of the two §4.2 gradient paths this one solve earns:
+
+      * Newton meets `forward.PatternSolver.CONVERGENCE_TOL` (1e-9, D1 verbatim -- READ
+        here, never redefined: F-D1-5 option (b), loosening the bar, stays off the table)
+        -> path="adjoint", `forward.PatternSolve`'s IFT backward.
+      * it does not -> STALL -> path="unrolled", `unrolled.unrolled_relax` from the SAME
+        field the Newton polish was handed. `forward.relax_to_pattern_torch` only
+        RETURNS once its own flat_tol detector confirms saturation (it RAISES otherwise,
+        see its docstring) -- so that field is SATURATED **by construction**, which is
+        what satisfies D-R3-2's caller contract ("the unrolled path may only be invoked
+        from a SATURATED warm state") without needing a separate runtime check here: the
+        one function that could hand this a non-saturated field refuses to return one.
+
+    NOT warm-started across calls: every call relaxes fresh from x* + noise, unlike
+    `forward.PatternSolver`'s warm-start reuse. Simpler and always correct is the point of
+    this being separate machinery rather than a `PatternSolver` extension -- reusing warm
+    state for the switch-aware path is left to whichever task next needs the cost (the
+    unrolled path is SERIAL MODEL ONLY per `unrolled.py`'s docstring; Task 14 owns the
+    batched twin this would need anyway).
+
+    Returns (u_star | None, path | None, stalled: bool, reason). `reason` is "ok" whenever
+    `u_star` is usable on EITHER path, else one of "steady_state_failed" / "relax_failed" /
+    "not_patterned" / "solve_failed" -- the same non-"ok" contract
+    `losses.total._apply_spectral` already treats as skip-this-step.
+    """
+    from .forward import (PatternSolver, PatternSolve, make_spatial_F, newton_polish,
+                          relax_to_pattern_torch, translation_modes)
+    from .eval.numerics import _spectral_k2
+    from .losses.terms import steady_state
+
+    dev = model.device if device is None else torch.device(device)
+    xs, ok = steady_state(model)
+    if not ok:
+        return None, None, False, "steady_state_failed"
+    xstar = xs.detach().cpu().numpy()
+    J = model.jacobian(xs, create_graph=False).detach()
+    jac_rate = float(np.abs(np.linalg.eigvals(J.cpu().numpy())).max())
+    if not np.isfinite(jac_rate) or jac_rate <= 0.0:
+        raise RuntimeError(f"|eig(J)|_max = {jac_rate!r} -- not a usable timescale")
+    dt = 0.2 / jac_rate
+    gamma = jac_rate
+    D_np = model.D.detach().cpu().numpy()
+
+    try:
+        X_sat = relax_to_pattern_torch(model, xstar, n, L, dt, seed, dev,
+                                       noise=noise, chunk=chunk, max_chunks=max_chunks)
+    except RuntimeError:
+        # relax blew up, or never saturated -- NOT a stall (the Newton polish never even
+        # ran), so this must not be counted or routed as one.
+        return None, None, False, "relax_failed"
+
+    F_fn = make_spatial_F(model, n, L)
+    k2_full = _spectral_k2(n, L)
+    modes_of = lambda uu: translation_modes(uu, n, L)              # noqa: E731
+    u, res = newton_polish(F_fn, X_sat, modes_of, k2_full, D_np, gamma, n_iter=newton_iter)
+
+    if res <= PatternSolver.CONVERGENCE_TOL:
+        payload = dict(model=model, u_star=u.detach(), n=n, L=L, k2_full=k2_full,
+                       D_np=D_np, gamma=gamma, k2h=None, k2_dev=None, D_dev=None)
+        out = PatternSolve.apply(payload, *(getattr(model, nm) for nm in THETA_NAMES))
+        path, stalled = "adjoint", False
+    else:
+        # STALL. §4.3's rule: never loosen CONVERGENCE_TOL (F-D1-5 option (b), off the
+        # table) -- switch this member's gradient to the truncated-unrolled path instead,
+        # from X_sat: the SAME saturated field the Newton polish just failed to refine,
+        # never a fresh growth-phase relax (D-R3-2 caller contract, enforced above).
+        out = unrolled_relax(model, X_sat, n, L, dt, segment_steps=segment_steps, device=dev)
+        path, stalled = "unrolled", True
+
+    # Patterned-ness (the eval/rollout.py floor, D-FFT-9 closure 2), same formula
+    # `PatternSolver.solve()` uses: a converged-or-relaxed-but-HOMOGENEOUS field is not a
+    # usable spectral target either way.
+    pattern_floor = max(1e-3, 0.02 * abs(float(xstar[0])))
+    amp = float(out[0].detach().std())
+    if not np.isfinite(amp):
+        return None, None, False, "solve_failed"
+    if amp <= pattern_floor:
+        return None, None, False, "not_patterned"
+    return out, path, stalled, "ok"
+
+
+class _StallSwitchSolver:
+    """Duck-typed drop-in for `forward.PatternSolver` in `losses.spectral.SpectralContext`
+    (`.solve() -> (u_star | None, reason)` -- `losses/spectral.py`'s documented extension
+    point: "A test stub satisfying whichever method its assembler calls is a legal
+    solver"), additionally dispatching the gradient path per spec §4.2/§4.3 -- see
+    `_spectral_solve_with_stall_switch`, which does the actual work.
+
+    `last_path` ("adjoint" | "unrolled" | None) and `last_stalled` are read by `recover()`'s
+    serial loop immediately after each `losses.total.total_loss` call, to update the
+    per-run stall counter and (when a `history.TrainingHistory` was given) record the
+    "stall" event -- this class does neither itself, since `.solve()` is not told its own
+    (step, member); `recover()` is.
+    """
+
+    def __init__(self, model, n, L, seed, **solve_kw):
+        self.model, self.n, self.L, self.seed = model, n, L, seed
+        self._solve_kw = solve_kw
+        self.last_reason = "never_solved"
+        self.last_path = None
+        self.last_stalled = False
+
+    def solve(self):
+        u, path, stalled, reason = _spectral_solve_with_stall_switch(
+            self.model, self.n, self.L, self.seed, **self._solve_kw)
+        self.last_reason, self.last_path, self.last_stalled = reason, path, stalled
+        return (u, reason) if reason == "ok" else (None, reason)
+
+
+def _account_for_stall(solver, history, step, member, counts):
+    """Update the per-run stall counter for ONE ignited-member solve `solver` just
+    attempted (spec §4.3: "a per-run counter of ignited-member solves missing the 1e-9
+    Newton bar"), and -- when `history` is given -- record the "stall" event (R2's Task 9
+    event vocabulary, `history.EVENT_KINDS`; reused verbatim, no second event kind added).
+
+    `counts` is the mutable `[n_ignited_solves, n_stalled_solves]` pair `recover()`'s
+    serial loop owns; a list rather than a return value so the caller does not have to
+    thread two extra locals through the loop by hand. Call this ONLY when this step
+    actually attempted a solve (`parts["spec_ignited"] == 1.0`) -- `solver.last_stalled`
+    is stale (from a PREVIOUS ignited step) on any step that did not call `.solve()`.
+    """
+    counts[0] += 1
+    if solver.last_stalled:
+        counts[1] += 1
+        if history is not None:
+            history.record_event(step, member, "stall")
 
 
 def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
@@ -359,7 +501,11 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             spectral_b_lo=0.60, spectral_b_hi=1.55,        # unit U4, D-FFT-9 closure 1
             spectral_channels=(0,), spectral_nblk=24,      # unit U4
             spectral_ignition_margin=1e-3,                 # unit U4, UNCALIBRATED
-            history=None):             # plottable training trajectory
+            history=None,              # plottable training trajectory
+            # ---- Task 13 (R3 redesign): stall accounting + the two-path switch, spec 4.3 --
+            stall_switch=False,        # Task 13
+            stall_switch_fraction=0.20):   # Task 13, UNCALIBRATED -- Task 16 calibrates it
+                                            # from the measured stall-rate distribution
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
@@ -442,6 +588,27 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         recorded run and an unrecorded one produce the same numbers (verified bit-identical on
         the tracked `m3_registry_20260730_005701` recovery, see
         docs/LGEN_TRANSFER_FIRST_RESULT.md).
+
+    stall_switch: False (DEFAULT, unchanged behaviour -- bit-identical to every call before
+        this parameter existed). True replaces the serial spectral solver
+        (`forward.PatternSolver`, warm-started) with `_StallSwitchSolver`
+        (`_spectral_solve_with_stall_switch`, fresh-relaxed every call, spec 4.3): a member
+        whose Newton polish meets `forward.PatternSolver.CONVERGENCE_TOL` (1e-9) still gets
+        the adjoint/IFT gradient; a member that misses it (a "stall") gets the
+        truncated-unrolled gradient (`unrolled.unrolled_relax`) from the SAME saturated
+        field instead -- never a loosened convergence bar (F-D1-5 option (b) stays off the
+        table). `RecoveryResult.n_ignited_solves` / `.n_stalled_solves` count the whole
+        call. Requires `batched=False`: `unrolled_relax` is SERIAL MODEL ONLY (no
+        `BatchedRNGRN` twin yet -- Task 14). A no-op unless a spectral weight is also
+        non-zero (`use_spectral`).
+
+    stall_switch_fraction: 0.20 (the spec's ~20%), UNCALIBRATED -- `docs/PLAN_redesign_R3.md`
+        Task 16 calibrates it from the measured stall-rate distribution, against the
+        measured gradient-error difference between the two paths, "not for convenience"
+        (spec 4.3 verbatim). Recorded for that comparison; this call does NOT gate the
+        per-member switch on it -- routing is unconditional on whether THIS solve stalled,
+        per the spec's "Interfaces" line (a per-run counter + a per-member switch "for those
+        members" that missed the bar). Only meaningful when `stall_switch=True`.
     """
     ri = recovery_input
     model_seed = seed if model_seed is None else model_seed
@@ -504,6 +671,12 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     # is gone -- there is a batched forward solve now; see the `spectral_*` docstring.)
     from .losses.spectral import SPECTRAL_TERM_KEYS  # unit U4
     use_spectral = any(float(strategy.base.get(k, 0.0)) != 0.0 for k in SPECTRAL_TERM_KEYS)
+    if stall_switch and batched:
+        raise ValueError(
+            "stall_switch=True is not supported with batched=True: unrolled.unrolled_relax "
+            "(the stall fallback, spec 4.3) is SERIAL MODEL ONLY -- it has no BatchedRNGRN "
+            "twin yet (unrolled.py's docstring; Task 14 owns that). Run the switch on the "
+            "serial path (batched=False).")
     if use_spectral and not split_hinges:
         raise ValueError(
             "a spectral weight is non-zero but split_hinges=False (unit U4): spectral "
@@ -619,6 +792,11 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             tau, jac_floor, dev, verbose, term_kw,
             kstar_obs_init=kstar_obs if d_init_from_kstar else None, history=history,
             spec_cfg=spec_cfg, spec_targets=spec_targets)
+    # Task 13: the per-run stall counter (spec 4.3). [n_ignited_solves, n_stalled_solves] --
+    # a mutable pair rather than two locals so `_account_for_stall` can update both without
+    # `nonlocal`. Stays [0, 0] unless stall_switch=True (batched=True never touches it: the
+    # switch is refused there, above).
+    stall_counts = [0, 0]
     # the serial loop is skipped entirely when the batched path ran; it stays the REFERENCE
     # implementation and the default, so no pre-existing number changes method.
     for r in range(0 if batched else n_restarts):
@@ -630,17 +808,23 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         # the model init so a spectral run is reproducible the same way the init is.
         spectral_ctx = None
         if use_spectral:
-            from .forward import PatternSolver
             from .losses.spectral import SpectralContext
-            # warm_mode="relax" is the TRAINING policy (GPU-port unit, 2026-08-12): the
-            # losses are translation-invariant so a warm re-relax's phase drift is
-            # harmless here, and Newton-only warm starts measured pathological at
-            # Adam-scale theta displacement (5030 s vs fresh 938 s at 96^2). The
-            # "newton" default on PatternSolver itself remains the FD-instrumentation
-            # contract. Device is derived from the model (already .to(dev) above).
-            solver = PatternSolver(model, n=frame.shape[-1], L=L_model,
-                                   seed=_restart_seed(model_seed, r),
-                                   warm_mode="relax")
+            if stall_switch:
+                # Task 13, spec 4.3: the stall-aware solver (fresh-relaxed every call; see
+                # its docstring for why it does not reuse PatternSolver's warm start).
+                solver = _StallSwitchSolver(model, frame.shape[-1], L_model,
+                                            _restart_seed(model_seed, r), device=dev)
+            else:
+                from .forward import PatternSolver
+                # warm_mode="relax" is the TRAINING policy (GPU-port unit, 2026-08-12): the
+                # losses are translation-invariant so a warm re-relax's phase drift is
+                # harmless here, and Newton-only warm starts measured pathological at
+                # Adam-scale theta displacement (5030 s vs fresh 938 s at 96^2). The
+                # "newton" default on PatternSolver itself remains the FD-instrumentation
+                # contract. Device is derived from the model (already .to(dev) above).
+                solver = PatternSolver(model, n=frame.shape[-1], L=L_model,
+                                       seed=_restart_seed(model_seed, r),
+                                       warm_mode="relax")
             spectral_ctx = SpectralContext(solver=solver, targets=spec_targets, cfg=spec_cfg)
         latent_module = None
         latent = None
@@ -670,6 +854,11 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                     history.record_death(r, step)
                 failed = True
                 break
+            # Task 13, spec 4.3: this step attempted an ignited-member solve iff
+            # `spec_ignited == 1.0` -- ONLY then is `solver.last_stalled` fresh (not stale
+            # from a previous ignited step) -- see `_account_for_stall`'s docstring.
+            if stall_switch and use_spectral and float(parts.get("spec_ignited", 0.0)) == 1.0:
+                _account_for_stall(spectral_ctx.solver, history, step, r, stall_counts)
             # BEFORE opt.step(): the recorded parameters are the ones that produced this loss.
             if history is not None and history.should_record(step):
                 history.record_serial(step, r, parts, model)
@@ -735,6 +924,14 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                                     failed_at="final_eval"))
             continue
 
+        # Task 13: the final evaluation pass is its own ignited-member solve attempt (same
+        # "step" `history.record_serial(adam_steps, ...)` below treats it as). NOT counted
+        # here: the LBFGS closure above, which can call `spectral_ctx.solver.solve()` an
+        # UNKNOWN number of times per line-search trial -- a known undercount when
+        # `lbfgs_steps > 0`, left as a limitation rather than guessed at.
+        if stall_switch and use_spectral and float(parts.get("spec_ignited", 0.0)) == 1.0:
+            _account_for_stall(spectral_ctx.solver, history, adam_steps, r, stall_counts)
+
         # The FINAL parameters -- post-LBFGS, the ones that get checkpointed -- are always in
         # the trace, whatever the stride (TrainingHistory.should_record).
         if history is not None:
@@ -793,4 +990,6 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                           loss=loss, parts=parts, restarts=restart_log, latent_fields=latent_np,
                           nondim=bool(nondim), L=float(L), D_phys=D_phys,
                           kstar_model_nondim=kstar_model_hat,
-                          q_model=kstar_model_hat / (2.0 * math.pi))
+                          q_model=kstar_model_hat / (2.0 * math.pi),
+                          n_ignited_solves=stall_counts[0], n_stalled_solves=stall_counts[1],
+                          stall_switch_fraction=float(stall_switch_fraction))

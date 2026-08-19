@@ -61,9 +61,11 @@ SIDE_NEUTRAL = ["utils.py"]
 #
 # `phase_topology` is deliberately NOT here: it takes a bare 2-D array and reads no payload,
 # so a recovery-side module could legitimately measure the OBSERVED frame with it.
+# `ingest_stripes` added 2026-08-19 (real-image dataset builder): lives in `scripts/`,
+# opens payload.h5 (write side), same bare-top-level-name exposure as the five above.
 FORBIDDEN = ["rd_models", "data.solver", "data.cache", "data.gate", "data.registry",
              "AnswerKey", "answer_key", "td_figures", "gen_tg3",
-             "canon_select", "canon_generate", "canon_annotate"]
+             "canon_select", "canon_generate", "canon_annotate", "ingest_stripes"]
 
 
 def _imports(path):

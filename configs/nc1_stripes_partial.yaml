@@ -1,0 +1,20 @@
+# Real-image partial observation: 3-node engineered colony circuit, 2 channels observed.
+# Dataset stripes_colony_2ch (scripts/ingest_stripes.py) — real data, NO answer key;
+# the sample k_star attr is the FFT peak (disclosed placeholder, D-REAL-1), so any
+# kstar-vs-truth score on these runs is circular. m=2 < N=3: the hidden channel is a
+# FreeScaleLatent field and REQUIRES loss.weights.resid > 0 (recover.py guard).
+# resid: 0.1 is UNCALIBRATED — hidden-channel recovery has no known-good objective
+# (TUNING.md Milestone 2); this config is an indicative probe, not a tuned recipe.
+# Other weights follow the claim-5 tuned nc1 recipe (param_prior 1.0, turing 8, kstar 8).
+# Serial path only (batched refuses m<N); device cuda per owner instruction 2026-08-19.
+_base_: [base.yaml]
+data:
+  source: registry
+  dataset_id: stripes_colony_2ch
+  sample_key: sample_0001
+model: {N: 3, m: 2, form: nc1, observed_idx: [0, 1], dispersion_backend: cubic}
+loss:
+  weights: {kstar: 8.0, turing: 8.0, resid: 0.1, anticollapse: 0.5, anchor: 2.0,
+            morphology: 0.1, param_prior: 1.0}
+train: {adam_steps: 400, n_restarts: 8, lbfgs_steps: 0, device: cuda}
+tracking: {run_name: stripes_partial}

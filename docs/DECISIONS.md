@@ -2537,3 +2537,106 @@ it can be fixed deliberately. See `docs/FUTURE_WORK.md`.
 
 **Not established.** Whether the reference frames are recoverable at a smaller `dt`, and hence
 what a calibrated k\* tolerance for Milestone 1 would actually be. Both remain open.
+
+### D-REAL-1 — real stripe images enter the registry with the FFT peak written into `k_star`; every k\*-vs-truth score on this dataset is CIRCULAR by construction
+
+**Date:** 2026-08-19 (branch `feature/real-stripes`, owner-requested real-data experiment).
+**Status:** DECIDED (with one knob marked **UNCALIBRATED** below).
+**Decided by:** the implementing agents under §10 delegated authority. The scope — 8 frames ×
+1 seed ("indicative"), device `cuda` (CPU in use elsewhere) — was set by the owner, 2026-08-19.
+
+**The context.** Owner request: train RNGRN on 8 pairs of real stripe-pattern snapshots of ONE
+bacterial colony carrying an engineered 3-node Turing circuit; only 2 of the 3 nodes are imaged
+(channels C1, C2), so this is partial observation, m=2 < N=3. Then a dynamical-lift simulation
+on the learned weights and topology/parameter/dispersion comparison graphics. Ingestion is
+`scripts/ingest_stripes.py`: 300×300 grayscale PNGs → per-channel least-squares 2nd-order
+polynomial illumination detrend → LANCZOS downsample to 96×96 → [0,1] rescale → (2,96,96)
+samples, C1 = channel 0, no mask (interior crops, no colony edge). Dataset
+`data/datasets/stripes_colony_2ch/` (8 samples). `L = 1.0` is ARBITRARY — the images carry no
+scale bar, so L only sets the units of D and k (§7c: L enters only as a unit).
+
+**The decision.** Real data has no generating model and therefore NO answer key — but
+`data/gate.py::from_registry` hard-requires a per-sample `k_star` attribute, defined there as
+the generator's *linear* answer-key wavenumber, and a sample missing it RAISES
+(`gate.py:205,228`). We write the FFT-measured peak of channel 0 into **both** `k_star` and
+`k_star_fft` (`scripts/ingest_stripes.py:97-100`, disclosed at the write site and in the module
+docstring).
+
+**Consequence, announced loudly per §10.4:** on this dataset `AnswerKey.kstar` IS the same FFT
+anchor the training objective already uses (`kstar_obs` from the observed frame). Every
+`kstar_rel_err`-style score computed on these runs is therefore **circular** — the model's k\*
+compared against the very measurement training was steered by — and must never be reported as
+accuracy against truth. It is not comparable to any `kstar_rel_err` reported on a generated
+dataset, where `k_star` is independent of the training signal. The reportable quantities here
+are cross-frame/cross-run consistency of the learned topology, parameters, and dispersion, and
+the lifted-rollout comparison against the real images.
+
+**What was rejected and why:**
+- *(a) Making `k_star` optional in `gate.py`.* A contract change at the firewall boundary
+  (`RecoveryInput`/`AnswerKey` separation, §5) that touches every consumer of the loader — too
+  invasive mid-deadline, and the hard requirement is the right default for generated data.
+- *(b) Leaving the attribute absent.* The loader raises by design ("a payload with no manifest
+  fails loud" applies to attributes too, §6); silencing that would weaken a guard to dodge a
+  disclosure that costs nothing.
+
+**Sub-decision — `loss.weights.resid = 0.1`, UNCALIBRATED.** m=2 < N=3 puts the hidden channel
+in the objective only through the stationarity residual, so `recover.py:376-388` raises unless
+`resid > 0` (otherwise the latent fields would sit at their initialisation while presenting as
+"recovered"). But no calibration for this weight exists: hidden-channel recovery is a documented
+open problem (TUNING.md Milestone 2, `[TUNE/IMPL]`), and the one measurement we have —
+`experiments/exp06_residual_sweep.json`, cited at the `recover.py` guard — found the residual
+*harmful* to Turing recovery when all channels are observed. `0.1` is an honest placeholder,
+marked UNCALIBRATED in `configs/nc1_stripes_partial.yaml`. What would calibrate it: a resid
+sweep on a *generated* partial-observation dataset with an answer key (Milestone 2's harness).
+
+**Sub-decision — `n_restarts = 8` (vs the tuned 64), serial path, CUDA.** The batched path
+refuses m<N (`recover.py:443-446` — latent fields have no batched residual form), so restarts
+run serially; 8 is a deadline compute compromise consistent with the owner's "indicative"
+scoping. Device `cuda` is the owner's call (CPU busy) — accepted knowing §7's measurement that
+the serial path is ~3× slower on CUDA than CPU. Other weights follow the claim-5 tuned nc1
+recipe (`param_prior 1.0, turing 8, kstar 8`; see the config header).
+
+**Firewall.** `ingest_stripes` opens `payload.h5` and is importable by bare name from
+`scripts/`, so it was added to `tests/test_firewall.py::FORBIDDEN` (line 68) per §5's
+hand-maintained scripts/ rule — the completeness test cannot see `scripts/`.
+
+**Evidence (preprocessing acceptance).** A windowed radial-spectrum estimate on the RAW 300 px
+images during ingestion found a dominant stripe wavelength of ~100 px (3 periods/frame) in 13
+of 16 channel-frames and ~60 px in 3, with spectral prominence ×250–×4000 over background
+(session measurement, recorded here; no committed artifact). Consistent with the committed
+payload: the registered samples' `k_star_fft` spans **11.44–19.93 rad/L ≈ 1.82–3.17
+periods/frame** (read back from `payload.h5` attrs, 2026-08-19). A smoke run (1 restart, 5
+Adam steps, `experiments/real_stripes/smoke/`) verified config → loader → trainer → scorer;
+per §8 its numbers are not findings — the harness runs, nothing more.
+
+**Not established.** Whether *any* run is Turing-unstable on this data — a real possibility,
+and a reportable outcome rather than a harness failure if it happens; whether `resid=0.1`
+helps or hurts the hidden channel; and recovery accuracy in any truth-anchored sense, which is
+UNMEASURABLE here by construction.
+
+**Where it lives:** `scripts/ingest_stripes.py` (docstring + attrs write);
+`configs/nc1_stripes_partial.yaml`; `data/datasets/stripes_colony_2ch/manifest.json`;
+`tests/test_firewall.py::FORBIDDEN`; runs under `experiments/real_stripes/` (see its README).
+
+**Addendum (2026-08-19, post-run) — final scope is 5 of 8 frames, by owner decision after a
+run-directory collision.** Run dirs are named `<run_name>_<UTC-second>_seedN`; the relaunched
+frames 1, 3, 4, 5 started within the same wall-clock second and all wrote to
+`stripes_partial_20260819_183655_seed0`, so the last finisher's (frame 1's) checkpoint
+survived and frames 3, 4, 5's models were destroyed. (Evidence: `target_reports.jsonl` maps
+all four samples to that one run_id; the surviving checkpoint's `kstar_obs` = 16.5936 =
+sample_0001's anchor, ≠ the anchors of 3/4/5.) The owner declined a rerun for time, so **every
+cross-frame claim from this experiment covers frames 1, 2, 6, 7, 8 only** — announced here per
+§10.4 because it changes what "n frames" means in any summary. The per-frame *metric rows* for
+3/4/5 in `target_reports.jsonl` were computed before the clobber and remain valid records;
+only the on-disk models are gone. Mechanical fixes, both in `run_frames.sh`: per-frame timeout
+raised 3600→7200 s (launch 1 killed 3 frames at the wire under 4-way GPU contention), and a
+per-sample `-o tracking.run_name="stripes_${s}"` override making run dirs unique per frame —
+mandatory for any rerun. `analyze.py` guards independently by cross-checking each checkpoint's
+`kstar_obs` against the sample's own anchor and dropping mismatches loudly.
+
+**Result summary (indicative — 1 seed, 8 restarts, resid UNCALIBRATED; k\* agreement is
+self-consistency with the training anchor, NOT accuracy):** all 5 analysed frames recover
+Turing-unstable models whose lifted (finite-gate μ = MU_BIO_CENTRAL) rollouts pattern, with
+lifted k\* tracking model k\* (e.g. 16.6→15.7, 19.3→21.2, 11.2→10.0) and μ_crit = inf over
+the probed gate range for all 5. `morphology_match` (QSS rollout vs observed frame class) is
+true for frame 7 only. Numbers: `experiments/real_stripes/analysis_summary.json`.

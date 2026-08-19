@@ -14,6 +14,8 @@ SOURCES = [
      ["D-CANON-4", "D-LIFT-1", "D-LIFT-2", "D-EVID-18", "D-PAPER-1"]),
     ("feature/paper-claim3-hidden-channel", "60fddfb", ["D-PAPER-2"]),
     ("feature/paper-claim5-noise", "4515ea1", ["D-CLAIM5-1"]),
+    ("feature/paper-form-robustness", "bfb9474", ["D-FORMCOMP-1"]),
+    ("feature/paper-weight-noise", "58445df", ["D-WNOISE-1"]),
 ]
 
 
@@ -38,9 +40,10 @@ def extract(branch: str, entry_id: str) -> str:
 
 def main() -> None:
     parts = [
-        "# DECISIONS.md excerpts — entries cited by PAPER_RESULTS_PACK.md\n",
-        "Verbatim copies of the decision entries the pack references, extracted "
-        "2026-08-19.\nEach branch's full `docs/DECISIONS.md` remains the "
+        "# DECISIONS.md excerpts — entries behind the paper-sprint claims\n",
+        "Verbatim copies of the decision entries the pack (and the two supplementary "
+        "claim docs, PAPER_CLAIM_FORMCOMP.md and PAPER_CLAIM_WNOISE.md) reference, "
+        "extracted 2026-08-19.\nEach branch's full `docs/DECISIONS.md` remains the "
         "authoritative record. Sources:\n",
     ]
     for branch, commit, ids in SOURCES:

@@ -33,13 +33,16 @@ def _resolve_recovery_input(cfg: Config):
     """Firewall gate: produce (RecoveryInput, AnswerKey) from the config's data source."""
     dc = cfg.data
     obs_idx = cfg.model.observed_idx or list(range(cfg.model.m))
+    # claim-5 unit: the observation-noise knob, threaded from cfg.data into every gate
+    # loader. See gate._apply_obs_noise for the contract.
+    noise_kw = dict(obs_noise_sigma=dc.obs_noise_sigma, obs_noise_seed=dc.obs_noise_seed)
     if dc.source == "reference":
         system = build_system(dc.system, L=dc.L)
         spec = spec_from_config(dc, system)
         cache.generate(dc.cache_root, spec, system)   # idempotent
-        return gate.from_cache(dc.cache_root, spec.hash(), cfg.model.N, obs_idx)
+        return gate.from_cache(dc.cache_root, spec.hash(), cfg.model.N, obs_idx, **noise_kw)
     if dc.source == "cache":
-        return gate.from_cache(dc.cache_root, dc.dataset_hash, cfg.model.N, obs_idx)
+        return gate.from_cache(dc.cache_root, dc.dataset_hash, cfg.model.N, obs_idx, **noise_kw)
     # For file-backed sources the sample's own L is authoritative; `data.L` is passed
     # through only as an EXPLICIT cross-check when the config sets one (the gate warns and
     # prefers the file if they disagree). `L_override` is None on these configs by default,
@@ -47,10 +50,10 @@ def _resolve_recovery_input(cfg: Config):
     if dc.source == "registry":
         return gate.from_registry(dc.datasets_root, dc.dataset_id, dc.sample_key,
                                   cfg.model.N, obs_idx, dc.L_override,
-                                  backend=cfg.tracking.index_backend)
+                                  backend=cfg.tracking.index_backend, **noise_kw)
     if dc.source == "hdf5_3gene":
         return gate.from_3gene_hdf5(dc.hdf5_path, dc.sample_key, cfg.model.N, obs_idx,
-                                    dc.L_override)
+                                    dc.L_override, **noise_kw)
     raise ValueError(f"unknown data.source '{dc.source}'")
 
 

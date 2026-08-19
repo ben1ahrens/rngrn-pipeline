@@ -48,6 +48,8 @@ class DataConfig:
     T_max: float = 4000.0      # generator horizon (answer-key side; OFF the tuning axis)
     dt: float = 0.1
     seed: int = 0
+    obs_noise_sigma: float = 0.0  # claim-5 unit: relative obs-noise level
+    obs_noise_seed: Optional[int] = None  # claim-5 unit
 
 
 @dataclass

@@ -110,6 +110,33 @@ def _observe(frame_full, observed_idx):
     return frame_full[idx].copy()
 
 
+def _apply_obs_noise(observed, obs_noise_sigma, obs_noise_seed):
+    """Add gaussian observation noise to an already-OBSERVED (m,H,W) frame.
+
+    claim-5 unit. Legal at the gate: this runs strictly after `_observe()` has sliced
+    the frame down to the observed channels, so it can never touch AnswerKey fields.
+
+    `obs_noise_sigma` is RELATIVE to each channel's own clean std (scale-free, so the
+    same sigma is comparable across samples with different signal amplitude). The
+    sigma=0 path is the IDENTITY: no RNG is constructed and the array returned is the
+    same object passed in, so it is bit-identical to the pre-noise code path. sigma>0
+    with no seed RAISES -- house style is fail-loud, and an unseeded noise draw would
+    make the run silently irreproducible.
+    """
+    if obs_noise_sigma == 0.0:
+        return observed
+    if obs_noise_seed is None:
+        raise ValueError(
+            "obs_noise_sigma > 0 requires obs_noise_seed to be set -- an unseeded "
+            "noise draw would make the run silently irreproducible.")
+    rng = np.random.default_rng(obs_noise_seed)
+    noisy = observed.copy()
+    for c in range(observed.shape[0]):
+        std = float(observed[c].std())
+        noisy[c] = observed[c] + obs_noise_sigma * std * rng.standard_normal(observed[c].shape)
+    return noisy
+
+
 def _require_attr(attrs, name, where):
     """Read a required scalar sample attribute, or RAISE.
 
@@ -149,7 +176,8 @@ def _resolve_L(attrs, L_arg, where):
     return L_file
 
 
-def from_cache(cache_root, dataset_hash, N, observed_idx):
+def from_cache(cache_root, dataset_hash, N, observed_idx,
+               obs_noise_sigma=0.0, obs_noise_seed=None):
     """Split a cached reference dataset into (RecoveryInput, AnswerKey).
 
     The cache's own schema stores the LINEAR k* under the answer-key group attribute
@@ -157,6 +185,8 @@ def from_cache(cache_root, dataset_hash, N, observed_idx):
     wavenumber, so ``AnswerKey.kstar_fft`` is None on this path. ``L`` and ``kstar`` are
     both required — the generator always writes them, so their absence means a corrupt
     or foreign payload and must not be papered over.
+
+    ``obs_noise_sigma``/``obs_noise_seed``: see ``_apply_obs_noise`` (claim-5 unit).
     """
     d = os.path.join(cache_root, dataset_hash)
     with h5py.File(os.path.join(d, "payload.h5"), "r") as f:
@@ -178,13 +208,14 @@ def from_cache(cache_root, dataset_hash, N, observed_idx):
             # it anyway so a future cache that grows the attribute is picked up for free.
             system_id=_system_id(dict(f.attrs)),
         )
-    ri = RecoveryInput(frame=_observe(frame_full, observed_idx), L=L,
-                       observed_idx=tuple(observed_idx), N=N)
+    observed = _apply_obs_noise(_observe(frame_full, observed_idx),
+                                obs_noise_sigma, obs_noise_seed)
+    ri = RecoveryInput(frame=observed, L=L, observed_idx=tuple(observed_idx), N=N)
     return ri, key
 
 
 def from_registry(datasets_root, dataset_id, sample_key, N, observed_idx, L=None,
-                  backend="jsonl"):
+                  backend="jsonl", obs_noise_sigma=0.0, obs_noise_seed=None):
     """Split a REGISTERED dataset sample into (RecoveryInput, AnswerKey).
 
     Loads <datasets_root>/<dataset_id>/payload.h5, reads the manifest to know which
@@ -205,6 +236,8 @@ def from_registry(datasets_root, dataset_id, sample_key, N, observed_idx, L=None
     A sample missing ``L`` or ``k_star`` RAISES. ``k_star_fft`` is optional (it is the
     headline scoring target when present, but its absence does not block scoring on the
     secondary linear reference) and is None when absent.
+
+    ``obs_noise_sigma``/``obs_noise_seed``: see ``_apply_obs_noise`` (claim-5 unit).
     """
     from . import registry as reg
     man = reg.load_manifest(datasets_root, dataset_id)
@@ -234,12 +267,14 @@ def from_registry(datasets_root, dataset_id, sample_key, N, observed_idx, L=None
                     sigma_max=sigma_max, D=D,
                     coefficients=coeffs, n_species_true=n_true,
                     system_id=_system_id(attrs))
-    ri = RecoveryInput(frame=_observe(frame_full, observed_idx), L=L_used,
-                       observed_idx=tuple(observed_idx), N=N)
+    observed = _apply_obs_noise(_observe(frame_full, observed_idx),
+                                obs_noise_sigma, obs_noise_seed)
+    ri = RecoveryInput(frame=observed, L=L_used, observed_idx=tuple(observed_idx), N=N)
     return ri, key
 
 
-def from_3gene_hdf5(path, sample_key, N, observed_idx, L=None):
+def from_3gene_hdf5(path, sample_key, N, observed_idx, L=None,
+                    obs_noise_sigma=0.0, obs_noise_seed=None):
     """Split a 3-gene dataset sample (train/val/test.h5) into (RecoveryInput, AnswerKey).
 
     The 3-gene contract: <sample>/final_frame (3,H,W) is the OBSERVABLE; jacobian,
@@ -249,6 +284,8 @@ def from_3gene_hdf5(path, sample_key, N, observed_idx, L=None):
     ``data/datasets/three_gene_*/payload.h5``, so the same per-sample attribute contract
     applies: ``L`` and ``k_star`` are read from the sample and are REQUIRED; ``L`` passed
     by the caller is a cross-check that warns and loses to the file.
+
+    ``obs_noise_sigma``/``obs_noise_seed``: see ``_apply_obs_noise`` (claim-5 unit).
     """
     where = f"{os.path.basename(path)}/{sample_key}"
     with h5py.File(path, "r") as f:
@@ -268,6 +305,7 @@ def from_3gene_hdf5(path, sample_key, N, observed_idx, L=None):
                     sigma_max=sigma_max, D=D,
                     coefficients={"interaction_matrix": inter.tolist()} if inter is not None else None,
                     n_species_true=n_true, system_id=_system_id(attrs))
-    ri = RecoveryInput(frame=_observe(frame_full, observed_idx), L=L_used,
-                       observed_idx=tuple(observed_idx), N=N)
+    observed = _apply_obs_noise(_observe(frame_full, observed_idx),
+                                obs_noise_sigma, obs_noise_seed)
+    ri = RecoveryInput(frame=observed, L=L_used, observed_idx=tuple(observed_idx), N=N)
     return ri, key

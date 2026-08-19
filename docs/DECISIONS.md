@@ -3258,3 +3258,83 @@ of the branch).
 
 **Where it lives:** `src/rngrn/model.py::RNGRN.__init__` (resolution), `::BatchedRNGRN.from_seeds`,
 `src/rngrn/config.py::ModelConfig`, `src/rngrn/recover.py::recover`.
+
+### D-PERF-4 — the batched-spectral refusal stays deleted; explicit entry-point validation replaces what it used to provide implicitly
+
+**Date:** 2026-08-19 (R3 repair task 1, `feature/gpu-optim-repair`, on top of
+`feature/gpu-optim`). **Status:** DECIDED
+**Decided by:** the implementing agent under delegated authority (§10).
+
+**The decision:** `losses/total.py::compute_terms_batched` no longer refuses a non-None
+`spectral` argument unconditionally, and that refusal is NOT restored. In its place, two
+explicit checks run at the top of the function, before any steady-state solve or Jacobian:
+(1) `model` must be a `model.BatchedRNGRN`, else `ValueError` naming the offending type; (2)
+when `spectral is not None`, `spectral.solver` must expose `solve_subset` (the
+`forward.BatchedPatternSolver` contract), else `ValueError` naming the offending type and
+`solve_subset` by name. `total_loss_batched` inherits both checks unchanged, since it only
+ever calls through `compute_terms_batched`.
+
+**Why the refusal's original reason no longer holds:** the deleted text (`10cff1b`) said
+"`forward.PatternSolver` owns per-restart warm-start state and cannot be shared across a
+batched member axis" — true when written, because no batched forward solve existed.
+`feature/gpu-optim`'s `2b11010` added `forward.BatchedPatternSolver`, which owns
+per-MEMBER warm state keyed by global member index and solves only the subset of members
+ignited at a given step (`_apply_spectral_batched`, `losses/total.py:188`). This is exactly
+the batched forward solve `docs/REDESIGN_rngrn.md` §4.1 names as R3's critical path. The
+structural obstruction the refusal existed to enforce is gone; keeping the refusal would make
+that critical-path combination permanently unreachable through this API, which is the
+opposite of what R3 needs.
+
+**Evidence:** `docs/REVIEW_gpu_optim_delta.md` C1 diagnosed the gap: `10cff1b..2b11010`
+deleted the refusal but added no replacement, leaving `compute_terms_batched`/
+`total_loss_batched` red (`AttributeError: 'NoneType' object has no attribute 'B'` on a
+`model=None` placeholder — reproduced here, RED, before this fix: 2 failed) and leaving
+`tests/test_ignition_gating.py::test_recover_raises_on_batched_with_a_spectral_weight`
+**passing vacuously** — it asserts `pytest.raises(ValueError, match="batched")` without
+passing `lbfgs_steps`, so it trips `recover()`'s unrelated LBFGS guard
+(`"batched=True requires lbfgs_steps=0"`), whose message happens to contain "batched". Passing
+`lbfgs_steps=0` explicitly (this task's Step 2, scratch, not committed) makes that same call
+raise **nothing at all** — `recover(batched=True, spectral weight != 0, lbfgs_steps=0)`
+completes cleanly, which is independent confirmation (from `recover.py`'s own code path, not
+just its docstring) that the combination is legal today. `recover.py:396-401`'s own docstring
+already states this in-place ("This combination USED TO RAISE … and the refusal is now
+DELETED because the solve gained a member axis, not relaxed because the reason stopped
+mattering") and `_batched_restarts` (`recover.py:238-248`) wires a real
+`forward.BatchedPatternSolver` into `SpectralContext` whenever `spec_cfg is not None`. The
+two-line entry-point check was verified against a well-formed batched `SpectralContext`
+(`_StubBatchedSpectralSolver` exposing `solve_subset`) producing the per-member
+exact-0-loss/NaN-record split `_apply_spectral_batched` documents
+(`test_compute_terms_batched_accepts_a_batched_spectral_context`), and against a serial-shaped
+solver (`.solve()`, no `.solve_subset()`) refused before any solve is attempted
+(`test_compute_terms_batched_refuses_a_serial_solver`, `n_calls == 0`).
+
+**What was rejected and why:** (a) restoring the deleted refusal verbatim — makes the
+newly-legal, REDESIGN-critical-path combination unreachable through `compute_terms_batched`,
+which is a functional regression relative to `2b11010`, not a repair; (b) leaving no
+validation at all (the state as committed) — a `PatternSolver` (serial) handed to the batched
+assembler by mistake surfaces as `AttributeError: 'PatternSolver' object has no attribute
+'solve_subset'` from inside `_apply_spectral_batched`, **after** the batch has already paid
+for a batched steady-state solve and three batched Jacobians, rather than being refused
+before either runs.
+
+**Not independently validated:** this task (R3 task 1) repairs only the entry-point
+validation and the test gap it exposed (C1). `BatchedPatternSolve.backward`'s adjoint
+gradient — the load-bearing untested item the review calls C2 — is out of scope here and
+remains unverified; the accepts-test above exercises `compute_terms_batched`'s per-member
+wiring with a hand-written stub solver, not the real `forward.BatchedPatternSolver`.
+
+**Open — returned to the orchestrator, not decided here:**
+`tests/test_ignition_gating.py::test_recover_raises_on_batched_with_a_spectral_weight`
+(`:194`) is left UNCHANGED by this task — still vacuously green for the reason above. Per its
+own docstring and the `recover.py:396-401` evidence cited above, the current contract makes
+`batched=True` + a non-zero spectral weight **legal**, so this test's name and assertion
+(`pytest.raises(ValueError, match="batched")`) no longer describe anything the library does.
+Its correct replacement is an end-to-end `batched=True, lbfgs_steps=0` spectral `recover()`
+run checked against its serial twin — which needs the equivalence-test machinery R3 tasks
+2/4 are building, not a two-line fix. Left as-is rather than deleted or weakened further,
+pending that task.
+
+**Where it lives:** `src/rngrn/losses/total.py::compute_terms_batched`;
+`tests/test_ignition_gating.py::test_compute_terms_batched_accepts_a_batched_spectral_context`,
+`::test_compute_terms_batched_refuses_a_serial_solver`,
+`::test_compute_terms_batched_refuses_a_non_batched_model`.

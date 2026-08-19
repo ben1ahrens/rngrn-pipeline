@@ -15,6 +15,7 @@ import torch
 from . import terms as T
 from .spectral import (is_ignited, is_ignited_batched, spectral_terms,
                        spectral_terms_batched, SPECTRAL_TERM_KEYS)
+from ..model import BatchedRNGRN
 
 
 class SteadyStateError(RuntimeError):
@@ -287,12 +288,21 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
 
     `spectral`: a `losses.spectral.SpectralContext` whose `solver` is a
     `forward.BatchedPatternSolver`, or None (default) to OMIT the M1 spectral terms. THIS
-    USED TO BE REFUSED and the refusal text is deleted, not weakened: it said the forward
-    solve had no batched form, which was true when it was written and is no longer. The
-    solver now owns per-MEMBER warm state keyed by global member index, and the forward
+    USED TO BE UNCONDITIONALLY REFUSED; the refusal was deleted, not weakened: it said the
+    forward solve had no batched form, which was true when it was written and is no longer.
+    The solver now owns per-MEMBER warm state keyed by global member index, and the forward
     solve gets its own member axis (`forward.batched_reaction_fields` broadcasts the batched
     parameters to per-pixel fields, which `model.BatchedRNGRN.reaction` deliberately does
     not). See `_apply_spectral_batched` for the per-member ignite-or-omit contract.
+
+    What the deleted refusal used to provide IMPLICITLY -- because it always fired before
+    `spectral` (or `model`) was ever touched -- is restored EXPLICITLY here instead, at the
+    entry point, before any steady-state solve or Jacobian: `spectral.solver` must expose
+    `solve_subset` (the `forward.BatchedPatternSolver` contract), not `solve` (the serial
+    `forward.PatternSolver` one). Handing the serial solver to this assembler is now a
+    plausible mistake -- both combinations are legal -- and used to surface only as an
+    `AttributeError` mid-step, inside `_apply_spectral_batched`, after the batch had already
+    paid for a steady-state solve and three Jacobians (REVIEW_gpu_optim_delta.md C1/§8).
 
     `active`: an optional (B,) bool mask of members still being optimised, used ONLY to skip
     the forward solve for members `recover` has already abandoned. It cannot change any
@@ -304,12 +314,25 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
     `obs_scale` / `kstar_idx`: the same per-call constants the serial `compute_terms` takes,
     with the same None-means-compute-it-here default.
     """
+    if not isinstance(model, BatchedRNGRN):
+        raise ValueError(
+            f"compute_terms_batched requires a model.BatchedRNGRN (B independent members); "
+            f"got {type(model).__name__}. Use losses.total.compute_terms for a single "
+            "model.RNGRN.")
     if compute_resid:
         raise ValueError(
             "compute_terms_batched cannot compute the stationarity residual: the batched "
             "reaction takes one state vector per member, not per-pixel states. Its default "
             "weight is 0 (exp06 settled it off), so batched recovery is available only for "
             "loss.weights.resid == 0. Use the serial path for residual runs.")
+    if spectral is not None and not hasattr(spectral.solver, "solve_subset"):
+        raise ValueError(
+            f"compute_terms_batched requires spectral.solver to expose solve_subset(members, "
+            f"xstar_batch) -> (u_stack, ok_members, reasons); got "
+            f"{type(spectral.solver).__name__}, which looks like the SERIAL "
+            "forward.PatternSolver (.solve() only, no member axis). Use "
+            "forward.BatchedPatternSolver for the batched path -- see "
+            "losses.spectral.SpectralContext's docstring for the two duck-typed contracts.")
     xstar, conv = T.steady_state_batched(model)
     # ones for the failed members: a poison guard for the SHARED graph, not a scored value.
     x_ok = torch.where(conv.unsqueeze(-1), xstar, torch.ones_like(xstar))

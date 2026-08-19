@@ -2537,3 +2537,102 @@ it can be fixed deliberately. See `docs/FUTURE_WORK.md`.
 
 **Not established.** Whether the reference frames are recoverable at a smaller `dt`, and hence
 what a calibrated k\* tolerance for Milestone 1 would actually be. Both remain open.
+
+---
+
+### D-PAPER-1 — claim-3 hidden-slow-channel experiment: `resid=0.3` UNCALIBRATED, 32 vs 64
+restarts, and the slow-channel/hub confound
+
+**Date:** 2026-08-19. **Status:** DECIDED (design), MEASURED (outcome), one input
+UNCALIBRATED.
+
+**The decision.** Paper claim 3 ("recovery of a 3N GRN from partial observations that
+patterns robustly") is tested on `three_gene_qvar` / `sample_0001`, seeds 0-7, three arms
+under `experiments/claim3_hidden_slow/`: (a) `replica_fullobs` — the exact `c2_P_t8k8_consol`
+invocation (CUDA batched, `n_restarts=64`, `resid=0`), run as a code-drift check against the
+historical baseline at git `4a61201`; (b) `ctrl_fullobs_resid` — full observation, serial CPU,
+`resid=0.3`, `n_restarts=32`; (c) `hidden_slow` — identical to (b) plus `model.m=2`,
+`model.observed_idx=[1,2]` (species 0 hidden). (b) and (c) are the claim-3 comparison: same
+objective, same restart budget, same seeds, only the observation differs.
+
+**`resid=0.3` is UNCALIBRATED, and that is unavoidable, not an oversight.** `recover.py:376-389`
+raises loudly for any `m < N` run with `resid` weight 0 — the latent (hidden) field enters the
+objective *only* through the stationarity residual, so at `resid=0` its gradient is exactly
+zero and a "recovery" of it would just be reporting the random init. `resid > 0` is therefore
+mandatory for arm (c), not a choice. But `recover.py:387-389`'s own comment records that
+**exp06 already measured this residual as harmful to Turing recovery — 9/9 swept cells
+collapsed** — so hidden-channel recovery "currently has no known-good objective, that is an
+open problem, not a config mistake" (source comment, verbatim). `0.3` was picked as a plausible
+non-zero value, not calibrated against a control sweep of its own; an honest negative result
+(recovery failing because of the residual term, not because of the hidden channel per se) was
+always a live possible outcome of this design and is called out here so it isn't misread as a
+verdict on hidden-channel identifiability. Arm (b) exists specifically so this confound is
+visible: (b) carries the same `resid=0.3` at full observation, so anything (b) itself loses
+relative to arm (a) (`resid=0`) is the residual's cost, not the hidden channel's.
+
+**`n_restarts` drops from 64 (arm a) to 32 (arms b/c), and (b)/(c) are restart-matched to each
+other, not to (a).** `recover.py:443-446` refuses `batched=True` whenever `m < N` — the batched
+reaction takes one state per member, not per-pixel states, so there is no batched residual —
+which forces (b) and (c) onto the serial CPU path. A timing probe (`n_restarts=4,
+adam_steps=50`, 1 worker, plumbing check only, not a result) measured 20 s wall and
+extrapolated to a ~43 min/cell projection at `n_restarts=32`, `--workers=4`, comfortably under
+the 2.5 h ceiling, so no further reduction was needed. Measured actual wall times came in well
+under the projection: (a) ~18 min (CUDA batched, 64 restarts), (b) ~9 min, (c) ~11 min (both
+serial CPU, 32 restarts, 4 workers) — the probe's linear extrapolation was conservative.
+Because (a) runs a different restart budget *and* a different `resid`, it is not a
+restart-matched or objective-matched comparison to (b)/(c); it exists solely to check that
+`main@48441e4`'s training code has not drifted from the code that produced the historical
+`c2_P_t8k8_consol` numbers. It has not: arm (a)'s `kstar_fft_rel_err_mean` came back
+bit-identical to the `4a61201` baseline (`0.03522518377119767` both), as expected from
+identical seeds, identical code, and `train.deterministic=true`.
+
+**Slow-channel identification is unambiguous by both criteria checked.** `sample_0001`'s
+ground truth (`payload.h5`, `params_json`): `D = [1.0, 190.293, 133.179]` — species 0 diffuses
+~130-190x slower than species 1 or 2 — and `mu = [0.776, 1.321, 2.595]` — species 0 also has
+the lowest reaction/degradation rate. Both the diffusion and reaction criteria independently
+point at species 0, so hiding it (`observed_idx=[1,2]`) unambiguously hides the slow channel
+under either definition.
+
+**The disclosed confound: species 0 is also the topological hub, not just the slow channel.**
+`interaction_matrix = [[1,-1,-1],[1,0,0],[1,0,0]]` — species 0 is self-activating and inhibited
+by *both* other species, while species 1 and 2 each carry only a self-term. Species 0 is the
+only species with any cross-species coupling at all. So this design cannot separate "hidden
+slow channel" from "hidden hub" — any recovery degradation attributable to (c) below could be
+either effect, or both, and this dataset does not let the two be told apart. That is a property
+of the fixed design (§ controller spec), not something this run introduced or could correct.
+
+**Measured outcome, (c) read against its control (b), never against zero (§8):**
+
+| | (b) ctrl_fullobs_resid, full obs, resid=0.3 | (c) hidden_slow, species 0 hidden, resid=0.3 |
+|---|---|---|
+| n_recovered | 8/8 | 8/8 |
+| n_turing (recovered_turing) | 8/8 (turing_frac 1.0) | 7/8 (turing_frac 0.875; seed 6 the exception) |
+| kstar_fft_rel_err mean / median | 0.0527 / 0.0503 | 0.0743 / 0.0814 |
+| kstar_rel_err mean / median | 0.0287 / 0.0312 | 0.0340 / 0.0330 |
+| morphology_n_compared / match_frac | 8 / 0.875 (seed 6 turing-true but morphology-false) | 7 / 1.0 (seed 6 excluded — no rollout comparison for a non-Turing recovery) |
+
+`recovered_turing` (a dispersion claim) and `morphology_match` (a rollout claim) are kept
+distinct per `reporting-numbers.md`; they disagree with each other inside (b) itself (seed 6:
+Turing-unstable, pattern mismatch), which is exactly the gap `eval/rollout.py` exists to catch,
+not a defect in this run. Hidden-channel scoring used `scoring_mode: permutation_aligned`
+(`validate.py:447`, via `PERM.observed_subblock_score` against the observed sub-block of the
+Jacobian) with `observed_idx=[1,2]`; the permutation search's best alignment was the identity
+`(0,1,2)` in the sampled run inspected, i.e. no permutation ambiguity was exploited given the
+observed indices are pinned.
+
+**What was rejected.** Calibrating `resid` before running (c) — no time in the paper-sprint
+window, and exp06's existing sweep already establishes the qualitative risk; running it
+UNCALIBRATED with the risk stated plainly was preferred over inventing an untested value or
+blocking on a calibration sweep. Redesigning which channel is hidden, or hiding more than one
+— the design is fixed by the controller for this claim, not decided locally. Reducing
+`n_restarts` below 32 — the timing probe showed no need.
+
+**Not established.** Whether the ~40-60% relative increase in k\* FFT error and the one lost
+Turing recovery in (c) versus (b) is attributable to the hidden channel, the hub confound, the
+`resid=0.3` cost (already partly visible as (b) vs (a)'s clean `resid=0` numbers), or some
+combination — this single design cannot separate them. No sweep over which species is hidden,
+nor over `resid`, was run.
+
+**Where it lives:** `experiments/claim3_hidden_slow/{replica_fullobs,ctrl_fullobs_resid,
+hidden_slow}/target_reports.jsonl`; gate at `recover.py:376-389` and `recover.py:443-446`;
+`experiments/claim3_hidden_slow/README.md`.

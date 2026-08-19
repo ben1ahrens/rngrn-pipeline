@@ -1,0 +1,457 @@
+{
+  "loss": 0.5746787798031284,
+  "kstar_model": 0.27447699831167205,
+  "kstar_obs": 0.2849945758311329,
+  "restarts": [
+    {
+      "restart": 0,
+      "total": 2.019150739274979,
+      "sig_max": -0.0366186773222027,
+      "sig_max_pos": -0.0366186773222027,
+      "kstar_model": 0.2687796130607136,
+      "rel_err": 0.05689568886086961
+    },
+    {
+      "restart": 1,
+      "total": 1.4000863872633644,
+      "sig_max": 0.04040041500799596,
+      "sig_max_pos": 0.04040041500799596,
+      "kstar_model": 0.31435869506838154,
+      "rel_err": 0.10303395792211047
+    },
+    {
+      "restart": 2,
+      "total": 2.129343496976333,
+      "sig_max": -0.038342228448565496,
+      "sig_max_pos": -0.04243737764944833,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 3,
+      "total": 2.141614895125666,
+      "sig_max": -0.04437196323499126,
+      "sig_max_pos": -0.04437196323499126,
+      "kstar_model": 0.32575346557029855,
+      "rel_err": 0.14301636961785555
+    },
+    {
+      "restart": 4,
+      "total": 2.188644979752127,
+      "sig_max": -0.05900077581808416,
+      "sig_max_pos": -0.06247510119222066,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 5,
+      "total": 2.139056391070683,
+      "sig_max": -0.05649419941547984,
+      "sig_max_pos": -0.06071196350787755,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 6,
+      "total": 2.0909074729772983,
+      "sig_max": -0.036924136352038284,
+      "sig_max_pos": -0.04095532811393976,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 7,
+      "total": 2.1278141322279316,
+      "sig_max": -0.05288203392452662,
+      "sig_max_pos": -0.057380481786052595,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 8,
+      "total": 0.640538167010503,
+      "sig_max": 0.18067576765583748,
+      "sig_max_pos": 0.18067576765583748,
+      "kstar_model": 0.27447699831167205,
+      "rel_err": 0.036904483012997175
+    },
+    {
+      "restart": 9,
+      "total": 2.092533820931748,
+      "sig_max": -0.030261079551104908,
+      "sig_max_pos": -0.03502317769662122,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 10,
+      "total": 2.0784518194600423,
+      "sig_max": -0.025048906647984537,
+      "sig_max_pos": -0.029065797014367956,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 11,
+      "total": 2.0819083832473875,
+      "sig_max": -0.033637128722256215,
+      "sig_max_pos": -0.03689315884177413,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 12,
+      "total": 2.0846336187805687,
+      "sig_max": -0.025475548027514727,
+      "sig_max_pos": -0.029570625949390084,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 13,
+      "total": Infinity,
+      "steady_state_failed": true,
+      "failed_at": "train",
+      "failed_at_step": 364
+    },
+    {
+      "restart": 14,
+      "total": 2.08369100198719,
+      "sig_max": -0.026132785108930245,
+      "sig_max_pos": -0.030186817616645434,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 15,
+      "total": 0.7477762411293482,
+      "sig_max": 0.13738351078560518,
+      "sig_max_pos": 0.13738351078560518,
+      "kstar_model": 0.2915691540645476,
+      "rel_err": 0.023069134530620528
+    },
+    {
+      "restart": 16,
+      "total": 6.616735721406789,
+      "sig_max": -0.2507990657163685,
+      "sig_max_pos": -0.2683287831767349,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 17,
+      "total": 0.5746787798031284,
+      "sig_max": 0.25431535752477386,
+      "sig_max_pos": 0.25431535752477386,
+      "kstar_model": 0.27447699831167205,
+      "rel_err": 0.036904483012997175
+    },
+    {
+      "restart": 18,
+      "total": 2.1196119384978296,
+      "sig_max": -0.04720738532296531,
+      "sig_max_pos": -0.05123182282724348,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 19,
+      "total": 1.2989729564036439,
+      "sig_max": 0.05643713681640605,
+      "sig_max_pos": 0.05643713681640605,
+      "kstar_model": 0.30866130981742307,
+      "rel_err": 0.08304275207423803
+    },
+    {
+      "restart": 20,
+      "total": 2.2007188720771,
+      "sig_max": -0.07937597689131837,
+      "sig_max_pos": -0.08314849055830131,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 21,
+      "total": 2.1095827306380683,
+      "sig_max": -0.026168223927454326,
+      "sig_max_pos": -0.03023878896466714,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 22,
+      "total": 1.504661978161027,
+      "sig_max": -0.00021416490161940693,
+      "sig_max_pos": -0.00021416490161940693,
+      "kstar_model": 0.35424039182509104,
+      "rel_err": 0.2429723988572181
+    },
+    {
+      "restart": 23,
+      "total": 2.110583055510872,
+      "sig_max": -0.03908866060189753,
+      "sig_max_pos": -0.04350170320794711,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 24,
+      "total": 2.124373305433424,
+      "sig_max": -0.04837269402732591,
+      "sig_max_pos": -0.052220717386687765,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 25,
+      "total": 2.137513506428979,
+      "sig_max": -0.05534492229006305,
+      "sig_max_pos": -0.05912708307232706,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 26,
+      "total": 2.093774407206891,
+      "sig_max": -0.032444285003046525,
+      "sig_max_pos": -0.036172546607005085,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 27,
+      "total": 2.135705143785567,
+      "sig_max": -0.0450123698778262,
+      "sig_max_pos": -0.04882871719387061,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 28,
+      "total": 2.0892720575520265,
+      "sig_max": -0.03721434154448966,
+      "sig_max_pos": -0.04137715389817487,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 29,
+      "total": 2.08909949352972,
+      "sig_max": -0.038257186303558455,
+      "sig_max_pos": -0.04227958345068761,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 30,
+      "total": 2.0781824788008474,
+      "sig_max": -0.020774097621233722,
+      "sig_max_pos": -0.024766456688209426,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    },
+    {
+      "restart": 31,
+      "total": 2.1564572648711424,
+      "sig_max": -0.06422227121527935,
+      "sig_max_pos": -0.06851017644115631,
+      "kstar_model": 0.006699891516622658,
+      "rel_err": 0.9764911578630054
+    }
+  ],
+  "recovered": {
+    "KA": [
+      [
+        0.7305510427517593,
+        0.001991692067401004,
+        0.0009199315400340752
+      ],
+      [
+        0.9076586100289573,
+        0.03918421703580672,
+        0.01589331904141274
+      ],
+      [
+        0.6015605486173046,
+        0.019297946202531887,
+        0.767424061012314
+      ]
+    ],
+    "KR": [
+      [
+        0.09204627901188699,
+        1.155384992284603,
+        0.004586328122161058
+      ],
+      [
+        0.045401889873838426,
+        0.06090899158988338,
+        0.028806223817642095
+      ],
+      [
+        1.000216092354058,
+        0.2225767559086412,
+        1.4734056478935273
+      ]
+    ],
+    "alpha": [
+      [
+        3.2983914216153796,
+        1.1815064413038519,
+        1.310648194935965
+      ],
+      [
+        3.107273726767397,
+        1.2065492891789793,
+        1.205085067178092
+      ],
+      [
+        1.2550884902994792,
+        1.266355721998409,
+        2.9731626308240515
+      ]
+    ],
+    "delta": [
+      0.8408935569648627,
+      1.0402830128540879,
+      1.018903724394061
+    ],
+    "beta": [
+      0.06264272912130985,
+      0.06302709684857832,
+      0.1578776840875599
+    ],
+    "D": [
+      0.6035198068867377,
+      115.5802263701672,
+      15.395603036541905
+    ],
+    "D_model": [
+      0.6035198068867377,
+      115.5802263701672,
+      15.395603036541905
+    ],
+    "x_star": [
+      0.45598311620704246,
+      0.5359222648149258,
+      0.5078780218730545
+    ],
+    "J": [
+      [
+        0.35140826213081666,
+        -0.29642845590548184,
+        -0.0005918709970196433
+      ],
+      [
+        1.7388302032051308,
+        -1.0241208617368702,
+        0.004286443022616894
+      ],
+      [
+        0.035151793827643475,
+        -0.06602832362282668,
+        -0.4983266183421834
+      ]
+    ]
+  },
+  "metric": {
+    "morphology_bank": "default_centroids",
+    "morphology_pred_target": "labyrinth",
+    "morphology_margin_target": 0.527191934363249,
+    "morphology_skew_target": 0.3682029671683864,
+    "morphology_kurtosis_target": -1.4612698057571436,
+    "morphology_ang_conc_target": 0.12240859540665007,
+    "morphology_ang_entropy_target": 0.9449551094558872,
+    "morphology_distance": 0.40484707495467137,
+    "spectral_distance_2d": 0.004243305992607487,
+    "morphology_pred": "labyrinth",
+    "morphology_margin": 0.10611967904962238,
+    "morphology_match": true,
+    "morphology_skew_model": 0.5259333475074921,
+    "morphology_kurtosis_model": -1.3524647239807552,
+    "morphology_ang_conc_model": 0.1027754111872513,
+    "morphology_ang_entropy_model": 0.9695844813700644,
+    "morphology_scored": "compared",
+    "kstar_model": 0.27447699831167205,
+    "kstar_true": 0.27169627507163324,
+    "kstar_rel_err": 0.010234675610866082,
+    "kstar_fft_true": 0.289,
+    "kstar_fft_rel_err": 0.0502526009976745,
+    "trivial_kstar_err": 0.24999999999999994,
+    "kstar_fft_bin_width": 0.125,
+    "trivial_kstar_fft_err": 0.2949058605407441,
+    "kstar_fft_bin_width_rel_fft": 0.11751568990987597,
+    "recovered_turing": true,
+    "recovered_turing_loose": true,
+    "turing_criterion": "strict_max_re_eig",
+    "recovered_sig_max": 0.25430479049254556,
+    "recovered_sig0": -0.3382220013637095,
+    "recovered_tr0": -1.171039217948237,
+    "turing_volume_1pct": 1.0,
+    "turing_volume_4p8pct": 1.0,
+    "turing_volume_10pct": 0.98,
+    "turing_volume_20pct": 0.855,
+    "repro_J_vector": "[0.35140826213081666, -0.29642845590548184, -0.0005918709970196433, 1.7388302032051308, -1.0241208617368702, 0.004286443022616894, 0.035151793827643475, -0.06602832362282668, -0.4983266183421834]",
+    "repro_sign_vector": "[1, -1, 0, 1, -1, 0, 0, 0, -1]",
+    "repro_N": 3,
+    "repro_kstar": 0.27447699831167205,
+    "repro_D_ratio": 191.51024548206433,
+    "repro_sign_zero_rtol": 0.05,
+    "plausibility_alpha_min": 1.1815064413038519,
+    "plausibility_alpha_max": 3.2983914216153796,
+    "plausibility_alpha_in_box": true,
+    "plausibility_alpha_source": "docs/GOAL_tica_equivalent.md \u00a72.2 \u2014 \"The generator priors recorded earlier in the project (alpha 0.5-10, delta 0.4-5, D-ratio ~8-250) are the working plausibility box for the RNGRN's own parameters.\" This is the project's own recorded working box, not an external wet-lab measurement; there is no independent literature citation for this dimensionless model-internal scale.\n",
+    "plausibility_delta_min": 0.8408935569648627,
+    "plausibility_delta_max": 1.0402830128540879,
+    "plausibility_delta_in_box": true,
+    "plausibility_delta_source": "docs/GOAL_tica_equivalent.md \u00a72.2 \u2014 same working-box record as `alpha` above.\n",
+    "plausibility_beta_min": 0.06264272912130985,
+    "plausibility_beta_max": 0.1578776840875599,
+    "plausibility_beta_in_box": null,
+    "plausibility_beta_source": "UNCITED",
+    "plausibility_d_ratio_value": 7.507352982266054,
+    "plausibility_d_ratio_in_box": true,
+    "plausibility_d_ratio_source": "Centre 7.5 and the \"measured ratio\" framing: docs/STATE_OF_THE_SCIENCE.md \u00a711 \u2014 \"The canonical measured ratio is Nodal/Lefty in live zebrafish: the activator Nodal diffuses ~7.5x slower than the inhibitor Lefty.\" low=1.0 is the classical Turing (1952) requirement that the inhibitor diffuse faster than the activator (D_ratio > 1) for a two-species reaction-diffusion instability \u2014 Turing, A.M. (1952) Phil. Trans. R. Soc. Lond. B 237:37-72. high=60.0 is a REASONED PROXY (not itself a measured ratio bound, flagged as such) taken from the same STATE_OF_THE_SCIENCE.md \u00a711 paragraph's cited absolute-diffusivity spread across measurement regimes (\"~60 um^2/s FCS-local to ~1-2 um^2/s FRAP-global\", i.e. roughly two orders of magnitude) as a ceiling on how much differential diffusion is physiologically plausible.\n",
+    "plausibility_n_scored": 3,
+    "plausibility_score": 1.0,
+    "lgen_system_id": "1",
+    "lgen_L": 185.00615234487148,
+    "lgen_nondim": false,
+    "lgen_q_model": 8.081877404886928,
+    "lgen_D_ratio": 191.51024548206433,
+    "lgen_J_sign": "+--+-++--",
+    "n_true": 3,
+    "n_model": 3,
+    "subblock_sign_match": 0.7777777777777778,
+    "subblock_fro_rel_err": 0.6067921120055492,
+    "sign_match_frac": 0.7777777777777778,
+    "sign_match_frac_aligned": 0.7777777777777778,
+    "sign_match_frac_identity": 0.7777777777777778,
+    "best_perm": "(0, 1, 2)",
+    "n_permutations_searched": 1,
+    "scoring_mode": "permutation_aligned",
+    "rollout_status": "ok",
+    "rollout_grid": 96,
+    "rollout_L": 185.00615234487148,
+    "rollout_integrator": "etdrk4_rfft",
+    "rollout_dt": 0.40437107646974735,
+    "rollout_nsteps": 388,
+    "rollout_nsteps_run": 388,
+    "rollout_stopped_reason": "horizon",
+    "rollout_sig_max": 0.25431644083273963,
+    "rollout_seconds": 1.092088730976684,
+    "rollout_amplitude": 0.3791306373598504,
+    "rollout_kstar": 0.2960578964846098,
+    "rollout_patterned": true,
+    "arm": "fully_observed",
+    "observed_idx": "[0, 1, 2]"
+  },
+  "provenance": {
+    "git_revision": "48441e4",
+    "python": "3.11.15",
+    "platform": "Linux-6.6.114.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "torch": "2.13.0+cu130",
+    "cuda_available": true,
+    "device": "cuda:NVIDIA GeForce RTX 5070 Ti Laptop GPU"
+  }
+}

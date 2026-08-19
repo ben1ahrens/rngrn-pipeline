@@ -228,6 +228,40 @@ def test_unknown_integrator_raises_before_any_work():
 
 
 # --------------------------------------------------------------------------------------
+# 4b. the explicit initial field (R3 Task 15's paired grid-fidelity measurement)
+# --------------------------------------------------------------------------------------
+def test_explicit_X0_reproduces_the_drawn_ic_exactly():
+    """`X0` is additive: handing `simulate` the very field it would have drawn must give
+    the same rollout, bit for bit. If this drifts, Task 15's paired measurement stops
+    having the committed unpaired run as its reference arm.
+    """
+    from rngrn.losses.terms import steady_state
+    m = turing_model()
+    n, seed, noise = 32, 0, 1e-2
+    xs, _ = steady_state(m)
+    xstar = xs.detach().cpu().numpy()
+    drawn = (xstar[:, None, None]
+             + noise * np.random.default_rng(seed).standard_normal((m.N, n, n)))
+
+    kw = dict(L=FIXTURE_L, n=n, integrator="etdrk4_rfft", seed=seed, max_steps=200)
+    ref = simulate(m, **kw)
+    got = simulate(m, X0=drawn, **kw)
+    assert np.array_equal(np.asarray(got["fields"]), np.asarray(ref["fields"]))
+    assert got["nsteps_run"] == ref["nsteps_run"]
+
+
+def test_explicit_X0_is_validated_not_silently_broadcast():
+    m = turing_model()
+    with pytest.raises(ValueError, match="X0 must have shape"):
+        simulate(m, L=FIXTURE_L, n=32, integrator="etdrk4_rfft",
+                 X0=np.zeros((m.N, 16, 16)), max_steps=10)
+    bad = np.ones((m.N, 32, 32))
+    bad[0, 0, 0] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        simulate(m, L=FIXTURE_L, n=32, integrator="etdrk4_rfft", X0=bad, max_steps=10)
+
+
+# --------------------------------------------------------------------------------------
 # 5. the saturation stopping rule
 # --------------------------------------------------------------------------------------
 def test_saturation_rule_needs_both_amplitude_and_wavenumber_flat():

@@ -158,7 +158,8 @@ def _collapsed(amps, sig_max, level, window):
 def simulate(model, L, n=128, T=None, dt=None, seed=0, noise=1e-2, xstar=None,
              integrator="etdrk4", horizon_growth_times=40.0, record_kstar=True,
              max_steps=200000, early_stop=False, check_every=200,
-             saturation_tol=0.01, saturation_window=5, collapse_margin=0.1, D=None):
+             saturation_tol=0.01, saturation_window=5, collapse_margin=0.1, D=None,
+             X0=None):
     """Integrate d x/dt = D lap(x) + f(x) from x* + noise. Returns a result dict.
 
     max_steps : hard bound on the number of steps taken, whatever the horizon implies.
@@ -177,6 +178,15 @@ def simulate(model, L, n=128, T=None, dt=None, seed=0, noise=1e-2, xstar=None,
         and applying it at the physical `L` starves diffusion by L**2 (3600x at L=60), so
         the model silently fails to pattern and `rollout_status` reads 'unpatterned'
         (D-EVID-14). None keeps `model.D`, which is correct on the dimensional path.
+    X0 : an EXPLICIT initial field of shape (N, n, n), replacing the default
+        `x* + noise*N(0,1)` draw. None (the default) keeps the drawn IC exactly as before —
+        `seed`, `noise` and `xstar` behave identically and this argument changes nothing.
+        Added for R3 Task 15's PAIRED grid-fidelity measurement, which needs the SAME
+        physical initial condition band-limited onto several grids: with the drawn IC,
+        `rng.standard_normal((N, n, n))` gives seed-s@96 and seed-s@512 unrelated fields, so
+        a distance between their rollouts conflates grid fidelity with nonlinear pattern
+        selection. `xstar` is still used for the dispersion/horizon setup and for
+        `pattern_floor`, so pass the same x* the field was built around.
 
     Result keys added by unit 7: `nsteps_run` (steps actually taken; `nsteps` remains the
     PLANNED count), `stopped_reason` in {'horizon', 'saturated', 'collapsed',
@@ -227,7 +237,15 @@ def simulate(model, L, n=128, T=None, dt=None, seed=0, noise=1e-2, xstar=None,
     nsteps = int(np.clip(T / dt, 200, max_steps))
     hit_budget = (T / dt) > max_steps
 
-    X = xstar[:, None, None] + noise * rng.standard_normal((N, n, n))
+    if X0 is None:
+        X = xstar[:, None, None] + noise * rng.standard_normal((N, n, n))
+    else:
+        X = np.array(X0, dtype=float)          # copied: the integrator writes in place
+        if X.shape != (N, n, n):
+            raise ValueError(
+                f"X0 must have shape {(N, n, n)} for N={N}, n={n}; got {X.shape}")
+        if not np.all(np.isfinite(X)):
+            raise ValueError("X0 contains non-finite entries")
     reaction_np = _reaction_np_builder(model)
     step = INTEGRATORS[integrator]
     # The amplitude above which the final field is called `patterned`. Defined here so the

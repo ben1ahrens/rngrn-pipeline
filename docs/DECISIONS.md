@@ -2699,3 +2699,17 @@ nothing more.
 
 **Where it lives:** `experiments/form_compare/comp_{0001,0004}/`;
 `experiments/form_compare/README.md`; `docs/PAPER_CLAIM_FORMCOMP.md`.
+
+**Outcome, recorded after the runs (2026-08-19).** Both cells completed cleanly (16/16
+recovered, 16/16 Turing, zero seed errors). Contrary to what the confound above might
+suggest, `competitive` at the `nc1`-tuned `t8k8` point does **not** underperform badly: it
+clears both §3.2 bars pooled (median `turing_volume_10pct`=0.9800 ≥ 0.90, median
+`turing_volume_4p8pct`=1.0000 ≥ 0.95), matching `nc1` at 1%/4.8%/10% closely and trailing
+`nc1` by a real but modest margin only at the 20% perturbation level (pooled median 0.8325
+vs `nc1`'s 0.9350, both still above the population median of 0.755). This is recorded
+because a favourable result is exactly the case where the disclosed confound is easiest to
+forget — the finding is "this hyperparameter point transfers reasonably well to
+`competitive`", not "`competitive` is confirmed equally robust as a form", since no
+`competitive`-own `kstar` sweep was run to check whether a form-appropriate choice would
+close, hold, or widen the 20% gap. Full numbers: `docs/PAPER_CLAIM_FORMCOMP.md`,
+`experiments/form_compare/numbers.md`.

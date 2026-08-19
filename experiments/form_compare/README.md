@@ -76,13 +76,24 @@ mechanism measured on `nc1` — the near-immobile-third-node route by which `tur
 buys its Turing rate at the cost of an exploding k\* error. `competitive`'s own tuning
 campaign (`docs/C1_COMPETITIVE_TUNING.md`) never swept a `kstar` axis at all; its own best
 cell (`turing8`) uses `turing=8` alone, at the library default `kstar=1.0`, and was measured
-only on `sample_0000`/`sample_0003` — not on the targets used here. **If `competitive`
-underperforms `nc1` in this comparison, that must be read as "underperforms at
-`nc1`-tuned hyperparameters", never as an intrinsic property of the `competitive` form** —
-the honest alternative reading is that `competitive` needs its own `kstar` sweep, which this
-unit does not have time to run before the paper deadline. See D-FORMCOMP-1 for the full
-reasoning and for context (not a gate) on Stage-0's measured prior-difficulty gap between
-the two forms.
+only on `sample_0000`/`sample_0003` — not on the targets used here. **Any number below must
+be read as "measured at `nc1`-tuned hyperparameters", never as an intrinsic property of the
+`competitive` form** — a fair form-vs-form claim would need `competitive`'s own `kstar`
+sweep, which this unit does not have time to run before the paper deadline. This matters
+even though the measured result turned out favourable to `competitive` (see
+`docs/PAPER_CLAIM_FORMCOMP.md` for the numbers) — a hyperparameter point transferring
+reasonably well is not the same claim as it being optimal, or even well-suited, for the
+other form. See D-FORMCOMP-1 for the full reasoning and for context (not a gate) on
+Stage-0's measured prior-difficulty gap between the two forms.
+
+## Result summary
+
+Both forms reach 16/16 Turing recovery and clear the pre-registered §3.2 bars pooled
+(`nc1` median tv10/tv4.8 = 1.0000/1.0000; `competitive` = 0.9800/1.0000). The gap between
+forms is small at 1%/4.8%/10% perturbation and opens up at 20% (`nc1` 0.9350 vs
+`competitive` 0.8325 pooled median), the only level with headroom to discriminate. Full
+numbers, per-target breakdowns and the honest "what is/is not supportable" framing:
+`docs/PAPER_CLAIM_FORMCOMP.md`.
 
 ## Caveats
 

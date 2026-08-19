@@ -42,12 +42,42 @@ steps against the batched-free (SERIAL) five spectral loss terms
 against a SURROGATE target pattern (a nearby-theta relaxation on the SAME box — the identical
 firewall-clean device `r3_fd_ab.py`'s `surrogate_frame` uses: no `payload.h5`, no `AnswerKey`).
 The box re-tiles per `solve_box.needs_retile`'s hysteresis (Task 11) exactly as §4.3 specifies,
-never on a fixed cadence. A step whose member is not Turing-ignited (cheap linear-stability
-check, mirrors `losses.spectral.is_ignited`'s margin) or whose solve fails for a non-stall
-reason (steady-state / relax failure, or a homogeneous / non-finite result) is NOT counted as
-an ignited-solve attempt (matching `recover._account_for_stall`'s existing semantics exactly,
-so this script's aggregate is comparable to a real run's `n_ignited_solves`/`n_stalled_solves`)
-— and a "recovery kick" (a small fixed-seed random nudge to theta) is applied so a member
+never on a fixed cadence.
+
+IGNITION GATE — CORRECTED 2026-08-19 (Task 16 review finding I2). A step whose member has not
+converged to a steady state is not-ignited exactly as production treats it (that half of the
+gate matches `losses.spectral.is_ignited`'s own precondition). Whether the member is
+Turing-UNSTABLE ENOUGH to ignite, however, is decided here with `sig.max() > IGNITION_MARGIN`
+on this script's own fixed `torch.linspace(1e-3, 10, 2000)` k-grid — this is NOT
+`losses.spectral.is_ignited`'s real gate, which reads `sig_max_pos` from
+`losses.terms.turing_hinges_split` (a k-FLOOR-limited slice of the dispersion curve). An
+earlier version of this docstring claimed the two "mirror" each other; they do not, and the
+difference is not cosmetic: `turing_hinges_split`'s k-floor sits near k≈1.0 on this survey's
+population, whose `khat` values all fall in [0.101, 0.191] — a literal `sig_max_pos` check
+would have de-ignited the ENTIRE population, including every genuine stall this script found.
+This is a DELIBERATE DIVERGENCE, kept because it is the only gate that produces a usable
+population here, but it makes this script's ignition test strictly MORE PERMISSIVE than
+production's — a member this script calls "ignited" is not guaranteed to pass production's own
+`is_ignited`.
+
+DENOMINATOR — A SECOND DIVERGENCE (Task 16 review finding I1). A step whose member IS ignited
+but whose solve fails for a non-stall reason (steady-state / relax failure, or a homogeneous /
+non-finite result — `reason != "ok"`) is recorded in this script's per-step trace but EXCLUDED
+from the stall-rate numerator AND denominator. Production does NOT exclude it: `spec_ignited`
+is set to `1.0` BEFORE the solve runs (`losses/total.py:49`, unconditional on the outcome), and
+`recover._account_for_stall` (`recover.py:330-332`) increments `n_ignited_solves`
+UNCONDITIONALLY whenever it is called (i.e. whenever `spec_ignited==1.0`), counting every
+non-"ok" reason as a NON-stall in the denominator (`last_stalled` is freshly `False` for every
+non-"ok" reason, never stale). So a real run's `n_stalled_solves`/`n_ignited_solves` ratio
+COUNTS relax/pattern failures as non-stalls; this script's `stall_fraction` DROPS them from
+both counts entirely — a different (arguably more honest, since a relax/pattern failure is not
+evidence about the Newton-convergence question at all) but genuinely DIFFERENT definition.
+Zero non-"ok" solves occurred in the population run below, so this divergence does not change
+the 25.7% headline this time — but it is a divergence, not a match, and a reader must not
+assume this script's aggregate is bit-for-bit comparable to a real run's counters without it.
+
+A "recovery kick" (a small fixed-seed random nudge to theta) is applied on any step that
+produced no gradient (not ignited, or the solve failed for a non-stall reason) so a member
 stuck in a dead patch of theta-space does not burn its whole step budget doing nothing.
 
 WHAT THIS SCRIPT DOES NOT COVER (state plainly, per CLAUDE.md §8/§10):
@@ -56,7 +86,9 @@ WHAT THIS SCRIPT DOES NOT COVER (state plainly, per CLAUDE.md §8/§10):
   * The perturbation scales sample a NEIGHBOURHOOD of one known-Turing point, not the full
     theta space an independent from-scratch training run would visit. A member that starts
     far outside the Turing class (`--scales` 2.0-and-up, per Task 14's hunt) is excluded from
-    the ignited population the moment it fails the cheap ignition check, same as production.
+    the ignited population the moment it fails THIS script's ignition gate — which is more
+    PERMISSIVE than production's own `is_ignited` (see the divergence note above), not "same
+    as production".
   * The "training-like" Adam steps here use ONLY the five spectral terms against a synthetic
     surrogate target — not the full A0 objective (kstar/turing/anticollapse/anchor). This
     affects how realistically theta WANDERS across steps; it does not affect the measured
@@ -64,6 +96,12 @@ WHAT THIS SCRIPT DOES NOT COVER (state plainly, per CLAUDE.md §8/§10):
     (theta, n, L, seed) and does not depend on what loss is driving theta.
   * `--steps` real Adam steps per member is a SHORT population (brief's own word), not a full
     training budget — see the module docstring's cost accounting below for why.
+  * **The measurement is made at `solve_box.N_DEFAULT` (n=96) and is GRID-DEPENDENT.** The
+    Newton residual — hence "stalled" vs "converged" itself — is a function of the grid the
+    forward solve runs on, not a property of theta alone. This n=96 is the grid the controller
+    has since RULED for Phase II (owner-delegated, D-R3-6 pending commit as this fix round is
+    written); this distribution is a TRANSFER CAVEAT against that ruling, not a pending
+    question — it does not automatically carry over if the ruled grid ever changes.
 
 FIREWALL. No `payload.h5`, no `AnswerKey`. Every input is the tracked checkpoint (via
 `torch.load`, the `r3_fd_ab.py` precedent) or a synthetic pattern this script itself relaxes.
@@ -166,19 +204,51 @@ def member_seed(scale: float, idx: int) -> int:
     return int.from_bytes(h.digest(), "big") % 2 ** 32
 
 
+def initial_model(scale: float, idx: int) -> tuple:
+    """(model, seed) -- the member's STARTING perturbed theta, seed-deterministic from
+    (scale, idx) alone. Factored out of `run_member` (Task 16 review finding I3c) so a cheap
+    init-only re-scan (`init_scan`) can reproduce exactly what a full `run_member` call would
+    have started from, without paying for the training loop -- `member_seed` and the
+    `np.random.default_rng(seed)` draw below are the ONLY sources of randomness in building
+    this starting point, so this is bit-reproducible."""
+    seed = member_seed(scale, idx)
+    rng = np.random.default_rng(seed)
+    dim = theta_dim(load_fixture())
+    direction = rng.standard_normal(dim)
+    pert0 = direction / np.linalg.norm(direction) * float(scale)
+    return load_fixture(pert0), seed
+
+
 # ------------------------------------------------------------------- cheap dispersion check
 
-def cheap_dispersion(model, kgrid_max: float = KGRID_MAX, kgrid_n: int = KGRID_N) -> dict | None:
-    """(sig_max, khat, xstar, gamma) from the LINEAR stability diagnostic only -- no relax, no
-    Newton. Mirrors the cheap gate `losses.spectral.is_ignited` reads upstream of any forward
-    solve in the real pipeline (`sig_max_pos` from `turing_hinges_split`), so this script does
-    not pay a full relax+Newton on a member that is not even predicted Turing-unstable.
-    Returns None on any failure (steady state, non-finite Jacobian rate, ...) rather than
-    raising -- a population survey must not die on one degenerate member."""
+def cheap_dispersion(model, kgrid_max: float = KGRID_MAX, kgrid_n: int = KGRID_N) -> dict:
+    """The LINEAR stability diagnostic only -- no relax, no Newton -- so this script does not
+    pay a full relax+Newton on a member that is not even predicted Turing-unstable.
+
+    CORRECTED 2026-08-19 (Task 16 review finding I2): this does NOT mirror
+    `losses.spectral.is_ignited` (`sig_max_pos` from `turing_hinges_split`'s k-floor-limited
+    slice) -- it is `sig.max()` on this script's own fixed k-grid, which is strictly MORE
+    PERMISSIVE. See the module docstring's "IGNITION GATE" paragraph for why (the real
+    `sig_max_pos` k-floor would have de-ignited this entire population). The steady-state
+    half of the gate DOES match production: both require `steady_state`'s own convergence
+    check to pass before anything downstream is trusted.
+
+    ALWAYS returns a dict (never None, per Task 16 review finding I3) with an "ok" bool, so a
+    caller can tell WHY a member did not ignite:
+      * `ok=False, failure="steady_state_failed"` -- `steady_state` itself did not converge.
+      * `ok=False, failure="exception_<Type>"` -- a downstream numerical exception (e.g. a
+        non-finite Jacobian on a badly displaced theta). Caught broadly and TYPED rather than
+        left unhandled, because a population survey must not die on one degenerate member --
+        but the exception's type is recorded rather than swallowed into an untyped None.
+      * `ok=True` with `sig_max <= IGNITION_MARGIN` -- a THIRD, different outcome ("left the
+        Turing class"): steady state converged and the dispersion computation succeeded, the
+        member is simply not unstable enough. Callers check `sig_max` themselves; this
+        function does not conflate that case with either failure above.
+    """
     try:
         xs, ok = steady_state(model)
         if not ok:
-            return None
+            return dict(ok=False, failure="steady_state_failed")
         J = model.jacobian(xs, create_graph=False).detach()
         kg = torch.linspace(1e-3, kgrid_max, kgrid_n)
         sig = model.dispersion(xs, kg, J=J).detach()
@@ -186,9 +256,10 @@ def cheap_dispersion(model, kgrid_max: float = KGRID_MAX, kgrid_n: int = KGRID_N
         khat = float(kg[int(sig.argmax())])
         rate = float(np.abs(np.linalg.eigvals(J.cpu().numpy())).max())
         gamma = rate if (np.isfinite(rate) and rate > 0.0) else None
-        return dict(sig_max=sig_max, khat=khat, xstar=xs.detach().cpu().numpy(), gamma=gamma)
-    except Exception:
-        return None
+        return dict(ok=True, sig_max=sig_max, khat=khat, xstar=xs.detach().cpu().numpy(),
+                   gamma=gamma)
+    except Exception as exc:                                              # noqa: BLE001
+        return dict(ok=False, failure=f"exception_{type(exc).__name__}")
 
 
 def _kick(model, seed: int, step: int, scale: float = KICK_SCALE) -> None:
@@ -214,7 +285,11 @@ def stall_check_solve(model, n: int, L: float, seed: int, newton_iter: int = NEW
 
     A near-verbatim copy of `recover._spectral_solve_with_stall_switch` -- see the module
     docstring for why this duplicates rather than imports it (it needs the residual, which the
-    original discards)."""
+    original discards). ONE further divergence, disclosed here: on a non-finite/non-positive
+    `|eig(J)|_max`, `recover.py:246-247` RAISES (`RuntimeError`, fail-loud); this function
+    instead returns `reason="bad_jacobian_rate"` (fail-SOFT), because a population survey must
+    keep going past one degenerate member rather than abort the whole run on it. Not observed
+    in the population run below (`reason_counts` has no `bad_jacobian_rate` entries)."""
     xs, ok = steady_state(model)
     if not ok:
         return None, None, False, float("nan"), "steady_state_failed"
@@ -308,18 +383,14 @@ def surrogate_frame_on_box(model, box: dict, seed: int) -> np.ndarray | None:
 # ------------------------------------------------------------------------------ one member
 
 def run_member(scale: float, idx: int, steps: int, lr: float, grad_clip: float) -> dict:
-    seed = member_seed(scale, idx)
-    rng = np.random.default_rng(seed)
-    dim = theta_dim(load_fixture())
-    direction = rng.standard_normal(dim)
-    pert0 = direction / np.linalg.norm(direction) * float(scale)
-    model = load_fixture(pert0)
+    model, seed = initial_model(scale, idx)
 
     op = cheap_dispersion(model)
-    if op is None or not (op["sig_max"] > IGNITION_MARGIN):
+    if not op["ok"] or not (op["sig_max"] > IGNITION_MARGIN):
+        init_reason = op["failure"] if not op["ok"] else "left_turing_class"
         return dict(scale=float(scale), member=idx, seed=seed, init_ignited=False,
-                    init_sig_max=(None if op is None else op["sig_max"]), n_retile=0,
-                    records=[])
+                    init_sig_max=(op["sig_max"] if op["ok"] else None),
+                    init_reason=init_reason, n_retile=0, records=[])
 
     khat_at_tile = op["khat"]
     box = sb.geometry(khat_at_tile)
@@ -335,9 +406,10 @@ def run_member(scale: float, idx: int, steps: int, lr: float, grad_clip: float) 
 
     for step in range(steps):
         opv = cheap_dispersion(model)
-        if opv is None or not (opv["sig_max"] > IGNITION_MARGIN):
-            records.append(dict(step=step, ignited=False, reason="not_ignited",
-                                sig_max=(None if opv is None else opv["sig_max"])))
+        if not opv["ok"] or not (opv["sig_max"] > IGNITION_MARGIN):
+            step_reason = opv["failure"] if not opv["ok"] else "left_turing_class"
+            records.append(dict(step=step, ignited=False, reason=step_reason,
+                                sig_max=(opv["sig_max"] if opv["ok"] else None)))
             _kick(model, seed, step)
             continue
 
@@ -395,7 +467,9 @@ def _quantiles(xs: list) -> dict | None:
                max=float(a.max()), mean=float(a.mean()))
 
 
-def summarize(all_members: list) -> dict:
+def summarize(all_members: list) -> tuple:
+    """(summary: dict, per_member: list, solved_records: list) -- fixed from a `-> dict`
+    annotation that did not match the actual 3-tuple return (Task 16 review, cheap minor)."""
     solved = [dict(scale=m["scale"], member=m["member"], step=r["step"], path=r["path"],
                    stalled=r["stalled"], residual=r["residual"], khat=r["khat"])
               for m in all_members for r in m["records"]
@@ -416,7 +490,11 @@ def summarize(all_members: list) -> dict:
         if not m["init_ignited"]:
             reason_counts["init_not_ignited"] = reason_counts.get("init_not_ignited", 0) + 1
         for r in m["records"]:
-            key = r.get("reason") if r.get("ignited") else "not_ignited"
+            # `reason` is meaningful on BOTH ignited and non-ignited records as of the
+            # Task 16 review fix (I3a) -- non-ignited steps now carry the specific reason
+            # ("steady_state_failed" / "exception_<Type>" / "left_turing_class") rather than
+            # a generic "not_ignited" placeholder, so no ternary override is needed here.
+            key = r.get("reason", "unknown")
             reason_counts[key] = reason_counts.get(key, 0) + 1
 
     by_scale: dict = {}
@@ -444,6 +522,27 @@ def summarize(all_members: list) -> dict:
     ), per_member, solved
 
 
+def init_scan(scales: list, members_per_scale: int) -> list:
+    """A CHEAP re-scan of every member's STARTING dispersion only -- no relax, no Newton, no
+    Adam steps. Added post-hoc (Task 16 review finding I3c) to recover the `init_sig_max` /
+    failure-kind evidence behind a "N of M members left the Turing class at init" claim
+    WITHOUT re-running the (potentially hours-long, "fresh relax every call") full survey:
+    `initial_model` reproduces each member's exact starting perturbation from (scale, idx)
+    alone, and `cheap_dispersion` is, by construction, the same cheap linear-algebra check
+    `run_member` already pays for at step 0 -- so this is seconds of work reproducing exactly
+    what the original run started from, not a new measurement."""
+    rows = []
+    for scale in scales:
+        for idx in range(members_per_scale):
+            model, seed = initial_model(scale, idx)
+            op = cheap_dispersion(model)
+            ignited = bool(op["ok"] and op["sig_max"] > IGNITION_MARGIN)
+            rows.append(dict(scale=float(scale), member=idx, seed=seed, ok=op["ok"],
+                            sig_max=op.get("sig_max"), khat=op.get("khat"),
+                            failure=op.get("failure"), init_ignited=ignited))
+    return rows
+
+
 # -------------------------------------------------------------------------------- driver
 
 def main() -> None:
@@ -456,16 +555,47 @@ def main() -> None:
     ap.add_argument("--lr", type=float, default=ADAM_LR_DEFAULT)
     ap.add_argument("--grad-clip", type=float, default=GRAD_CLIP_DEFAULT)
     ap.add_argument("--threads", type=int, default=1)
+    ap.add_argument("--init-scan-only", action="store_true",
+                    help="skip the full population survey; only run the cheap per-member "
+                         "init_scan (Task 16 review finding I3c) and merge it into "
+                         "<out>/results/stall_rate.json's 'init_scan' key")
     a = ap.parse_args()
 
     torch.set_default_dtype(torch.float64)
     torch.set_num_threads(a.threads)
+
+    if a.init_scan_only:
+        rows = init_scan(a.scales, a.members_per_scale)
+        n_ignited = sum(r["init_ignited"] for r in rows)
+        print(f"init scan: {len(rows)} members, {n_ignited} init-ignited, "
+             f"{len(rows) - n_ignited} not init-ignited", flush=True)
+        for r in rows:
+            print(f"  scale={r['scale']} idx={r['member']}: ok={r['ok']} "
+                 f"sig_max={r['sig_max']!r} khat={r['khat']!r} "
+                 f"init_ignited={r['init_ignited']} failure={r['failure']!r}", flush=True)
+        out_path = pathlib.Path(a.out) / "results" / "stall_rate.json"
+        payload = json.loads(out_path.read_text()) if out_path.exists() else {}
+        payload["init_scan"] = dict(
+            what="cheap re-scan of every member's INITIAL perturbed-theta dispersion only "
+                 "(no relax, no Newton, no training steps) -- added post-hoc (Task 16 review "
+                 "finding I3) to recover init_sig_max / failure-kind evidence behind the "
+                 "'N of M left the Turing class at init' claim, without re-running the full "
+                 "training survey. Uses initial_model(), the SAME seed-deterministic "
+                 "perturbation run_member starts each member from, so this reproduces "
+                 "exactly what the original run's members started at.",
+            ignition_margin=IGNITION_MARGIN, rows=rows,
+            n_members=len(rows), n_init_ignited=n_ignited)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2))
+        print(f"\nmerged init_scan into {out_path}", flush=True)
+        return
+
     t_start = time.perf_counter()
 
     # ---- one-shot equivalence check: stall_check_solve vs the real recover.py function ----
     base = load_fixture()
     op0 = cheap_dispersion(base)
-    if op0 is None or not (op0["sig_max"] > IGNITION_MARGIN):
+    if not op0["ok"] or not (op0["sig_max"] > IGNITION_MARGIN):
         raise RuntimeError("the base fixture is not Turing-unstable -- cannot run the "
                            "equivalence check or build the commensurate box")
     box0 = sb.geometry(op0["khat"])
@@ -517,6 +647,13 @@ def main() -> None:
         "summary": summary,
         "per_member": per_member,
         "records": records,
+        # Task 16 review finding I3b: `summary`/`per_member`/`records` all project down to
+        # solved (ignited AND reason=="ok") steps, dropping init_sig_max, n_retile, box_*,
+        # retiled, loss, and every non-"ok" step record. `all_members` is the RAW per-member,
+        # per-step trace `run_member` already builds -- persisted here in full so a reader can
+        # audit the evidence behind any "N of M left the Turing class" / "n_retile" claim
+        # without re-running anything.
+        "all_members": all_members,
         "total_seconds": time.perf_counter() - t_start,
     }
     out = out_dir / "results" / "stall_rate.json"

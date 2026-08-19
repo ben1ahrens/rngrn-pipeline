@@ -531,5 +531,133 @@
       "khat": 0.10104002001000502
     }
   ],
-  "total_seconds": 4012.9934592119826
+  "total_seconds": 4012.9934592119826,
+  "init_scan": {
+    "what": "cheap re-scan of every member's INITIAL perturbed-theta dispersion only (no relax, no Newton, no training steps) -- added post-hoc (Task 16 review finding I3) to recover init_sig_max / failure-kind evidence behind the 'N of M left the Turing class at init' claim, without re-running the full training survey. Uses initial_model(), the SAME seed-deterministic perturbation run_member starts each member from, so this reproduces exactly what the original run's members started at.",
+    "ignition_margin": 0.001,
+    "rows": [
+      {
+        "scale": 0.1,
+        "member": 0,
+        "seed": 1994948670,
+        "ok": true,
+        "sig_max": 0.36267927854216403,
+        "khat": 0.17607003501750879,
+        "failure": null,
+        "init_ignited": true
+      },
+      {
+        "scale": 0.1,
+        "member": 1,
+        "seed": 1218824748,
+        "ok": true,
+        "sig_max": 0.3606548818037596,
+        "khat": 0.17607003501750879,
+        "failure": null,
+        "init_ignited": true
+      },
+      {
+        "scale": 0.3,
+        "member": 0,
+        "seed": 1593320229,
+        "ok": true,
+        "sig_max": 0.3570154568561719,
+        "khat": 0.18107203601800903,
+        "failure": null,
+        "init_ignited": true
+      },
+      {
+        "scale": 0.3,
+        "member": 1,
+        "seed": 4007588059,
+        "ok": true,
+        "sig_max": 0.35210325139204307,
+        "khat": 0.16106403201600802,
+        "failure": null,
+        "init_ignited": true
+      },
+      {
+        "scale": 0.6,
+        "member": 0,
+        "seed": 1869879416,
+        "ok": true,
+        "sig_max": -0.4577237286605111,
+        "khat": 0.026010005002501252,
+        "failure": null,
+        "init_ignited": false
+      },
+      {
+        "scale": 0.6,
+        "member": 1,
+        "seed": 1821600094,
+        "ok": true,
+        "sig_max": -0.5117872074319584,
+        "khat": 0.021008004002001004,
+        "failure": null,
+        "init_ignited": false
+      },
+      {
+        "scale": 1.0,
+        "member": 0,
+        "seed": 1929381213,
+        "ok": true,
+        "sig_max": 0.31849644230605445,
+        "khat": 0.18607403701850928,
+        "failure": null,
+        "init_ignited": true
+      },
+      {
+        "scale": 1.0,
+        "member": 1,
+        "seed": 4061436637,
+        "ok": true,
+        "sig_max": -0.43334875686805935,
+        "khat": 0.026010005002501252,
+        "failure": null,
+        "init_ignited": false
+      },
+      {
+        "scale": 1.5,
+        "member": 0,
+        "seed": 666594711,
+        "ok": true,
+        "sig_max": 0.23934245089718487,
+        "khat": 0.16606603301650827,
+        "failure": null,
+        "init_ignited": true
+      },
+      {
+        "scale": 1.5,
+        "member": 1,
+        "seed": 71756541,
+        "ok": true,
+        "sig_max": 0.2916924073211044,
+        "khat": 0.14605802901450726,
+        "failure": null,
+        "init_ignited": true
+      },
+      {
+        "scale": 2.0,
+        "member": 0,
+        "seed": 1503040078,
+        "ok": true,
+        "sig_max": 0.418965875445722,
+        "khat": 0.15606203101550778,
+        "failure": null,
+        "init_ignited": true
+      },
+      {
+        "scale": 2.0,
+        "member": 1,
+        "seed": 1329169536,
+        "ok": true,
+        "sig_max": -0.3754510307386037,
+        "khat": 0.036014007003501755,
+        "failure": null,
+        "init_ignited": false
+      }
+    ],
+    "n_members": 12,
+    "n_init_ignited": 8
+  }
 }

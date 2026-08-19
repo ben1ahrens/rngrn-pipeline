@@ -3463,3 +3463,211 @@ grid sizes on a single model, not the config space.
 docstring), `::raps_torch` (docstring);
 `src/rngrn/forward.py::relax_to_pattern_torch` (docstring), `::_kstar_of_torch_batched`;
 `tests/test_raps_torch_parity.py`.
+
+---
+
+### D-PERF-5 — `_lsmr_torch`'s three departures from scipy `lsmr` stay; this is the missing entry for semantic-change-table #4
+
+**Date:** 2026-08-19 (R3 task 5, `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` I1 / table #4). **Status:** DECIDED
+**Decided by:** the implementing agent under delegated authority (§10), writing the entry the
+review found missing; the underlying code change itself was not authored by this task.
+
+**The decision:** three departures from a scipy-`lsmr`-faithful port of the D-FFT-10 adjoint
+solve stay as landed, undocumented until now:
+
+1. `forward.py:185` (`_LSMR_STOP_CHECK_EVERY = 25`) — the stopping test runs every 25
+   iterations instead of every iteration, so the solve can overshoot scipy's stop point by up
+   to 24 iterations; the returned iterate is not the one at the crossing scipy would report.
+2. `forward.py:152` (`_sym_ortho_t`) — `_sym_ortho` (Python floats, scipy-verbatim) is
+   deleted and replaced by a branchless 0-d-tensor version with guarded denominators.
+3. `forward.py:188` (`_lsmr_torch`) — the exact-Krylov-breakdown branch changes algorithm:
+   scipy *skips* the `v` update entirely when `beta == 0`; this code always runs it with
+   `u / where(beta==0, 1, beta)`, leaving an unnormalised vector rather than terminating.
+
+**Why this is accepted rather than reverted:** the refinement loop that follows LSMR decides
+convergence on the solve's *true residual*, not on LSMR's own internal stopping signal — so a
+cadenced, up-to-24-iterations-late stop changes which iterate refinement starts FROM, not what
+gets accepted as the final answer. All three departures are already documented at length,
+correctly, in `_lsmr_torch`'s own docstring and `_minnorm_solve_t`'s docstring — what was
+missing was this register entry, not the code-level explanation.
+
+**Evidence:** `docs/REVIEW_gpu_optim_delta.md` I1 (§3, table #4) is the source of the above:
+it independently re-derived all three departures from the diff, confirmed the docstrings
+state them honestly, and confirmed the true-residual argument is sound. It also states the
+gap this entry closes: `docs/DECISIONS.md` gained exactly one entry in the `feature/gpu-optim`
+range (D-PERF-3, about the dispersion backend) — none for this change — and that
+`tests/test_forward_solve.py`, named in the docstring as pinning agreement, "was written
+against the *faithful* port and was not re-examined" against the cadenced/branchless version.
+No fresh scipy-vs-torch LSMR comparison was run in this task — it is documentation-only, no
+behaviour change (per this task's own scope).
+
+**What was rejected and why:** (a) reverting to an iteration-for-iteration scipy-faithful stop
+check and restoring `_sym_ortho`'s Python-float branching — this would reintroduce a host sync
+on every LSMR iteration, which is exactly the cost this branch's whole thesis (§7a: batching
+and desyncing the training-time hot path) exists to eliminate; (b) leaving the change
+undocumented — the status quo, which is what produced I1 in the first place and which
+`CLAUDE.md` §10 forbids for a science decision that changes the stopping semantics of a solve
+D-FFT-10 verified.
+
+**Not independently validated:** this task made no new measurement. `tests/test_forward_solve.py`
+was not re-examined against the cadenced/branchless/guarded-breakdown version specifically —
+the review's finding that it "was written against the faithful port" stands unresolved. A
+future task re-deriving or re-verifying scipy-vs-torch LSMR agreement under the current code
+should start there.
+
+**Where it lives:** `src/rngrn/forward.py:185` (`_LSMR_STOP_CHECK_EVERY`), `:152`
+(`_sym_ortho_t`), `:188` (`_lsmr_torch`); D-FFT-10 (the decision this modifies the stopping
+semantics of); `tests/test_forward_solve.py` (unexamined against this version).
+
+---
+
+### D-PERF-6 — the ETDRK4 blow-up check moved from per-step to per-call; the numpy/torch return-array parity break on a blow-up is now recorded
+
+**Date:** 2026-08-19 (R3 task 5, `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` I2 / table #5). **Status:** DECIDED
+**Decided by:** the implementing agent under delegated authority (§10), writing the entry the
+review found missing; the underlying code change itself was not authored by this task.
+
+**The decision:** `etdrk4_torch.py:133` (`integrate_etdrk4_rfft_torch`) evaluates
+`isfinite(v).all()` ONCE per call, after the full step loop, rather than once per step as
+`eval/numerics.integrate_etdrk4_rfft` (the numpy original) does. This stays as landed.
+
+**Why this is accepted:** the boolean-equivalence argument is sound. Every operation in an
+ETDRK4 step is linear or an FFT over the whole field, so a non-finite value cannot be erased
+once it appears — `isfinite(v).all()` after the loop yields the identical flag a per-step
+check would have produced. The reaction closure (`clamp(X,0)**n`, `1 + einsum`, division) was
+checked for a path back to finite and none exists: `inf/inf -> nan`, and `nan` is absorbing.
+On CUDA a per-step `isfinite` check is a blocking device sync whose cost does not shrink as
+the step's own FLOPs shrink, so it dominates at small training geometries — eliminating it is
+squarely within this branch's thesis.
+
+**What the prior docstring omitted, now recorded:** `eval/numerics.integrate_etdrk4_rfft`
+(numpy) returns **the field at the first non-finite step**; the torch port now returns **the
+field after all `nsteps`**. So on a blow-up the two backends return numerically DIFFERENT
+arrays, not merely a different step index — this is a genuine deviation from
+`relax_to_pattern_torch`'s docstring claim that the two backends "relax the same trajectory up
+to FFT-backend round-off" (`forward.py:628`), not just lost diagnostic granularity about which
+step blew up.
+
+**Evidence:** `docs/REVIEW_gpu_optim_delta.md` I2 (§3, table #5). The boolean-equivalence check
+and the reaction-closure absorbing-nan argument are the reviewer's, stated there; this entry
+restates them as the record `CLAUDE.md` §10 requires and adds the parity-break framing
+verbatim from the review. `tests/test_etdrk4_torch.py` pins numpy equivalence at `delta <=
+1e-12` (CPU) / `1e-9` (CUDA) on non-blowing-up trajectories only — it neither catches nor
+covers the blow-up parity break, and per I2 it was not updated when the change landed.
+
+**What was rejected and why:** (a) reverting to a per-step `isfinite` check — reintroduces the
+per-step blocking CUDA sync this change exists to remove; (b) leaving the parity break
+unrecorded — the state as landed, which silently weakens a standing cross-backend claim
+(`relax_to_pattern_torch`'s docstring) without that claim's own text reflecting the exception.
+
+**Not independently validated:** no test currently exercises a blow-up trajectory against both
+the numpy and torch backends to confirm the returned arrays actually diverge as described (the
+argument is analytic — nan absorption plus differing return timing — not measured here). This
+task added the parity note to `integrate_etdrk4_rfft_torch`'s docstring but made no new
+measurement and changed no behaviour.
+
+**Where it lives:** `src/rngrn/etdrk4_torch.py:133` (`blew = ...`), its updated docstring;
+`src/rngrn/eval/numerics.py::integrate_etdrk4_rfft` (the differing numpy contract);
+`src/rngrn/forward.py::relax_to_pattern_torch` (the docstring carrying the now-qualified
+parity claim); `tests/test_etdrk4_torch.py` (does not cover the blow-up case).
+
+---
+
+### D-PERF-7 — the liveness-sync cadence (25 steps) stays; its "harmless" claim is corrected, not the cadence
+
+**Date:** 2026-08-19 (R3 task 5, `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` M3 / table #8). **Status:** DECIDED
+**Decided by:** the implementing agent under delegated authority (§10), writing the entry the
+review found missing; the underlying code change itself was not authored by this task.
+
+**The decision:** `recover.py:236` (`LIVENESS_SYNC_EVERY = 25`) inside `_batched_restarts`
+stays: the host-side "is everyone dead" bookkeeping and early break are checked every 25 Adam
+steps (and on the final step), not every step. This can let the early break fire up to 24
+steps late once every member of a batch has died.
+
+**What the prior inline comment overclaimed, now corrected:** the comment at the sync point
+called the delayed break "harmless -- those extra steps optimise an all-dead, all-masked batch
+and produce nothing." That is stronger than the truth. During those extra steps `total`
+(`torch.where(alive, loss_vec, zeros).sum()`) is an exact-zero tensor **with a graph** once
+every member is dead, so the fresh gradient contribution from `total.backward()` is zero -- but
+Adam's momentum and second-moment state, accumulated from steps BEFORE the batch died, keep
+decaying and being applied to the parameters regardless of the current gradient being zero.
+The parameters DO move during the lag. What is true, and is what the comment should have said,
+is narrower: no REPORTED number depends on it, because `final_alive` is all-False for such a
+batch and every member logs `steady_state_failed` downstream, whatever its parameters drifted
+to during the lag. Separately, `verbose` printing at such a step computes
+`float(loss_vec[alive].mean())` over an empty boolean selection, which silently evaluates to
+NaN rather than raising.
+
+**Evidence:** `docs/REVIEW_gpu_optim_delta.md` M3 (§4, table #8) is the source of both the
+mechanism (Adam momentum vs. zero gradient) and the verbose-NaN observation; this entry
+restates them as the record `CLAUDE.md` §10 requires. No new run was made to measure how
+often, or by how much, parameters actually drift during the lag -- the review's own claim is
+that no reported number depends on the answer, and this task's scope is documentation only.
+
+**What was rejected and why:** (a) shortening `LIVENESS_SYNC_EVERY` to catch a fully-dead
+batch sooner -- would reintroduce the per-step host sync this cadence was introduced to
+eliminate (the same D2H sync it replaced two per-step syncs with), for a case the review
+confirms affects no reported number; (b) silencing or fixing the verbose NaN print -- a
+behaviour change, out of scope for a documentation-only task; recorded here instead as a known,
+harmless (cosmetic-only) side effect for a future task to pick up if it matters.
+
+**Not independently validated:** the magnitude of parameter drift during a lag, and how often
+a lag actually occurs in practice, are both unmeasured. The claim that "no reported number
+depends on it" rests on `final_alive`/`steady_state_failed` excluding such members from every
+downstream consumer, which was verified by reading the code, not by a run.
+
+**Where it lives:** `src/rngrn/recover.py:236` (`LIVENESS_SYNC_EVERY`), `:258-274` (the
+`is_sync_step` block and its corrected inline comment), `:298-300` (the verbose NaN-mean
+print, unchanged).
+
+---
+
+### D-PERF-8 — `lbfgs_error` recording replaces a bare `except: pass`; the serial-only asymmetry against `_batched_restarts` is recorded, not closed
+
+**Date:** 2026-08-19 (R3 task 5, `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` M4 / table #10). **Status:** DECIDED
+**Decided by:** the implementing agent under delegated authority (§10), writing the entry the
+review found missing; the underlying code change itself was not authored by this task.
+
+**The decision:** in the serial restart loop (`recover.py:679-699`), an LBFGS-polish failure
+that used to be swallowed by a bare `except: pass` is now caught, formatted as
+`lbfgs_error = f"{type(e).__name__}: {e}"`, and appended as an `lbfgs_error` key on that
+restart's `restart_log` row (`recover.py:728-731`). This stays as landed.
+
+**Why this is accepted:** CLAUDE.md §4 requires failing loud; the deleted `except: pass` was
+exactly the failure mode the house style forbids -- the code comment at the site already notes
+this is "where the FIRST async CUDA error of a GPU run would previously have been swallowed."
+The LBFGS polish stays optional (a failed polish does not abort the restart; Adam's parameters
+are kept), so recording rather than raising is the correct severity: informational, not
+fatal.
+
+**The asymmetry, now recorded:** `lbfgs_error` is added to SERIAL `restart_log` rows only. The
+batched path's row construction (`_batched_restarts`, `recover.py:322-325`) never runs an
+LBFGS polish per member and never emits the key. `recover(batched=False)` and
+`recover(batched=True)` therefore write different column sets into the run index for what is
+nominally the same log structure. `CLAUDE.md` §4's flat-scalar rule is satisfied either way (a
+`str | None` is a flat scalar) -- the asymmetry is the missing column, not the type.
+
+**Evidence:** `docs/REVIEW_gpu_optim_delta.md` M4 (§4, table #10) is the source of the
+diagnosis, including the exact line references and the flat-scalar clarification. A short
+inline comment was added at `recover.py:322` (this task) noting the missing key at the site
+where a reader would otherwise expect it.
+
+**What was rejected and why:** (a) reverting to `except: pass` -- rejected outright, it is the
+defect being fixed and doing so would violate CLAUDE.md §4 again; (b) adding a matching
+`lbfgs_error=None` key to every `_batched_restarts` row in this task -- rejected as a
+behaviour change: `_batched_restarts` has no per-member LBFGS polish step to report on, so
+adding the key would either be a dead constant or would require adding the polish itself,
+neither of which is a documentation fix and both are out of this task's no-behaviour-change
+scope.
+
+**Not independently validated:** no test asserts on the presence or absence of `lbfgs_error`
+across the two `recover()` paths; nothing currently pins the asymmetry this entry describes,
+so a future change could close or widen it silently again.
+
+**Where it lives:** `src/rngrn/recover.py:699` (`lbfgs_error` assignment), `:728-731`
+(`restart_log.append(..., lbfgs_error=lbfgs_error)`); `src/rngrn/recover.py::_batched_restarts`
+`:320-325` (the row missing the field, with the new inline comment).

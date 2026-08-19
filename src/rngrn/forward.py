@@ -28,9 +28,14 @@ remains the reference implementation; ``BatchedPatternSolver`` (bottom of the fi
 restart/member axis over a ``model.BatchedRNGRN``, which is what lets a spectral run train
 B restarts at once on the GPU. The batched relax is one B-wide ETDRK4 stack; the Newton
 polish and the backward adjoint LOOP over the ignited members, calling the D1-verified
-``newton_polish`` / ``solve_adjoint`` unchanged. Measured split of a batched solve at
-32^2/B=3: relax 30 %, Newton 40 %, adjoint 30 %; at 64^2/B=3 it is 10 / 75 / 15 — so the
-per-member loop, not the relax, is what a further optimisation has to attack.
+``newton_polish`` / ``solve_adjoint`` unchanged. UNMEASURED: the relax/Newton/adjoint cost
+split of a batched solve. A prior version of this paragraph quoted a 32^2/B=3 and 64^2/B=3
+split ("relax 30%, Newton 40%, adjoint 30%"; "10/75/15") citing "the unit's report", which
+does not exist — no run under `experiments/` backs those figures (reporting-numbers.md step
+1), so the design conclusion drawn from them ("the per-member loop, not the relax, is what
+a further optimisation has to attack") is UNSUPPORTED and is withdrawn along with the
+numbers. `docs/PLAN_redesign_R3.md` Task 17 (the B/K curve with the forward solve in the
+loop) is where this split would actually get measured and committed under `experiments/`.
 
 Nothing here reads the observed frame or any answer-key quantity: the solver consumes
 only the model's own parameters and grid geometry supplied by the caller.
@@ -732,11 +737,16 @@ class PatternSolver:
 
     Device: ``device=None`` derives the solve device from the model (recover.py moves
     the model to the training device). On CUDA the relax runs on the D2-verified torch
-    integrator and Newton/adjoint run through the torch LSMR (`_minnorm_solve_t`,
-    same D-FFT-10 semantics); on CPU the algebra is the D1 port's, with two round-off
-    level departures from it taken for device efficiency and applied on BOTH devices:
-    |eig(J)|_max is evaluated by numpy rather than torch (`solve`), and the torch LSMR
-    stops on a cadence (`_lsmr_torch`). Neither changes what any quantity means.
+    integrator and Newton/adjoint run through the torch LSMR (`_minnorm_solve_t`, same
+    D-FFT-10 semantics, cadenced per D-PERF-5); on CPU the algebra is the D1 port's and
+    NEVER enters `_lsmr_torch` — `newton_polish`/`solve_adjoint` select
+    `_minnorm_solve_t`/`precon_t` only under `on_device = u.device.type != "cpu"`, so the
+    CPU path routes through scipy's `_minnorm_solve` unchanged. Of the two round-off
+    level departures from the D1 port taken for device efficiency, only ONE is applied on
+    BOTH devices — |eig(J)|_max is evaluated by numpy rather than torch (`solve`) — and
+    the torch LSMR cadence is CUDA-only. A reader asking whether CPU results are still
+    the D1 reference should read "yes": neither departure changes what any quantity
+    means, and the CPU path is unaffected by the LSMR cadence entirely.
     dt = 0.2/|eig(J)|_max and gamma = |eig(J)|_max are recomputed per solve from the
     current theta, as in the diagnostic. Grid geometry (the rfft2 |k|^2, the kx/ky pair
     and the full-spectrum |k|^2) is theta-independent and is built ONCE in __init__,
@@ -884,20 +894,21 @@ class PatternSolver:
 # is not reachable from here: nothing in this section is called by `PatternSolver`,
 # `PatternSolve`, or any free function they use.
 #
-# WHAT IS BATCHED AND WHAT IS NOT (the split is measured, not assumed — see the unit's
-# report and the docstrings below):
+# WHAT IS BATCHED AND WHAT IS NOT (structural, from the code below; the relative COST of
+# each part is UNMEASURED — see the module docstring's note on the withdrawn cost-split
+# figures and `docs/PLAN_redesign_R3.md` Task 17):
 #
-#   * the ETDRK4 relax, which is the dominant cost of a solve, runs as ONE (b, N, n, n)
-#     stack through `integrate_etdrk4_rfft_torch`'s existing batch axis, with per-member
-#     dt and per-member D carried in the ETDRK4 coefficients;
+#   * the ETDRK4 relax runs as ONE (b, N, n, n) stack through
+#     `integrate_etdrk4_rfft_torch`'s existing batch axis, with per-member dt and
+#     per-member D carried in the ETDRK4 coefficients;
 #   * the Newton polish and the backward adjoint LOOP over the ignited members, calling
 #     the D1-verified `newton_polish` / `solve_adjoint` UNCHANGED on a single-member view.
 #     Each member's polish is an independent minimal-norm least-squares solve, so a loop
 #     is exact by construction; a (b,)-batched LSMR would have to re-derive the D-FFT-10
-#     stopping and refinement semantics per member and is not worth that risk for a cost
-#     that measurement puts well below the relax. The ONE thing that is batched in the
-#     backward is the final dF/dtheta vjp: the per-member adjoints are stacked and hit the
-#     batched parameters in a single `torch.autograd.grad`.
+#     stopping and refinement semantics per member, and no measurement here justifies that
+#     risk against an unmeasured cost. The ONE thing that is batched in the backward is
+#     the final dF/dtheta vjp: the per-member adjoints are stacked and hit the batched
+#     parameters in a single `torch.autograd.grad`.
 #
 # Member identity is stable throughout: `idx` is a tensor of GLOBAL member indices into the
 # `BatchedRNGRN`, and nothing here reorders the batch.

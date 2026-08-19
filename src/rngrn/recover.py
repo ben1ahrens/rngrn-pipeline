@@ -261,9 +261,17 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
             # (bool(newly_dead.any()) and bool(alive.any())). A member already stops
             # contributing gradient the step it dies (`alive` masks the loss below, updated
             # tensor-side every step), so cadencing only the host bookkeeping means: the
-            # early break can fire up to LIVENESS_SYNC_EVERY-1 steps late (harmless -- those
-            # extra steps optimise an all-dead, all-masked batch and produce nothing), and
-            # per-death logging can batch up to that many steps late.
+            # early break can fire up to LIVENESS_SYNC_EVERY-1 steps late, and per-death
+            # logging can batch up to that many steps late (D-PERF-7). NOT "harmless" in the
+            # stronger sense a prior version of this comment claimed: during those extra
+            # steps `total` is an exact zero tensor WITH A GRAPH once every member is dead,
+            # so the fresh gradient contribution is zero, but Adam's momentum/velocity state
+            # from prior real gradients keeps decaying and being applied -- it DOES move the
+            # parameters. What is actually true is narrower: no REPORTED number depends on
+            # it, because `final_alive` is all-False for such a batch and every member logs
+            # `steady_state_failed` regardless of where its parameters drifted. Separately,
+            # `verbose` at such a step computes `float(loss_vec[alive].mean())` over an
+            # empty boolean selection, which is NaN, not an error.
             died_at_step_host = died_at_step.tolist()
             still_alive = False
             for b, died_step in enumerate(died_at_step_host):
@@ -311,6 +319,9 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
             continue
         pm = LT.parts_member(parts, b)
         lb = float(loss_vec[b])
+        # No `lbfgs_error` key here (D-PERF-8): this batched path never runs an LBFGS
+        # polish per member, unlike the serial restart loop below, which records one.
+        # The two paths therefore emit different column sets into the run index.
         restart_log.append(dict(restart=b, total=lb, sig_max=pm.get("sig_max"),
                                 sig_max_pos=pm.get("sig_max_pos"),
                                 kstar_model=pm.get("kstar_model"),
@@ -361,7 +372,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         Defaults to `seed` when not given, for backward compatibility.
 
     dispersion_backend: 'auto' (default; resolves to 'cubic' when N == 3, else 'eig')
-        | 'eig' (any N, the reference) | 'cubic' (exact for N<=3 ONLY). Resolution
+        | 'eig' (any N, the reference) | 'cubic' (exact for N == 3 ONLY -- model.py
+        raises ValueError for any other N, including N=2; it is not "N<=3"). Resolution
         happens in RNGRN.__init__ (D-PERF-3); the model's .dispersion_backend always
         reads the concrete backend.
 

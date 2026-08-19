@@ -145,9 +145,13 @@ def raps_torch(field: torch.Tensor, L: float) -> tuple[np.ndarray, torch.Tensor]
 
 def spectral_block_torch(field: torch.Tensor, nblk: int = 24) -> torch.Tensor:
     """Central (nblk, nblk) log-power block, differentiable w.r.t. `field`. Same arithmetic
-    and ORDER (normalise by total power, THEN log1p, THEN sum-normalise) as
-    `scoring.morphology._spectral_block` — verified to allclose 1e-12 by
-    `tests/test_spectral_terms.py`.
+    and ORDER (normalise by the CENTRAL BLOCK's own total power, THEN log1p, THEN
+    sum-normalise) as `scoring.morphology._spectral_block` — verified to allclose 1e-12 by
+    `tests/test_spectral_terms.py`. (A prior version of this line said "normalise by total
+    power" without qualification, which reads as whole-spectrum power; see the DEVIATION
+    paragraph below and `spectral_block_torch_batched`'s docstring, both of which state the
+    central-block normalisation correctly — this was a wording defect only, not an
+    arithmetic one.)
 
     DEVIATION FROM `scripts/diag_fft_d1.py::spectral_block_torch`: that D1 prototype
     normalises by `P.sum()` (total power of the WHOLE spectrum, pre-slice). This function

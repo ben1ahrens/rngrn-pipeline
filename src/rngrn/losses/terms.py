@@ -52,7 +52,14 @@ def _damped_newton(model, x0, tol, max_iter):
     is accepted, exactly as the loop's fall-through gave. The candidate norms now come from
     one (30, N) reaction evaluation instead of 30 separate (N,) ones — the same arithmetic
     per row, but not guaranteed identical to the last ulp, so a candidate sitting exactly on
-    the acceptance boundary could in principle be decided the other way."""
+    the acceptance boundary could in principle be decided the other way.
+
+    CPU COST (M1, `docs/REVIEW_gpu_optim_delta.md`): this is a GPU-sync win that is a
+    measured small CPU loss on the default, CPU reference path. Over 40 seeded N=3 models,
+    the vectorised form and a faithful reimplementation of the pre-vectorisation loop
+    produced max |dx*| = 0.0 with 0 convergence-flag disagreements (the selection rule
+    above is preserved exactly, including the 0.5**30 fall-through), at 0.1322 s vs
+    0.1181 s per 40 solves (20 repeats, `OMP_NUM_THREADS=1`) — about 12% slower on CPU."""
     x = x0.clone()
     # lam candidates 1, 0.5, ..., 0.5**29 (shape (30,)), built once per call.
     lams = torch.pow(torch.as_tensor(0.5, device=x0.device, dtype=x0.dtype),
@@ -601,7 +608,10 @@ def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
                 # syncs per Newton iteration and 3,000 per call. Value-preserving — an
                 # accepted member's lam is frozen by the `torch.where` above, so the extra
                 # halvings before the next check cannot move it, and an inactive member's
-                # x_new is masked out below.
+                # x_new is masked out below. Same CPU-cost trade as M1's vectorised line
+                # search (`docs/REVIEW_gpu_optim_delta.md`): up to 4 extra batched reaction
+                # evaluations per Newton iteration are paid on CPU between cadence checks
+                # (5-halving stride), a GPU-sync win at a small, unmeasured CPU cost.
                 if (j + 1) % 5 == 0 and bool((accept | ~active).all()):
                     break
             x_new = torch.clamp(x - lam.unsqueeze(-1) * step, min=1e-9)

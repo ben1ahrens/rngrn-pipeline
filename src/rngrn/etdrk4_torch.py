@@ -104,6 +104,15 @@ def integrate_etdrk4_rfft_torch(X0: torch.Tensor, reaction_t, n: int, dt: float,
     after `nsteps`, not the state at the first non-finite step. Callers chunk their
     calls (the forward relax runs 500 steps at a time), so detection granularity is one
     chunk, unchanged.
+
+    CROSS-BACKEND PARITY BREAK on a blow-up (D-PERF-6): `eval.numerics.integrate_etdrk4_rfft`
+    (the numpy original) returns the field AT THE FIRST NON-FINITE STEP, while this function
+    returns the field AFTER ALL `nsteps`. On a blow-up the two backends therefore return
+    numerically different arrays, not just a different step index — this is a real deviation
+    from the "same trajectory up to FFT-backend round-off" claim `relax_to_pattern_torch`
+    otherwise makes (forward.py), not merely lost diagnostic granularity. It does not affect
+    correctness on non-blowing-up trajectories, which is all `tests/test_etdrk4_torch.py`
+    currently pins.
     """
     E, E2, Q, f1, f2, f3 = coeffs
 

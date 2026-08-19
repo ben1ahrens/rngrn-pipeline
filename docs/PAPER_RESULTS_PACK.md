@@ -12,8 +12,8 @@ dry-run figure.
 |---|---|---|
 | `LL/` | `feature/lift-ladder` @ `2f50fff` | `worktrees/lift-ladder` |
 | `MAIN/` | `main` @ `48441e4` | `rngrn-pipeline` |
-| `C3/` | `feature/paper-claim3-hidden-channel` | `worktrees/paper-claim3` |
-| `C5/` | `feature/paper-claim5-noise` | `worktrees/paper-claim5` |
+| `C3/` | `feature/paper-claim3-hidden-channel` @ `f9d1514` | `worktrees/paper-claim3` |
+| `C5/` | `feature/paper-claim5-noise` @ `4515ea1` | `worktrees/paper-claim5` |
 
 Figures are committed image files — the deliverable is the `.png` itself (scoped
 `.gitignore` carve-outs, see `LL/.gitignore`).
@@ -260,19 +260,40 @@ recovered n=16 spans **2 independent targets** (fact 1).
 
 ## Claim 5 — Robustness of training to noisy training data
 
-**STATUS: experiment running overnight.** Design (D-PAPER-C5 entry on
-`C5/docs/DECISIONS.md` when it lands): an observation-noise knob added at the data
-firewall gate (TDD'd `src/` change on `C5`): gaussian noise per observed channel at
-relative level σ ∈ {0 (control), 0.01, 0.05, 0.2} × per-channel clean std, seeded and
-recorded in `frozen_config.yaml` so every noisy frame is byte-identically regenerable
-from the tracked dataset checksum + σ + seed. Same target (`three_gene_qvar/sample_0001`),
-same seeds 0–7, same winning c2_P config per level. **No calibrated threshold exists; the
-deliverable is the measured curve, level by level against the 0-noise control — no
-pass/fail language.** Note the noise also perturbs `kstar_obs` (the k-grid anchor is an
-FFT of the observed frame) — deliberate; that *is* noisy training data.
+**Headline (run overnight 2026-08-19; branch `C5` @ `4515ea1`, D-CLAIM5-1):** on the
+primary target, Turing recovery is **unaffected by observation noise up to σ = 0.20**
+(20% of each channel's clean std): 8/8 seeds `recovered_turing` at *every* noise level,
+and the k\*/morphology columns move **non-monotonically within the seed-to-seed spread
+already present at σ = 0**. The measured curve, not a pass/fail bar (no calibrated
+threshold exists — the levels are UNCALIBRATED probe points):
 
-*(Section completed from the four cells' target_reports.jsonl before hand-off; a
-degradation-to-failure at some level is reported as the curve, not as a failed bar.)*
+| σ_rel | recovered_turing | k\*_fft rel err (mean) | k\* rel err | morphology match | morph distance (mean) |
+|---|---|---|---|---|---|
+| 0.00 (control) | 8/8 | 0.0352 | 0.0365 | 7/7 | 0.399 |
+| 0.01 | 8/8 | 0.0278 | 0.0365 | 7/8 | 0.476 |
+| 0.05 | 8/8 | 0.0450 | 0.0261 | 7/7 | 0.404 |
+| 0.20 | 8/8 | 0.0448 | 0.0368 | 8/8 | 0.376 |
+
+**Design:** gaussian observation noise added at the data firewall gate
+(`data/gate.py::_apply_obs_noise`, TDD'd `src/` change: `DataConfig.obs_noise_sigma` /
+`obs_noise_seed`, recorded automatically in `frozen_config.yaml`), applied per observed
+channel relative to its clean std, seeded — every noisy frame is **byte-identically
+regenerable** from the tracked dataset checksum + σ + seed (disclosed substitute for
+registering noisy dataset copies; no new payload-writing script, hence no new firewall
+`FORBIDDEN` entry needed). The noise also perturbs `kstar_obs` (the k-grid anchor is an
+FFT of the observed frame) — deliberate: that *is* noisy training data. Same target
+(`three_gene_qvar/sample_0001`), same seeds 0–7, same winning c2_P config per level,
+batched CUDA. The σ=0 control **reproduces the c2_P baseline exactly** (mean 0.0352),
+which doubles as a full-run proof that the knob's zero path is bit-identical.
+
+Run dirs: `C5/experiments/claim5_obs_noise/sigma_{0p00,0p01,0p05,0p20}`. Suite on the
+branch: 582 passed / 1 skipped (through the pre-push hook, no bypass).
+
+**Caveats to carry:** one target × 8 seeds — **not a general robustness claim**; targets
+are tuning-half (fact 2); one seed (3) fails to pattern on rollout at σ = 0.00 *and*
+0.05 but patterns at 0.01 and 0.20 — restart-selection variance, reported as measured,
+not smoothed; noise levels are probe points, not calibrated to any experimental noise
+model.
 
 ---
 
@@ -323,9 +344,12 @@ independent targets, not 3** (fact 1).
 `feature/lift-ladder`: 657 passed / 23 skipped recorded in the session ledger at the last
 figure commit (topology unit's run); the branch's own tracked docs record the scoped
 40-test lift-ladder gate for the demo/domain-size commits. `main` @ 48441e4 untouched by
-this pack. Claim 3/5 branch suite counts land with their sections.
+this pack — but note it **fails one test as-is** (`eval/lifted.py` unclassified in the
+firewall completeness test; see claim 3's incidental finding — both experiment branches
+carry the identical one-line fix). Claim-3 branch: 574 passed / 1 skipped. Claim-5
+branch: 582 passed / 1 skipped, both pushes through the hook.
 
-## NOT-SUPPORTABLE statements (final list lands with the overnight sections)
+## NOT-SUPPORTABLE statements (final)
 
 - **Cannot claim three independent recovery targets** — two of the three systems in use
   are the same system at different resolution (fact 1).
@@ -337,4 +361,12 @@ this pack. Claim 3/5 branch suite counts land with their sections.
   disclosure, D-PAPER-1).
 - **Cannot claim topology/wiring recovery** — sign agreement at/below chance (claim 6);
   the supportable claim is the equivalence-class/phenotype one.
-- *(placeholders resolved before hand-off: claim 3 outcome; claim 5 curve.)*
+- **Cannot attribute claim 3's degradation to partial observation alone** — the
+  `resid=0.3` objective change and the hidden-hub confound are inseparable from the
+  hidden-channel effect in this design (claim 3's two disclosed confounds). The
+  supportable statement is the matched-pair comparison as run.
+- **Cannot claim general noise robustness from claim 5** — one target, 8 seeds, three
+  UNCALIBRATED probe levels; the supportable statement is the measured flat curve on
+  this target up to σ = 0.20.
+- **Cannot present any c2_P-derived number as held-out evidence** — tuning-half data
+  (fact 2), applies to claims 1, 4, and the claim-3/5 target choice alike.

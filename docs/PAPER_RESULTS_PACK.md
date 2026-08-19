@@ -171,25 +171,57 @@ the ≥8 floor.
 
 ## Claim 3 — Recovery of a 3N GRN from partial observations that patterns robustly
 
-**STATUS: experiment running overnight (launched ~01:20).** Design (D-PAPER-C3 entry on
-`C3/docs/DECISIONS.md` when it lands): target `three_gene_qvar/sample_0001`, N=3 model
-observing **2 of 3 channels with the slow channel hidden** — species 0, which is
-unambiguously the slow one (D = [1.0, 190.3, 133.2]: ~130–190× slowest diffuser; μ =
-[0.776, 1.321, 2.595]: slowest-reacting) — same seeds 0–7 as the full-observation
-baseline. Three arms: (a) exact c2_P invocation re-run on current code (code-drift
-check, batched CUDA); (b) full-observation control and (c) hidden-slow arm as a **matched
-serial pair** (the batched path refuses m<N; both arms `resid=0.3` UNCALIBRATED — the
-stationarity residual is the only loss term the latent fields enter — and matched
-restart counts).
+**Headline (run overnight 2026-08-19; branch `C3` @ `f9d1514`, D-PAPER-2):** with the
+**slow channel hidden** (species 0 of 3 — unambiguously the slow one: D = [1.0, 190.3,
+133.2], ~130–190× slowest diffuser; μ = [0.776, 1.321, 2.595], slowest-reacting),
+recovery still succeeds on the primary target: **8/8 seeds recover, 7/8 are
+Turing-unstable, and morphology matches the target on all 7 runs where a rollout
+comparison was possible**, with morphology distances 0.35–0.93 — all well under the §3.3
+threshold (2.1072). The cost of hiding the channel, read against the matched
+full-observation control (same objective, same seeds, same restarts): k\*-FFT error
+roughly doubles (mean 0.0743 vs 0.0527, median 0.0814 vs 0.0503) and one seed (6) loses
+Turing instability. All hidden-arm k\* errors (0.015–0.129) remain far below the 0.250
+trivial baseline for this target.
 
-**Known confounds to disclose regardless of outcome:** hidden-channel recovery has no
-known-good objective (the code itself says so — `recover.py`; the resid term previously
-measured harmful to Turing recovery in exp06), so an honest negative is a live outcome;
-species 0 is also the topological hub (row `[+,−,−]` — self-activating, inhibited by both
-others), so "hidden slow channel" is simultaneously "hidden hub".
+**Design** (full rationale + tables in `C3/docs/DECISIONS.md` § D-PAPER-2 and
+`C3/experiments/claim3_hidden_slow/README.md`): target `three_gene_qvar/sample_0001`,
+seeds 0–7, three arms —
+- (a) `replica_fullobs`: the exact c2_P winning invocation on current code (batched CUDA,
+  64 restarts, resid=0). **Code-drift check: bit-identical to the `4a61201` baseline**
+  (`kstar_fft_rel_err_mean = 0.03522518377119767` in both).
+- (b) `ctrl_fullobs_resid` / (c) `hidden_slow`: a **matched serial pair** (the batched
+  path refuses m<N) — CPU serial, 32 restarts, `resid=0.3`, differing ONLY in
+  observation (m=3 vs m=2, `observed_idx=[1,2]`).
 
-*(Section completed from the run's target_reports.jsonl before hand-off; if recovery
-fails, the NOT-SUPPORTABLE statement replaces the headline.)*
+| | (a) replica | (b) full-obs control | (c) hidden slow |
+|---|---|---|---|
+| n_recovered / n_turing | 8/8 / 8/8 | 8/8 / 8/8 | 8/8 / **7/8** |
+| k\*_fft rel err mean / median | 0.0352 / 0.0305 | 0.0527 / 0.0503 | 0.0743 / 0.0814 |
+| k\* rel err mean | 0.0365 | 0.0287 | 0.0340 |
+| morphology compared / match | 7 / 7 | 8 / 7 | 7 / 7 |
+
+Run dirs: `C3/experiments/claim3_hidden_slow/{replica_fullobs,ctrl_fullobs_resid,hidden_slow}`.
+Suite on the branch: 574 passed / 1 skipped.
+
+**Verdict wording for the prose: supported but not cleanly attributable.** Two confounds
+are inseparable in this design and must be disclosed:
+1. `resid=0.3` is **UNCALIBRATED** and mandatory for m<N — the stationarity residual is
+   the *only* loss term the latent fields enter (`recover.py` raises otherwise, noting
+   "hidden-channel recovery currently has no known-good objective"), and exp06 previously
+   measured this residual as harmful to Turing recovery. Arm (b) vs (a) quantifies part
+   of that cost at full observation (0.0527 vs 0.0352 mean k\*_fft err).
+2. Species 0 is also the **sole topological hub** (`interaction_matrix` row
+   `[+,−,−]` — self-activating, inhibited by both others): "hidden slow channel" and
+   "hidden hub" cannot be separated on this dataset.
+Also disclose: 32 restarts in the pair vs 64 in the c2_P baseline (compute-bound, serial
+path); `recovered_turing` (dispersion) and `morphology_match` (rollout) disagree within
+arm (b) itself on seed 6 — keep the two claims distinct.
+
+**Incidental finding (repo-level):** `main` @ `48441e4` fails
+`tests/test_firewall.py::test_every_loss_and_eval_module_is_classified` (`eval/lifted.py`
+unclassified, from the turing-training merge) — fixed on `C3` by classifying it
+RECOVERY_SIDE; any branch off this base needs the same one-line fix to pass the pre-push
+gate.
 
 ---
 

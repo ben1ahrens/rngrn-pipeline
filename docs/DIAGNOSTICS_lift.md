@@ -451,14 +451,29 @@ block agrees on `patterned` for every anchor system. That is the attractor-scale
 μ = 7.2e-4; the T = 4000·dt pair above is not one.
 
 **Finding F-L10 — `l2_diff_dev_by_mu` returns 9.4e+288 on one row, and that is a
-division-by-almost-zero, not a value.** `harvest/nc1__immobile/1`'s 512² anchor run has a QSS
-control that decayed to exactly zero amplitude, so the deviation-from-channel-means
-denominator of `_rel_l2_dev` is at its 1e-300 guard. The raw `l2_diff_by_mu` on the same row is
-1.75e-15 (correct — both fields are zero). CLAUDE.md §8's rule is that a value which arrived
-this way is a defect, not a datum: the guard should raise or return NaN rather than emit a
-finite number 288 orders out of range. **Do not read `l2_diff_dev_by_mu` on any row whose
-control did not pattern.** Reported, not fixed (docs-only task); the raw `_rel_l2` curve, which
-is the briefed key and the one every campaign JSON carries, is unaffected.
+division-by-almost-zero, not a value. FIXED** (`fix/lift-l10`, task 19). `harvest/nc1__immobile/1`'s
+512² anchor run has a QSS control that decayed to exactly zero amplitude, so the
+deviation-from-channel-means denominator of `_rel_l2_dev` was at its 1e-300 guard. The raw
+`l2_diff_by_mu` on the same row is 1.75e-15 (correct — both fields are zero). CLAUDE.md §8's rule
+is that a value which arrived this way is a defect, not a datum: `_rel_l2_dev`
+(`src/rngrn/eval/ladder.py`) now returns `NaN` — documented as deliberate at the site — whenever
+the control's deviation norm is below the same 1e-300 floor, instead of dividing by it.
+`tests/test_lift_ladder.py::test_rel_l2_dev_nans_on_a_zero_amplitude_control_instead_of_9e288`
+pins the behaviour on a synthetic uniform control and asserts `_rel_l2` (`l2_diff_by_mu`'s
+function) is unaffected. **Do not read `l2_diff_dev_by_mu` on any row whose control did not
+pattern.**
+
+The three affected loci in the already-committed `experiments/lift_ladder/v3/results/v3.json`
+(all `harvest/nc1__immobile/1`) — `rows[18].l2_diff_dev_by_mu` (4.5266524e+288, the 128²
+population), `full_rows[7].l2_diff_dev_by_mu` and `anchor[7].full_grid.l2_diff_dev_by_mu` (both
+9.4066017e+288, the 512² population/anchor) — **predate the fix and were not re-emitted**: doing
+so needs a fresh 512² `v3_spatial` run (`guarded_run.sh`-gated GPU compute), which is not cheap,
+and the raw fields behind those rows were never persisted to `arrays/v3.npz` (only the scalar
+summaries were), so the pre-fix numbers cannot be recomputed from the committed artifacts either
+— only a rerun produces the corrected value. Any reader of that file must skip
+`l2_diff_dev_by_mu` on those three loci (or treat it as `NaN` by construction) and read
+`l2_diff_by_mu` instead, which was and remains correct (1.75e-15 / 3.37e-15 — both fields
+zero-amplitude in that row's grid).
 
 ### CPU/CUDA equivalence at campaign scale
 
@@ -689,7 +704,7 @@ Two further items for the same ruling, neither decided here:
 | F-L7 | V3 | claim scope is 10/23 at 128² and 4/8 at 512²; a horizon artifact, resolution-independent |
 | F-L8 | V3 | `l2_monotone` 18/23 is a last-digit tick at the O(dt) floor, quantified |
 | F-L9 | V3 | at the QSS dt, V3(a) cannot see μ-dependence; it rests on the 32² tests and V3(b) |
-| F-L10 | V3 | `l2_diff_dev_by_mu` = 9.4e+288 on one decayed row — a defect, not a value |
+| F-L10 | V3 | `l2_diff_dev_by_mu` = 9.4e+288 on one decayed row — a defect, not a value. **FIXED** (task 19): now NaNs; the 3 pre-fix rows in the committed `v3.json` are unre-emitted, read `l2_diff_by_mu` there instead |
 | F-L11 | V4 | `nc1__mobile3/4` has a 0/200 baseline volume; its 0/0 ratio is dropped from the median |
 | F-L12 | V4 | 10 of 27 clouds are 121–199 draws; non-converged draws count as non-Turing |
 | F-L13 | V3 | V3(b)'s anchor ran at μ_central = 7.2e-4, not at the owner-set μ_gate = 1e-3; no dt-halving pair exists at the gate point |

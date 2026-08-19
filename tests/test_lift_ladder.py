@@ -466,6 +466,22 @@ def test_v3_l2_difference_floors_at_an_O_dt_scheme_difference():
     assert 1.7 < a / b < 2.3, (a, b)      # first order in dt at the mu -> 0 limit
 
 
+def test_rel_l2_dev_nans_on_a_zero_amplitude_control_instead_of_9e288():
+    """F-L10 (docs/DIAGNOSTICS_lift.md:453): `harvest/nc1__immobile/1`'s 512^2 anchor run
+    had a QSS control that decayed to a spatially uniform field -- zero deviation from its
+    own channel means -- so `_rel_l2_dev`'s denominator guard sat at its 1e-300 floor and the
+    function emitted 9.4e+288. CLAUDE.md Sec 8: a value that arrives this way is a defect, not
+    a datum. A uniform (zero-pattern-amplitude) control must NaN instead of dividing by
+    (almost) zero. `_rel_l2` -- the function behind `l2_diff_by_mu`, the briefed key -- is
+    unaffected: its denominator is the control's raw norm, not its deviation from the mean,
+    and a uniform control still has a large raw norm whenever its fixed point is nonzero.
+    """
+    b = np.full((2, 4, 4), 3.0)           # spatially uniform control: zero pattern amplitude
+    a = np.zeros_like(b)
+    assert np.isnan(ladder._rel_l2_dev(a, b))
+    assert np.isfinite(ladder._rel_l2(a, b))
+
+
 def test_v3_torch_backend_reproduces_the_numpy_one_on_cpu():
     """V3(b) runs on the GPU (Task 5's port); this pins the driver's backend switch to the
     numpy path it is supposed to be a faster way of computing, on the CPU where the contract

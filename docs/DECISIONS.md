@@ -3512,7 +3512,7 @@ are untested; so is any claim about what the redesign arm would do with them.
 
 ---
 
-### D-PERF-3 — `dispersion_backend` gains `'auto'`, which resolves to the closed-form cubic at N = 3 (MECHANICS adopted on this line; the DEFAULT stays `'eig'` — see the R3 amendment at the end of this entry)
+### D-PERF-3 — `dispersion_backend` gains `'auto'`, which resolves to the closed-form cubic at N = 3 (MECHANICS adopted on this line; the DEFAULT stays `'eig'` by ruling — see the R3 amendment at the end of this entry, and D-PERF-10)
 
 **Date:** 2026-08-17 (GPU-optimisation branch `feature/gpu-optim`, orchestrating session).
 **Status:** DECIDED
@@ -3566,6 +3566,8 @@ load-bearing:
   bit-identical behaviour after every task, and this entry's own "Announced loudly" paragraph
   says an `'auto'` default makes N = 3 runs not bit-comparable. The two cannot both hold, so
   the flip is parked as a decision point returned to the controller, not taken here.
+  **RULED 2026-08-19: the flip is REJECTED at integration — see D-PERF-10**, which records the
+  four facts and the rejected alternatives.
   **Consequence: nothing in the paragraph above describing `'auto'` as "the default" is true on
   this line.** It is an opt-in.
 - **ADOPTED and NOT in the original — the frozen-config fix.** `train.fit` resolves
@@ -3770,3 +3772,94 @@ to them on this line:
    finding **M9** (whether the `spec_cfg is not None` conditional should be a bare
    `active=alive`) is therefore untouched by this task and stays open for Task 9, which owns
    both halves of it.
+
+---
+
+### D-PERF-10 — at integration the `dispersion_backend` DEFAULT stays `'eig'`; D-PERF-3's default flip is REJECTED, its mechanics are kept
+
+**Date:** 2026-08-19 (R3 Phase B Task 8, `feature/r3-integration` @ `087de3d`; collision ledger
+row 26 / §2.8, plan Task 8 Step 3). **Status:** DECIDED
+**Decided by:** the controller, on the four facts returned by the implementing agent under
+delegated authority (§10). The agent implemented the mechanics and returned the flip rather
+than taking it; this entry records the ruling that closed that decision point.
+
+*(Id note: `D-PERF-4`, `-5` and `-6` are not free — they exist on `feature/gpu-optim-repair`
+and describe code that Task 9 transplants, so they are reserved rather than skipped. `-10` is
+the next free key in this series. This entry rules on `D-PERF-3`, which it should be read with.)*
+
+**The decision:** on the integrated line, `dispersion_backend` defaults to `'eig'` in all four
+places — `RNGRN.__init__`, `BatchedRNGRN.from_seeds`, `config.ModelConfig` and `recover()`.
+**D-PERF-3's flip of those four defaults to `'auto'` is REJECTED at integration.** What IS
+adopted is D-PERF-3's *mechanics*, which are separable from its default: `'auto'` is a legal,
+opt-in value, accepted by `RNGRN.__init__`'s three-way `assert` and resolved at construction by
+`model.resolve_dispersion_backend` to `'cubic'` at N == 3 and `'eig'` otherwise. The string
+`'auto'` never survives construction, and `.dispersion_backend` always reads a concrete backend.
+Explicit `'cubic'` at N ≠ 3 still raises. **Nothing about which backend an existing N = 3 run
+uses changes**, so A0 bit-identity holds by construction rather than by argument.
+
+**Evidence — the four facts the decision point returned.**
+
+1. **The binding constraint.** `docs/PLAN_redesign.md` Global Constraints: *"A0 is untouchable:
+   the baseline objective … must keep bit-identical behaviour after every task."* A flipped
+   default changes the backend of every N = 3 caller that omits the argument, which includes the
+   A0 baseline path.
+2. **D-PERF-3's own concession.** That entry's "Announced loudly" paragraph states runs recorded
+   after the flip are **not bit-comparable** to runs before it for any N = 3 config that did not
+   pin the backend. The cubic form is exact for N = 3 and agrees with `eigvals` to
+   σ_max MAE 9.2e-13 / k\* MAE 0 / 0 of 127 Turing-verdict flips on real answer-key Jacobians,
+   and ~1e-12 per step — but D-PERF-3 says plainly that this diverges over a full optimisation.
+   The two documents therefore point opposite ways, and one had to yield; the constraint won.
+3. **T16's a0 arm already ran `cubic`, by explicit driver choice — and this is an OPEN FACT, not
+   a resolved one.** Every `experiments/redesign_r2/*/*/config/frozen_config.yaml` records
+   `dispersion_backend: cubic`, passed explicitly, while `feature/redesign-model`'s `model.py`
+   still defaults to `'eig'`. **So whether T16's a0 arm is comparable to the D5 row is a live
+   question on the redesign line independently of gpu-optim, and this ruling does not answer it.**
+   It only ensures that the integration does not make it worse by changing a default underneath
+   it. **This question is carried to the owner roll-up (Task 22); it is not settled here.**
+4. **A provenance regression D-PERF-3 does not mention, now closed.** `train.fit` wrote
+   `config/frozen_config.yaml` from the *requested* config, so a run configured `'auto'` froze
+   the literal string `'auto'` — a file that cannot say which backend produced the number, against
+   `.claude/rules/reporting-numbers.md` step 4 ("read the frozen config, do not re-derive from
+   it"). `fit` now resolves through `model.resolve_dispersion_backend` **before** the write, so
+   the frozen config records the backend that ran. This was authorised whichever way the flip
+   ruling went, and landed independently of it.
+
+**What was rejected and why.**
+
+- **The default flip itself** (D-PERF-3 as written). Rejected because it trades a measured A0
+  bit-identity constraint for no measurable gain *on the runs that exist*: fact 3 shows every
+  run that matters already pins the backend explicitly, so the flip changes behaviour only for
+  callers that omit the argument — of which the A0 baseline is the one that must not change.
+- **Silently keeping `'auto'` in frozen configs** — i.e. adopting the mechanics and leaving the
+  provenance regression in place. Rejected outright: it would make a run directory unable to
+  answer which algorithm produced its numbers, which is the false-provenance failure mode
+  CLAUDE.md §8 exists to prevent. This is why the fix landed regardless of the flip ruling.
+- **Deleting the `'auto'` mechanics along with the default** (integrate neither half). Rejected:
+  the resolution block and the three-way assert are inert until a caller opts in, cost nothing,
+  and are the vehicle by which a future GPU sweep gets the measured 162× cubic win with one
+  string — the separability finding is precisely what made a partial adoption safe.
+- **Adding `lbfgs_error=None` to `_batched_restarts`'s rows** to square up review finding M4.
+  Rejected **by ruling, on the same grounds D-PERF-8 already gave**: the batched path runs no
+  per-member LBFGS polish, so an always-`None` column would conflate "no polish exists" with
+  "the polish succeeded", and it would change the recorded column set of every batched run for
+  a field that can never carry information. **The serial-only asymmetry stays, recorded at both
+  sites, not closed.**
+
+**Not independently validated:** no cubic-vs-eig full-run comparison was made on this line —
+the 162× and ~1e-12 figures in D-PERF-3 are inherited, not re-measured here. The
+frozen-config test reproduces `train.fit`'s resolve-then-write sequence rather than running
+`fit` (which needs a dataset); the *ordering* inside `fit` is pinned by a source-order
+assertion, which is weaker than a behavioural test and is labelled as such at the site. And,
+restating fact 3 because it is the caveat most likely to be forgotten: **this entry does not
+establish that T16's a0 arm is comparable to the D5 row.** It establishes only that the
+integration did not change any backend that was in use.
+
+**Where it lives:** `src/rngrn/model.py:42` (`resolve_dispersion_backend`, the one definition of
+the rule), `:185` (the three-way assert), `:251` (resolution in `RNGRN.__init__`);
+`src/rngrn/config.py::ModelConfig.dispersion_backend`; `src/rngrn/recover.py::recover`;
+`src/rngrn/train.py:205-212` (resolve before freeze). Pinned by
+`tests/test_dispersion_cubic.py::test_the_default_backend_is_eig_everywhere` (the ruling — all
+four defaults plus the resolved effect at N = 3, so a flip cannot land without editing the
+test), `::test_auto_resolves_at_construction_and_never_survives_it` (the mechanics) and
+`::test_frozen_config_records_the_resolved_backend_not_the_request` (the provenance fix).
+Read with **D-PERF-3** (amended in place) and **D-PERF-8** (the M4 asymmetry).

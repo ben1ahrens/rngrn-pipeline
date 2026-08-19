@@ -74,6 +74,7 @@ _MORPHOLOGY_REFUSAL = (
     "numpy diagnostic)'); loss.weights.morphology is currently INERT (TUNING.md)."
 )
 
+
 def _register(name, fn, batched_fn, refusal_reason, default_weight, calibration):
     LOSS_TERMS.register(name)(LossTerm(
         name=name, fn=fn, batched_fn=batched_fn, refusal_reason=refusal_reason,

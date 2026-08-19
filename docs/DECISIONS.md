@@ -3958,6 +3958,23 @@ downstream consumer, which was verified by reading the code, not by a run.
 `is_sync_step` block and its corrected inline comment), `:298-300` (the verbose NaN-mean
 print, unchanged).
 
+> **R3 INTEGRATION AMENDMENT — 2026-08-19, `feature/r3-integration` Task 10, integration
+> review I3.** This entry's cadence rationale implies a benefit the code does not deliver:
+> "eliminate... the same D2H sync it replaced two per-step syncs with" reads as if the
+> batched step becomes async-pipelineable once those two syncs are gone. It does not --
+> the batched step is unconditionally sync-bound regardless of this cadence, through six
+> OTHER, pre-existing D2H syncs on the same step: `losses/terms.py:817-818`
+> (`_np(sig0)`/`_np(sig_max)`/`_np(sig_max_pos)` inside `turing_hinges_split_batched`),
+> `losses/total.py:358` (`ss_converged=conv.detach().cpu().numpy()`), and
+> `losses/total.py:396,400` (`parts["total"]` and each `term_vals` entry's
+> `.detach().cpu().numpy()` in `total_loss_batched`). Removing the two `.any()` syncs this
+> cadence targeted is therefore a minor tidy, not an unlock -- and even that tidy's own
+> benefit (fewer syncs at the SAME cadence point) is UNMEASURED; no run was made to time it
+> before or after. The behavioural cost this entry documents -- up to
+> `LIVENESS_SYNC_EVERY - 1` steps of decaying Adam momentum applied after a batch is fully
+> dead, with no reported number depending on it -- stands unchanged; this amendment
+> corrects only the implied performance framing, not the decision to keep the cadence.
+
 ---
 
 ### D-PERF-8 — `lbfgs_error` recording replaces a bare `except: pass`; the serial-only asymmetry against `_batched_restarts` is recorded, not closed

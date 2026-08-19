@@ -220,9 +220,16 @@ def _apply_spectral_batched(term_vals, parts, spectral, xstar_pre, conv, active)
         live = np.asarray(
             active.detach().cpu().numpy() if hasattr(active, "detach") else active,
             dtype=bool)
-        # An abandoned lane is recorded as such, not merged into "not_ignited": it may well
-        # have been Turing-unstable when the caller gave up on it, and the record should say
-        # why the solve was skipped rather than imply a stability verdict it did not make.
+        # An abandoned lane is recorded as such, not merged into "not_ignited" -- but this
+        # does not avoid making a stability verdict, and an earlier version of this comment
+        # overclaimed that it did. An abandoned-but-Turing-unstable lane records
+        # spec_ignited=0.0 (the `ignited & live` AND below forces it), and a lane whose
+        # steady state simply failed THIS step (never abandoned) reads "not_ignited" too --
+        # its dispersion is evaluated on the ones-substitute polish (total.py:339), which
+        # reads stable. Both are one-step and unpersisted: history.py admits neither
+        # `spectral_skipped` nor `spec_computed` into its frozen columns, and
+        # `record_batched` skips dead lanes outright -- so the misleading verdict never
+        # survives past the step that produced it.
         skipped[~live] = "abandoned"
         ignited = ignited & live
     parts["spec_ignited"] = ignited.astype(float)
@@ -336,12 +343,26 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
             "losses.spectral.SpectralContext's docstring for the two duck-typed contracts.")
     xstar, conv = T.steady_state_batched(model)
     # ones for the failed members: a poison guard for the SHARED graph, not a scored value.
+    # Also the reason `solve_subset`'s WHOLE-BATCH eigendecomposition can never see a
+    # diverged member's real Jacobian: `_apply_spectral_batched` hands `x_ok.detach()` to
+    # `forward.BatchedPatternSolver.solve_subset`, which stacks every offered member's x*
+    # into ONE `np.linalg.eigvals` call -- see forward.py solve_subset. A NaN/inf x* there
+    # would poison that whole-batch call, not just its own row; this substitution is what
+    # keeps it a plain 1.0 row instead (R3 integration review I2). Tied together by
+    # tests/test_ignition_gating.py::
+    # test_compute_terms_batched_ones_substitution_protects_the_forward_solve_eigendecomposition.
     x_ok = torch.where(conv.unsqueeze(-1), xstar, torch.ones_like(xstar))
     xstar, polish_ok = T.steady_state_diff_batched(model, x_ok)
     # a singular J at the polish step is the same failure the serial path raises on
     conv = conv & polish_ok
     x_disp = xstar.detach() if detach_xstar else xstar
-    # ONE batched Jacobian for the three dispersion-side terms -- see `compute_terms`.
+    # ONE batched Jacobian for the three dispersion-side terms INSIDE THIS FUNCTION -- see
+    # `compute_terms`. That scope is deliberate: the spectral solver
+    # (`forward.BatchedPatternSolver.solve_subset`) computes its OWN, separate, pre-polish
+    # Jacobian later (at `x_ok.detach()`, before this one exists) because it needs
+    # |eig(J)|_max at the pre-polish x* to pick dt=0.2/rate for the ETDRK4 relax -- exactly
+    # what the serial PatternSolver does. Reusing this hoisted post-polish J there would
+    # break serial/batched parity, not save shared work (R3 integration review I1).
     J = model.jacobian(x_disp, create_graph=True)
     L_k, p_k = T.kstar_anchor_batched(model, x_disp, kgrid, kstar_obs, tau=tau, J=J,
                                       idx=kstar_idx)

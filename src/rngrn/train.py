@@ -207,7 +207,11 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
     # definition of the rule), and cubic/eig runs are not bit-comparable (D-PERF-3). Freezing
     # the literal 'auto' would leave the file unable to answer which backend produced the
     # number, against .claude/rules/reporting-numbers.md step 4. Resolved here, before the
-    # write, so config/frozen_config.yaml and the model agree by construction.
+    # write, so config/frozen_config.yaml and the model agree by construction. Mutating
+    # `cfg` in place is safe at this call site specifically: `sweep` deep-copies `cfg` per
+    # cell before calling `fit`, the CLI builds a fresh `Config` per invocation, and
+    # `resolve_dispersion_backend` is idempotent (re-resolving an already-concrete 'eig' or
+    # 'cubic' is a no-op), so a second call on the same object cannot change the answer.
     cfg.model.dispersion_backend = M.resolve_dispersion_backend(
         cfg.model.dispersion_backend, cfg.model.N)
     cfg.to_yaml(os.path.join(rdir, "config", "frozen_config.yaml"))

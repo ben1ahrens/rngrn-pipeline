@@ -245,6 +245,72 @@ def test_compute_terms_batched_refuses_a_non_batched_model():
 
 
 # ---------------------------------------------------------------------------------
+# (d1) I2 (R3 integration review): the ones-substitution at `losses/total.py:339` and
+# `forward.BatchedPatternSolver.solve_subset`'s whole-batch eigendecomposition
+# (`forward.py:1326-1327`) are written in two different files and were, before this test,
+# untested as a PAIR. `solve_subset` stacks every OFFERED member's x* into one
+# `np.linalg.eigvals` call; it is safe only because `total.py:339` has already replaced a
+# non-converged member's raw x* with ones before it ever reaches the solver.
+# ---------------------------------------------------------------------------------
+def test_compute_terms_batched_ones_substitution_protects_the_forward_solve_eigendecomposition(
+        monkeypatch):
+    """RED-able, measured: replacing `losses/total.py:339`'s
+    `torch.where(conv.unsqueeze(-1), xstar, torch.ones_like(xstar))` with bare `xstar` (done
+    in a scratch edit, reverted) turns this test red -- the assertion that the solver's
+    received row is `ones`, not NaN, fails (member 0's row stays exactly the injected
+    `[nan, nan, nan]`). This test uses a stub solver, so it does not itself exercise the
+    REAL consumer of that row; separately, `forward.py::solve_subset`'s own `bad` isfinite
+    check (`:1328-1332`) is what turns an unsubstituted NaN into a RuntimeError there, over
+    the real `np.linalg.eigvals` call -- this test pins the total.py-side half of that pair
+    (the row IS ones by the time it leaves `compute_terms_batched`), not the forward.py-side
+    raise itself."""
+    frame, L, obs_idx = _tiny_recovery_inputs(N=3)
+    kstar_obs = _kstar_obs(frame, L)
+    cfg = SpectralConfig(ignition_margin=-1e9)   # forces ignition for every member offered
+    targets = build_frame_targets(frame.numpy(), L, kstar_obs, cfg)
+    bmodel = BatchedRNGRN.from_seeds(N=3, seeds=[200, 201])  # both converge (verified above)
+
+    from rngrn.losses import terms as T
+    real_xstar, real_conv = T.steady_state_batched(bmodel)
+    assert bool(real_conv[0]) and bool(real_conv[1]), "fixture seeds must converge"
+    poisoned_xstar = real_xstar.clone()
+    poisoned_xstar[0] = float("nan")            # member 0's raw x* is unusable
+    poisoned_conv = real_conv.clone()
+    poisoned_conv[0] = False
+
+    monkeypatch.setattr(LT.T, "steady_state_batched",
+                        lambda model: (poisoned_xstar, poisoned_conv))
+
+    class _RecordingBatchedSolver:
+        """Like `_StubBatchedSpectralSolver`, but also records the `xstar_batch` it was
+        handed -- this test's whole point is what member 0's row of that tensor contains."""
+        def __init__(self, pattern):
+            self._pattern = pattern
+            self.calls = []             # [(members, xstar_batch), ...]
+
+        def solve_subset(self, members, xstar_batch):
+            self.calls.append((list(members), xstar_batch.clone()))
+            u_stack = torch.stack([self._pattern] * len(members))
+            return u_stack, list(members), {}
+
+    solver = _RecordingBatchedSolver(_different_synthetic_pattern(N=3))
+    ctx = SpectralContext(solver=solver, targets=targets, cfg=cfg)
+
+    # The point: this must NOT raise.
+    term_vals, parts, conv = LT.compute_terms_batched(
+        bmodel, frame, L, obs_idx, KGRID, kstar_obs, spectral=ctx)
+
+    assert bool(parts["ss_converged"][0]) is False, "member 0 must still read as failed"
+    assert solver.calls, "the ignition margin forces both members to be offered to the solver"
+    _, xstar_batch = solver.calls[0]
+    assert torch.allclose(xstar_batch[0], torch.ones(3, dtype=xstar_batch.dtype)), (
+        "member 0's row reaching the solver must be the total.py:339 ones-substitute, not "
+        "its raw (NaN) steady state")
+    assert parts["spectral_skipped"][0] in ("", "not_ignited", "abandoned", "solve_failed",
+                                            "not_patterned")
+
+
+# ---------------------------------------------------------------------------------
 # (d2) `_apply_spectral_batched` directly (Task 4, R3 review §5): the per-member
 # ignite-or-omit contract at the unit it is actually implemented in, not only through
 # `compute_terms_batched`'s end-to-end path above. Two things the (d) tests above do not
@@ -453,3 +519,50 @@ def test_history_survives_ignition_toggling_between_steps():
     idx = names.index("spec_ignited")
     assert arrays["hist_scalars"][0, 0, idx] == pytest.approx(1.0)
     assert arrays["hist_scalars"][1, 0, idx] == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------------
+# (f) I4 (R3 integration review): the one smoke test that exercises, TOGETHER, through the
+# real public recover() entry point -- not a stub -- the active=alive seam, warm state
+# carried across steps by the real forward.BatchedPatternSolver, and the frozen history
+# column set surviving a multi-step run where ignition can toggle. Everything above tests
+# one piece in isolation; this is the only place all three seams meet. Kept cheap (16x16
+# grid, N=3, 3 restarts, 4 Adam steps): seconds, not the ~50s real-solve tests in
+# test_forward_solve.py / test_batched_forward_solve.py.
+# ---------------------------------------------------------------------------------
+def test_batched_recover_completes_a_full_ignition_gated_run_with_history(monkeypatch):
+    from rngrn import recover as R
+    from rngrn.history import TrainingHistory
+
+    captured = {}
+    real_total_loss_batched = LT.total_loss_batched
+
+    def _spying_total_loss_batched(*args, **kwargs):
+        loss_vec, parts, conv = real_total_loss_batched(*args, **kwargs)
+        captured["parts"] = parts            # overwritten every call; ends on the FINAL eval
+        return loss_vec, parts, conv
+
+    # `R.LT` is the same module object as this file's `LT` (`from .losses import total as
+    # LT` in recover.py) -- patching the attribute here is what `_batched_restarts` sees.
+    monkeypatch.setattr(R.LT, "total_loss_batched", _spying_total_loss_batched)
+
+    ri = _tiny_recovery_input_np(N=3, H=16)
+    hist = TrainingHistory(every=1, total_steps=4, n_members=3, N=3)
+
+    result = R.recover(ri, strategy=_spectral_on_strategy(), batched=True,
+                       lbfgs_steps=0, adam_steps=4, n_restarts=3, history=hist)
+
+    assert result is not None, "the run must complete and return a RecoveryResult"
+
+    # TrainingHistory._names froze on the first recorded step and did not raise across the
+    # 5 recorded steps (0..4) despite ignition toggling member-to-member and step-to-step --
+    # if it had raised, this call would already have failed above.
+    names = list(hist.to_arrays()["hist_scalar_names"])
+    assert "spec_ignited" in names
+    for k in _SPEC_KEYS:
+        assert f"L_{k}" in names
+
+    skipped = captured["parts"]["spectral_skipped"]
+    assert skipped.shape == (3,)
+    assert set(skipped.tolist()) <= {"", "not_ignited", "abandoned", "solve_failed",
+                                     "not_patterned"}

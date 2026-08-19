@@ -34,8 +34,9 @@ split ("relax 30%, Newton 40%, adjoint 30%"; "10/75/15") citing "the unit's repo
 does not exist — no run under `experiments/` backs those figures (reporting-numbers.md step
 1), so the design conclusion drawn from them ("the per-member loop, not the relax, is what
 a further optimisation has to attack") is UNSUPPORTED and is withdrawn along with the
-numbers. `docs/PLAN_redesign_R3.md` Task 17 (the B/K curve with the forward solve in the
-loop) is where this split would actually get measured and committed under `experiments/`.
+numbers. `docs/PLAN_redesign_R3.md` Task 17 (on `docs/redesign-rngrn` until merged; the B/K
+curve with the forward solve in the loop) is where this split would actually get measured
+and committed under `experiments/`.
 
 Nothing here reads the observed frame or any answer-key quantity: the solver consumes
 only the model's own parameters and grid geometry supplied by the caller.
@@ -625,8 +626,9 @@ def relax_to_pattern_torch(model: RNGRN, xstar: np.ndarray, n: int, L: float,
                            X0: torch.Tensor | None = None) -> torch.Tensor:
     """`relax_to_pattern` on the D2-verified torch integrator (etdrk4_torch), fields on
     `device`. SAME initial condition as the numpy path (numpy rng, same seed) so the two
-    backends relax the same trajectory up to FFT-backend round-off. Returns the (N, n, n)
-    field ON THE DEVICE.
+    backends relax the same trajectory up to FFT-backend round-off — EXCEPT on a blow-up,
+    where the torch integrator returns the field after all `nsteps` rather than at the
+    first non-finite step (D-PERF-6). Returns the (N, n, n) field ON THE DEVICE.
 
     The saturation detector runs ON THE DEVICE: `observables.kstar_of_torch` (the parity
     port of `kstar_of`) instead of pulling the whole channel-0 frame back per chunk — up
@@ -739,14 +741,15 @@ class PatternSolver:
     the model to the training device). On CUDA the relax runs on the D2-verified torch
     integrator and Newton/adjoint run through the torch LSMR (`_minnorm_solve_t`, same
     D-FFT-10 semantics, cadenced per D-PERF-5); on CPU the algebra is the D1 port's and
-    NEVER enters `_lsmr_torch` — `newton_polish`/`solve_adjoint` select
-    `_minnorm_solve_t`/`precon_t` only under `on_device = u.device.type != "cpu"`, so the
-    CPU path routes through scipy's `_minnorm_solve` unchanged. Of the two round-off
-    level departures from the D1 port taken for device efficiency, only ONE is applied on
-    BOTH devices — |eig(J)|_max is evaluated by numpy rather than torch (`solve`) — and
-    the torch LSMR cadence is CUDA-only. A reader asking whether CPU results are still
-    the D1 reference should read "yes": neither departure changes what any quantity
-    means, and the CPU path is unaffected by the LSMR cadence entirely.
+    NEVER enters `_lsmr_torch` — both `newton_polish` (its own `on_device` flag) and
+    `solve_adjoint` (the same device check, gated inline rather than named) route the CPU
+    leg through scipy's `_minnorm_solve` unchanged, each with its own preconditioner
+    closure on the device path. Of the two round-off level departures from the D1 port
+    taken for device efficiency, only ONE is applied on BOTH devices — |eig(J)|_max is
+    evaluated by numpy rather than torch (`solve`) — and the torch LSMR cadence is
+    CUDA-only. A reader asking whether CPU results are still the D1 reference should read
+    "yes": neither departure changes what any quantity means, and the CPU path is
+    unaffected by the LSMR cadence entirely.
     dt = 0.2/|eig(J)|_max and gamma = |eig(J)|_max are recomputed per solve from the
     current theta, as in the diagnostic. Grid geometry (the rfft2 |k|^2, the kx/ky pair
     and the full-spectrum |k|^2) is theta-independent and is built ONCE in __init__,

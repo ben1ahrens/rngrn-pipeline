@@ -3570,8 +3570,10 @@ measurement and changed no behaviour.
 
 **Where it lives:** `src/rngrn/etdrk4_torch.py:133` (`blew = ...`), its updated docstring;
 `src/rngrn/eval/numerics.py::integrate_etdrk4_rfft` (the differing numpy contract);
-`src/rngrn/forward.py::relax_to_pattern_torch` (the docstring carrying the now-qualified
-parity claim); `tests/test_etdrk4_torch.py` (does not cover the blow-up case).
+`src/rngrn/forward.py::relax_to_pattern_torch` (docstring, `:626-629` — this task appends
+the blow-up exception to the "same trajectory up to FFT-backend round-off" claim, which
+was previously unconditional); `tests/test_etdrk4_torch.py` (does not cover the blow-up
+case).
 
 ---
 
@@ -3702,10 +3704,12 @@ other:
 
 Both raises share the identical reasoning, independently arrived at: "a run that actually
 executed ETDRK4 under that label would be provenance that claims an integrator which never
-ran" (`numerics.py:200-203`, and R1's docstring makes the same point in its own words).
-Whichever branch merges first, the other's line-identical hunk is this 27th
-line-granularity collision point for Phase B's merge ledger to watch, alongside the 26 in
-`docs/REVIEW_gpu_optim_delta.md` §10 — cite this entry there.
+ran" (`numerics.py:200-203`, and R1's docstring makes the same point in its own words) — but
+the two stubs are semantically identical, not textually identical: different docstrings,
+different `NotImplementedError` messages. Whichever branch merges first, the other's hunk at
+the same lines is this 27th collision point for Phase B's merge ledger to watch, alongside
+the 26 in `docs/REVIEW_gpu_optim_delta.md` §10 — it will merge as a CONFLICT, not a silent
+duplicate-keeps-both, and Phase B's ledger should expect that. Cite this entry there.
 
 **No relabelling occurred — stated explicitly, this is the finding.**
 `docs/REVIEW_gpu_optim_delta.md` I3 raised the possibility that the raise "silently

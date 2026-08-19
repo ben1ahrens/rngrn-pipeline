@@ -54,12 +54,13 @@ def _damped_newton(model, x0, tol, max_iter):
     per row, but not guaranteed identical to the last ulp, so a candidate sitting exactly on
     the acceptance boundary could in principle be decided the other way.
 
-    CPU COST (M1, `docs/REVIEW_gpu_optim_delta.md`): this is a GPU-sync win that is a
-    measured small CPU loss on the default, CPU reference path. Over 40 seeded N=3 models,
-    the vectorised form and a faithful reimplementation of the pre-vectorisation loop
-    produced max |dx*| = 0.0 with 0 convergence-flag disagreements (the selection rule
-    above is preserved exactly, including the 0.5**30 fall-through), at 0.1322 s vs
-    0.1181 s per 40 solves (20 repeats, `OMP_NUM_THREADS=1`) — about 12% slower on CPU."""
+    CPU COST (M1, `docs/REVIEW_gpu_optim_delta.md`; scratch-script measurement, not
+    committed under experiments/): this is a GPU-sync win that is a measured small CPU
+    loss on the default, CPU reference path. Over 40 seeded N=3 models, the vectorised
+    form and a faithful reimplementation of the pre-vectorisation loop produced
+    max |dx*| = 0.0 with 0 convergence-flag disagreements (the selection rule above is
+    preserved exactly, including the 0.5**30 fall-through), at 0.1322 s vs 0.1181 s per
+    40 solves (20 repeats, `OMP_NUM_THREADS=1`) — about 12% slower on CPU."""
     x = x0.clone()
     # lam candidates 1, 0.5, ..., 0.5**29 (shape (30,)), built once per call.
     lams = torch.pow(torch.as_tensor(0.5, device=x0.device, dtype=x0.dtype),

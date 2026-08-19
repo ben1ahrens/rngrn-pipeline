@@ -872,10 +872,21 @@ def _rel_l2_dev(a, b):
     §5.3 V3 marks the absolute bound UNCALIBRATED and says the measured curve becomes the
     calibration — so both curves are recorded and the calibration can be taken from whichever
     the caller argues for.
+
+    F-L10 (docs/DIAGNOSTICS_lift.md): a control that decayed to a spatially uniform field has
+    zero deviation from its own channel means, so this normalisation is undefined for it, not
+    merely small. Dividing by a 1e-300 floor in that case does not produce a real number — it
+    produced 9.4e+288 on `harvest/nc1__immobile/1`'s 512^2 anchor row, 288 orders out of range
+    (CLAUDE.md §8: a value that arrives this way is a defect, not a datum). NaN is returned
+    instead — deliberate, not a bug — and is the correct read: "no pattern amplitude to
+    normalise by" rather than "an enormous but finite difference".
     """
     b = np.asarray(b)
     dev = b - b.mean(axis=tuple(range(1, b.ndim)), keepdims=True)
-    return float(np.linalg.norm(np.asarray(a) - b) / max(float(np.linalg.norm(dev)), 1e-300))
+    dev_norm = float(np.linalg.norm(dev))
+    if dev_norm < 1e-300:
+        return float("nan")
+    return float(np.linalg.norm(np.asarray(a) - b) / dev_norm)
 
 
 def v3_spatial(model, mus, n: int = 128, L: float = 20.0, seed: int = 0, *, dt=None, T=None,

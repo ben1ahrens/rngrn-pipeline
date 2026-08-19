@@ -598,7 +598,8 @@ def main(argv=None) -> int:
             summary.update(dict(
                 run_id=run_id, run_dir=run_dir,
                 dataset_id=args.dataset_id, sample_key=args.sample_key,
-                L=L, kstar_obs=kstar_obs, x_pin=x_pin, device=str(device),
+                L=L, kstar_obs=kstar_obs,
+                x_pin=(x_pin if arm != "a0" else None), device=str(device),
                 backend=args.backend, lr=args.lr, grad_clip=args.grad_clip,
                 model_seed=args.model_seed,
                 weights=_arm_weights(arm),
@@ -716,7 +717,7 @@ def _frozen_config_yaml(args, arm, B, device, L, kstar_obs, x_pin, box) -> str:
         arm=arm, B=B, steps=args.steps, lr=args.lr, grad_clip=args.grad_clip,
         model_seed=args.model_seed, device=str(device), dispersion_backend=args.backend,
         dataset_id=args.dataset_id, sample_key=args.sample_key, L=L,
-        kstar_obs=kstar_obs, pin_xstar=x_pin,
+        kstar_obs=kstar_obs, pin_xstar=(x_pin if arm != "a0" else None),
         param_boxes=({k: list(v) for k, v in box.items()}
                      if arm in ("r2", "r2_noprior") else None),
         weights=_arm_weights(arm),

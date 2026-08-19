@@ -111,6 +111,19 @@ Only three D5 columns are comparable (§1): `turing_frac`, `n_distinct_structure
 Telemetry OFF on every row, so the rungs are comparable (recording the trajectory + §3.4
 invariants at stride 100 costs ~53 % at B=512: 6313 → 2957 member-steps/s).
 
+**Caveat (I2/I3, added at review): these six rows come from different processes, not one
+run, and run-to-run noise is at least as large as the effect below.** Each row is a separate
+driver invocation; `phase1_r2_B512/PROVENANCE.md` documents ≥1.65× spread (4885 vs 2957
+member-steps/s) measured on the SAME cell (B=512, r2, telemetry on) across two different
+invocations, with no guard-log evidence for either the committed run.json's actual invocation
+or for the telemetry-off `phase1_throughput/phase1_r2_B512` cell used in the row below. **The
++14 % B=256→512 throughput difference this table's next bullet reports is therefore NOT
+established by these data** — a same-process, telemetry-off, back-to-back B=256/B=512 pair was
+never measured, and the observed cross-process noise (1.65×) is an order of magnitude larger
+than the reported effect (1.14×). The B=256 recommendation in §7 item 4 does not change: it
+was already the conservative choice, made for throughput-saturation reasons that do not depend
+on the exact +14 % figure holding up.
+
 | arm | B | member-steps/s | ms per member-step | wall (s) | peak host RSS (MB) | CUDA alloc (MB) |
 |---|---|---|---|---|---|---|
 | r2 | 64 | 2168 | 0.461 | 44.3 | 1915 | 91.4 |
@@ -120,7 +133,8 @@ invariants at stride 100 costs ~53 % at B=512: 6313 → 2957 member-steps/s).
 | a0 | 64 | 60 | 16.6 | 1598.5 | 1989 | 91.7 |
 | a0 | 128 | 70 | 14.3 | 2758.5 | 1991 | 113.4 |
 
-- **Throughput saturates between B=256 and B=512**: +100 % members buys +14 % throughput.
+- **Throughput saturates between B=256 and B=512**: +100 % members buys +14 % throughput
+  (this specific difference is UNESTABLISHED by cross-process data — see caveat above).
 - **Host RSS is flat in B (~1.9–2.0 GB) and dominated by the CUDA context, not the batch.**
   CUDA allocation is 91 → 243 MB over an 8× range in B. So on GPU, **B is limited by
   throughput saturation, not memory**, and the §7a guard's 8 GB `MemAvailable` floor is

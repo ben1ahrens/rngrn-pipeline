@@ -27,7 +27,7 @@ TRAINER = re.compile(
     """
 )
 # The experiment scripts drive the same trainers.
-EXP_SCRIPT = re.compile(r"scripts/(?:exp\d+\w*|stage0_bio_viability|stage0_part4_prior_recovery)\.\w+")
+EXP_SCRIPT = re.compile(r"scripts/(?:exp\d+\w*|stage0_bio_viability|stage0_part4_prior_recovery|r2_ignition_run)\.\w+")
 
 # Talking *about* a command is not running one.
 DISCUSSING = re.compile(r"(?x) \b(?:grep|rg|ag|ack|sed|awk|cat|head|tail|less|echo|printf)\b | --help | \s-h(?:\s|$)")

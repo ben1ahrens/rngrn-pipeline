@@ -11,10 +11,7 @@ kstar_obs: 0.28387817575592444
 lr: 0.05
 model_seed: 0
 param_boxes: null
-pin_xstar:
-- 0.4193849837438677
-- 0.754671536968317
-- 0.3504568664953922
+pin_xstar: null
 sample_key: sample_0000
 staging:
   keys:

@@ -21,7 +21,7 @@ RECOVERY_SIDE = [
     "history.py",                                  # runs INSIDE the Adam loop (recover.py:245)
     "losses/terms.py", "losses/total.py", "losses/weighting.py",
     "eval/rollout.py", "eval/numerics.py", "eval/dynamical.py",
-    "eval/analysis.py", "eval/topology.py",
+    "eval/analysis.py", "eval/topology.py", "eval/lifted.py",
 ]
 
 # SCORING-side modules under losses/ and eval/. These MAY read the answer key; they are

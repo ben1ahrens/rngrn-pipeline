@@ -40,6 +40,13 @@ RECOVERY_SIDE = [
     "losses/term_registry.py",                      # Task 8 (R2 redesign): the loss-term
     # registry. Imports only losses/terms.py and losses/spectral.py (both already
     # RECOVERY_SIDE) and rngrn/registry.py; reads no ground-truth quantity.
+    "solve_box.py",                                 # Task 11 (R3 redesign): the adaptive
+    # commensurate solve box (REDESIGN_rngrn.md 4.3). Runs INSIDE the training loop: builds
+    # L_solve from the model's OWN detached dispersion argmax k-hat(theta), and re-bins the
+    # OBSERVED frame's log-RAPS onto that box's bins in k/k*_obs units. Inputs are model-own
+    # geometry plus (frame-derived RAPS, k*_obs) — both legal recovery quantities,
+    # SPEC_fourier_training.md 7. Its only rngrn import is losses.spectral.SpectralConfig
+    # (already RECOVERY_SIDE), for B_train's closed edges.
 ]
 
 # SCORING-side modules under losses/ and eval/. These MAY read the answer key; they are
@@ -164,7 +171,12 @@ def test_every_loss_and_eval_module_is_classified():
     # forward.py added alongside history.py (unit U4): both are package-root modules the
     # losses/eval glob below cannot see, so both must be listed explicitly or a package-root
     # addition goes unaudited exactly the way history.py itself once did.
-    discovered = {"history.py", "forward.py", "etdrk4_torch.py"}
+    # solve_box.py (Task 11, R3) is the fourth such package-root module, added by hand for
+    # the same reason. The DURABLE fix is a glob over src/rngrn/*.py — but that demands a
+    # classification for EVERY package-root module (cli, config, io, index, train, validate,
+    # export, plotdata, viz, tracking, ...), most of which fit neither existing category. It
+    # is a taxonomy change, out of Task 11's scope; recorded here as the standing gap.
+    discovered = {"history.py", "forward.py", "etdrk4_torch.py", "solve_box.py"}
     for pkg in ("losses", "eval"):
         for path in sorted((SRC / pkg).glob("*.py")):
             if path.name == "__init__.py":

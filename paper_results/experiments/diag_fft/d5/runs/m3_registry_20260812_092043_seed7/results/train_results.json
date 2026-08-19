@@ -1,0 +1,225 @@
+{
+  "loss": 0.2192989679125625,
+  "kstar_model": 0.006677563515118489,
+  "kstar_obs": 0.28387817575592444,
+  "restarts": [
+    {
+      "restart": 0,
+      "total": 0.21956514187554949,
+      "sig_max": -0.007561570314738253,
+      "sig_max_pos": -0.011426268700681863,
+      "kstar_model": 0.006677563515118489,
+      "rel_err": 0.9764773587338493
+    },
+    {
+      "restart": 1,
+      "total": 0.21950903854161757,
+      "sig_max": -0.0056001698789749366,
+      "sig_max_pos": -0.009599352089429969,
+      "kstar_model": 0.006677563515118489,
+      "rel_err": 0.9764773587338493
+    },
+    {
+      "restart": 2,
+      "total": 0.2192989679125625,
+      "sig_max": -0.001236461640167441,
+      "sig_max_pos": -0.005287419172498531,
+      "kstar_model": 0.006677563515118489,
+      "rel_err": 0.9764773587338493
+    },
+    {
+      "restart": 3,
+      "total": 0.21934313847753908,
+      "sig_max": -0.004003200283437359,
+      "sig_max_pos": -0.008114297826700827,
+      "kstar_model": 0.006677563515118489,
+      "rel_err": 0.9764773587338493
+    }
+  ],
+  "recovered": {
+    "KA": [
+      [
+        0.03135748187238257,
+        0.9596735108362507,
+        0.011117728825506473
+      ],
+      [
+        0.5035202095156359,
+        0.2354661609451045,
+        0.009862782572402832
+      ],
+      [
+        0.11191389891069004,
+        0.10561077013299103,
+        0.03158196288807494
+      ]
+    ],
+    "KR": [
+      [
+        0.04930048606165858,
+        0.2867733605219257,
+        0.028044773730285407
+      ],
+      [
+        0.1351957572770781,
+        0.08615490426360031,
+        0.04269652221238192
+      ],
+      [
+        0.06149671594809783,
+        0.14985358310387392,
+        0.08602367736250818
+      ]
+    ],
+    "alpha": [
+      [
+        0.6986032726820458,
+        1.4073851885993431,
+        0.3841723255533527
+      ],
+      [
+        1.050340320018089,
+        0.4400910384023877,
+        0.29391243404143574
+      ],
+      [
+        0.3901680654181532,
+        0.4942749174533918,
+        0.30897890879849466
+      ]
+    ],
+    "delta": [
+      0.8363185702111104,
+      0.3816979574856785,
+      1.2417070740278167
+    ],
+    "beta": [
+      0.1634437439088544,
+      0.06335664898858547,
+      0.6062241375227589
+    ],
+    "D": [
+      0.07365761146143612,
+      0.07461321550108116,
+      0.6320104226674687
+    ],
+    "D_model": [
+      0.07365761146143612,
+      0.07461321550108116,
+      0.6320104226674687
+    ],
+    "x_star": [
+      0.5094084057141942,
+      0.5078636770904847,
+      0.5074899309664104
+    ],
+    "J": [
+      [
+        -0.8357709728836602,
+        0.7685191850196857,
+        -0.004511906272040633
+      ],
+      [
+        0.3596019004948641,
+        -0.33208228320814315,
+        -0.0031841849960114878
+      ],
+      [
+        0.035278529245564835,
+        0.041021082859276914,
+        -1.2355310838221754
+      ]
+    ]
+  },
+  "metric": {
+    "morphology_bank": "default_centroids",
+    "morphology_pred_target": "labyrinth",
+    "morphology_margin_target": 0.5776992869127215,
+    "morphology_skew_target": 0.34486618871295627,
+    "morphology_kurtosis_target": -1.4799753188455302,
+    "morphology_ang_conc_target": 0.12084305164281678,
+    "morphology_ang_entropy_target": 0.9410448142265659,
+    "morphology_scored": "target_only",
+    "kstar_model": 0.006677563515118489,
+    "kstar_true": 0.27169627507163324,
+    "kstar_rel_err": 0.975422690232474,
+    "kstar_fft_true": 0.28867729226361033,
+    "kstar_fft_rel_err": 0.976868414336446,
+    "trivial_kstar_err": 0.24999999999999994,
+    "kstar_fft_bin_width": 0.125,
+    "trivial_kstar_fft_err": 0.2941176470588235,
+    "kstar_fft_bin_width_rel_fft": 0.11764705882352941,
+    "recovered_turing": false,
+    "recovered_turing_loose": false,
+    "turing_criterion": "strict_max_re_eig",
+    "recovered_sig_max": -0.0012332253966735873,
+    "recovered_sig0": -0.0012331511535819129,
+    "recovered_tr0": -2.4033843399139787,
+    "turing_volume_1pct": 0.0,
+    "turing_volume_4p8pct": 0.0,
+    "turing_volume_10pct": 0.0,
+    "turing_volume_20pct": 0.0,
+    "repro_J_vector": "[-0.8357709728836602, 0.7685191850196857, -0.004511906272040633, 0.3596019004948641, -0.33208228320814315, -0.0031841849960114878, 0.035278529245564835, 0.041021082859276914, -1.2355310838221754]",
+    "repro_sign_vector": "[-1, 1, 0, 1, -1, 0, 0, 0, -1]",
+    "repro_N": 3,
+    "repro_kstar": 0.006677563515118489,
+    "repro_D_ratio": 8.580381716536674,
+    "repro_sign_zero_rtol": 0.05,
+    "plausibility_alpha_min": 0.29391243404143574,
+    "plausibility_alpha_max": 1.4073851885993431,
+    "plausibility_alpha_in_box": false,
+    "plausibility_alpha_source": "docs/GOAL_tica_equivalent.md \u00a72.2 \u2014 \"The generator priors recorded earlier in the project (alpha 0.5-10, delta 0.4-5, D-ratio ~8-250) are the working plausibility box for the RNGRN's own parameters.\" This is the project's own recorded working box, not an external wet-lab measurement; there is no independent literature citation for this dimensionless model-internal scale.\n",
+    "plausibility_delta_min": 0.3816979574856785,
+    "plausibility_delta_max": 1.2417070740278167,
+    "plausibility_delta_in_box": false,
+    "plausibility_delta_source": "docs/GOAL_tica_equivalent.md \u00a72.2 \u2014 same working-box record as `alpha` above.\n",
+    "plausibility_beta_min": 0.06335664898858547,
+    "plausibility_beta_max": 0.6062241375227589,
+    "plausibility_beta_in_box": null,
+    "plausibility_beta_source": "UNCITED",
+    "plausibility_d_ratio_value": 8.470489020250183,
+    "plausibility_d_ratio_in_box": true,
+    "plausibility_d_ratio_source": "Centre 7.5 and the \"measured ratio\" framing: docs/STATE_OF_THE_SCIENCE.md \u00a711 \u2014 \"The canonical measured ratio is Nodal/Lefty in live zebrafish: the activator Nodal diffuses ~7.5x slower than the inhibitor Lefty.\" low=1.0 is the classical Turing (1952) requirement that the inhibitor diffuse faster than the activator (D_ratio > 1) for a two-species reaction-diffusion instability \u2014 Turing, A.M. (1952) Phil. Trans. R. Soc. Lond. B 237:37-72. high=60.0 is a REASONED PROXY (not itself a measured ratio bound, flagged as such) taken from the same STATE_OF_THE_SCIENCE.md \u00a711 paragraph's cited absolute-diffusivity spread across measurement regimes (\"~60 um^2/s FCS-local to ~1-2 um^2/s FRAP-global\", i.e. roughly two orders of magnitude) as a ceiling on how much differential diffusion is physiologically plausible.\n",
+    "plausibility_n_scored": 3,
+    "plausibility_score": 0.3333333333333333,
+    "lgen_system_id": "1",
+    "lgen_L": 185.00615234487148,
+    "lgen_nondim": false,
+    "lgen_q_model": 0.19661847814020816,
+    "lgen_D_ratio": 8.580381716536674,
+    "lgen_J_sign": "-+-+--++-",
+    "n_true": 3,
+    "n_model": 3,
+    "subblock_sign_match": 0.5555555555555556,
+    "subblock_fro_rel_err": 0.8512789701865544,
+    "sign_match_frac": 0.5555555555555556,
+    "sign_match_frac_aligned": 0.5555555555555556,
+    "sign_match_frac_identity": 0.5555555555555556,
+    "best_perm": "(0, 1, 2)",
+    "n_permutations_searched": 1,
+    "scoring_mode": "permutation_aligned",
+    "rollout_status": "unpatterned",
+    "rollout_grid": 512,
+    "rollout_L": 185.00615234487148,
+    "rollout_integrator": "etdrk4_rfft",
+    "rollout_dt": 0.1619406750518865,
+    "rollout_nsteps": 15000,
+    "rollout_nsteps_run": 1000,
+    "rollout_stopped_reason": "collapsed",
+    "rollout_sig_max": -0.0012332253966735873,
+    "rollout_seconds": 126.06012963000012,
+    "rollout_amplitude": 0.00011588482218021088,
+    "rollout_kstar": 0.11743541025955849,
+    "rollout_patterned": false,
+    "arm": "fully_observed",
+    "observed_idx": "[0, 1, 2]"
+  },
+  "provenance": {
+    "git_revision": "1b9ecda",
+    "python": "3.11.15",
+    "platform": "Linux-6.6.114.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "torch": "2.13.0+cu130",
+    "cuda_available": true,
+    "device": "cuda:NVIDIA GeForce RTX 5070 Ti Laptop GPU"
+  }
+}

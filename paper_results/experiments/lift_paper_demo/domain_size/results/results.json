@@ -1,0 +1,859 @@
+{
+  "what": "domain-size independence panel: same recovered D5 models, lifted at mu=0.001, boxes p in (4, 8, 16) periods (p=8 pulled from the parent demo, not re-run)",
+  "parent_demo": "experiments/lift_paper_demo/results/demo.json",
+  "population": "d5",
+  "mu": 0.001,
+  "n": 128,
+  "seed": 0,
+  "device": "cuda",
+  "periods": [
+    4,
+    8,
+    16
+  ],
+  "periods_run": [
+    4,
+    16
+  ],
+  "periods_reference": 8,
+  "mu_band": [
+    1.1e-05,
+    0.0092
+  ],
+  "morphology_claim_min_n": 512,
+  "scope_note": "n=128 supports the pattern-formation statement (amplitude vs floor, k* within one radial bin) and NOT the 512^2-only morphology-class equality claim (REDESIGN SS5.3 V3); morphology labels here are descriptive. p=16 at n=128 has points-per-wavelength exactly 8.0 -- at, not above, the resolution floor; see README for the explicit boundary note.",
+  "rows_by_p": {
+    "4": {
+      "d5/seed1": {
+        "label": "d5/seed1",
+        "provenance": {
+          "seed": 1,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed1",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed1/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 4,
+        "L": 89.40093565972384,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 32.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0702809792852116,
+        "pattern_floor": 0.0101786458169435,
+        "qss": {
+          "patterned": true,
+          "morphology": "mixed",
+          "kstar": 0.3162644067824797,
+          "amplitude": 0.15231625689951528,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 7983,
+          "seconds": 78.55640514600964
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "mixed",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.31626440662205413,
+          "amplitude": 0.15231625671917665,
+          "kstar_abs_diff_vs_qss_sim": 1.6042556172379818e-10,
+          "kstar_abs_diff_vs_qss_linear": 0.03514048948120774,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": true,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.023679234986585182,
+          "rel_l2_dev_vs_qss": 0.09898970812866513,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 7983,
+          "dt": 0.0072242422780632925,
+          "dt_over_mu": 7.224242278063293,
+          "seconds": 27.165481957999873
+        }
+      },
+      "d5/seed3": {
+        "label": "d5/seed3",
+        "provenance": {
+          "seed": 3,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed3",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed3/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 4,
+        "L": 89.40093565972384,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 32.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0702809792852116,
+        "pattern_floor": 0.010347575826261357,
+        "qss": {
+          "patterned": true,
+          "morphology": "spots",
+          "kstar": 0.2690423655967579,
+          "amplitude": 0.02022562867625506,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 8444,
+          "seconds": 64.42168478500389
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "spots",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.2851212136257753,
+          "amplitude": 0.018931337054297476,
+          "kstar_abs_diff_vs_qss_sim": 0.01607884802901738,
+          "kstar_abs_diff_vs_qss_linear": 0.003997296484928914,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": true,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.24130789481800602,
+          "rel_l2_dev_vs_qss": 1.0363992424366144,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 8444,
+          "dt": 0.004915506002184205,
+          "dt_over_mu": 4.915506002184205,
+          "seconds": 26.15570375000243
+        }
+      },
+      "d5/seed5": {
+        "label": "d5/seed5",
+        "provenance": {
+          "seed": 5,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed5",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed5/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 4,
+        "L": 89.40093565972384,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 32.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0702809792852116,
+        "pattern_floor": 0.010122942355711585,
+        "qss": {
+          "patterned": true,
+          "morphology": "spots",
+          "kstar": 0.2974776667725821,
+          "amplitude": 0.19697396098090758,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 12459,
+          "seconds": 113.17277084600937
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "spots",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.2970981639403311,
+          "amplitude": 0.19704291312676264,
+          "kstar_abs_diff_vs_qss_sim": 0.00037950283225096637,
+          "kstar_abs_diff_vs_qss_linear": 0.015974246799484726,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": true,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.036359082557347495,
+          "rel_l2_dev_vs_qss": 0.11914763207298504,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 12459,
+          "dt": 0.0038984219118829333,
+          "dt_over_mu": 3.898421911882933,
+          "seconds": 46.39580432200455
+        }
+      },
+      "d5/seed6": {
+        "label": "d5/seed6",
+        "provenance": {
+          "seed": 6,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed6",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed6/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 4,
+        "L": 89.40093565972384,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 32.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0702809792852116,
+        "pattern_floor": 0.01051018060091345,
+        "qss": {
+          "patterned": true,
+          "morphology": "spots",
+          "kstar": 0.31626440658499455,
+          "amplitude": 0.019143509160284216,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 9741,
+          "seconds": 88.66528531299264
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "spots",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.3162644000239438,
+          "amplitude": 0.019143509212828914,
+          "kstar_abs_diff_vs_qss_sim": 6.561050758246978e-09,
+          "kstar_abs_diff_vs_qss_linear": 0.0351404828830974,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": true,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.02005167396711362,
+          "rel_l2_dev_vs_qss": 0.09410019167143828,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 9741,
+          "dt": 0.005768806906080574,
+          "dt_over_mu": 5.768806906080574,
+          "seconds": 38.49371842999244
+        }
+      }
+    },
+    "8": {
+      "d5/seed1": {
+        "label": "d5/seed1",
+        "provenance": {
+          "seed": 1,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed1",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed1/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 8,
+        "L": 178.80187131944768,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 16.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0351404896426058,
+        "pattern_floor": 0.0101786458169435,
+        "qss": {
+          "patterned": true,
+          "morphology": "labyrinth",
+          "kstar": 0.2805997777181931,
+          "amplitude": 0.15890214410081555,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps": 7981,
+          "nsteps_run": 7981,
+          "seconds": 58.46356083199498
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "labyrinth",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.2805377830921583,
+          "amplitude": 0.1587072416489462,
+          "kstar_abs_diff_vs_qss_sim": 6.199462603478922e-05,
+          "kstar_abs_diff_vs_qss_linear": 0.0005861340486880695,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": true,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.038334085147489226,
+          "rel_l2_dev_vs_qss": 0.15433121692009366,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps": 7981,
+          "nsteps_run": 7981,
+          "dt": 0.0072242422780632925,
+          "dt_over_mu": 7.224242278063293,
+          "seconds": 26.935141445996123
+        },
+        "source": "pulled from ../results/demo.json and ../arrays/final_frames.npz, NOT re-run (p=8 is the parent demo's own box)"
+      },
+      "d5/seed3": {
+        "label": "d5/seed3",
+        "provenance": {
+          "seed": 3,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed3",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed3/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 8,
+        "L": 178.80187131944768,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 16.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0351404896426058,
+        "pattern_floor": 0.010347575826261357,
+        "qss": {
+          "patterned": true,
+          "morphology": "spots",
+          "kstar": 0.27004375330203295,
+          "amplitude": 0.019803479886688253,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps": 8443,
+          "nsteps_run": 8443,
+          "seconds": 67.12610809000034
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "spots",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.2702632423579614,
+          "amplitude": 0.019807382373483146,
+          "kstar_abs_diff_vs_qss_sim": 0.0002194890559284457,
+          "kstar_abs_diff_vs_qss_linear": 0.010860674782884994,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": true,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.052926914469214055,
+          "rel_l2_dev_vs_qss": 0.2268951407737767,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps": 8443,
+          "nsteps_run": 8443,
+          "dt": 0.004915506002184205,
+          "dt_over_mu": 4.915506002184205,
+          "seconds": 32.7932551119884
+        },
+        "source": "pulled from ../results/demo.json and ../arrays/final_frames.npz, NOT re-run (p=8 is the parent demo's own box)"
+      },
+      "d5/seed5": {
+        "label": "d5/seed5",
+        "provenance": {
+          "seed": 5,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed5",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed5/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 8,
+        "L": 178.80187131944768,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 16.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0351404896426058,
+        "pattern_floor": 0.010122942355711585,
+        "qss": {
+          "patterned": true,
+          "morphology": "spots",
+          "kstar": 0.2870754547016029,
+          "amplitude": 0.19846595479457202,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps": 12459,
+          "nsteps_run": 12459,
+          "seconds": 110.75320859000203
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "spots",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.2870731638357975,
+          "amplitude": 0.19841638043218426,
+          "kstar_abs_diff_vs_qss_sim": 2.2908658053877318e-06,
+          "kstar_abs_diff_vs_qss_linear": 0.005949246694951116,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": true,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.017401671147748085,
+          "rel_l2_dev_vs_qss": 0.05665974419549548,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps": 12459,
+          "nsteps_run": 12459,
+          "dt": 0.0038984219118829333,
+          "dt_over_mu": 3.898421911882933,
+          "seconds": 46.76314015600656
+        },
+        "source": "pulled from ../results/demo.json and ../arrays/final_frames.npz, NOT re-run (p=8 is the parent demo's own box)"
+      },
+      "d5/seed6": {
+        "label": "d5/seed6",
+        "provenance": {
+          "seed": 6,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed6",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed6/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 8,
+        "L": 178.80187131944768,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 16.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0351404896426058,
+        "pattern_floor": 0.01051018060091345,
+        "qss": {
+          "patterned": true,
+          "morphology": "spots",
+          "kstar": 0.2813662434580748,
+          "amplitude": 0.02055203328828559,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps": 9738,
+          "nsteps_run": 9738,
+          "seconds": 84.20618747700064
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "spots",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.28162673746044853,
+          "amplitude": 0.020551421188637075,
+          "kstar_abs_diff_vs_qss_sim": 0.00026049400237371234,
+          "kstar_abs_diff_vs_qss_linear": 0.0005028203196021375,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": true,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.01087204652849437,
+          "rel_l2_dev_vs_qss": 0.05101320055118066,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps": 9738,
+          "nsteps_run": 9738,
+          "dt": 0.005768806906080574,
+          "dt_over_mu": 5.768806906080574,
+          "seconds": 35.11431045499921
+        },
+        "source": "pulled from ../results/demo.json and ../arrays/final_frames.npz, NOT re-run (p=8 is the parent demo's own box)"
+      }
+    },
+    "16": {
+      "d5/seed1": {
+        "label": "d5/seed1",
+        "provenance": {
+          "seed": 1,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed1",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed1/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 16,
+        "L": 357.60374263889537,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 8.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0175702448213029,
+        "pattern_floor": 0.0101786458169435,
+        "qss": {
+          "patterned": true,
+          "morphology": "labyrinth",
+          "kstar": 0.2797647792298492,
+          "amplitude": 0.15996140102943152,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 7981,
+          "seconds": 71.2130276599928
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "labyrinth",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.2794002235524556,
+          "amplitude": 0.15933609380926456,
+          "kstar_abs_diff_vs_qss_sim": 0.0003645556773936298,
+          "kstar_abs_diff_vs_qss_linear": 0.0017236935883908067,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": true,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.18398416388260147,
+          "rel_l2_dev_vs_qss": 0.7361713659530346,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 7981,
+          "dt": 0.0072242422780632925,
+          "dt_over_mu": 7.224242278063293,
+          "seconds": 31.86280556699785
+        }
+      },
+      "d5/seed3": {
+        "label": "d5/seed3",
+        "provenance": {
+          "seed": 3,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed3",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed3/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 16,
+        "L": 357.60374263889537,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 8.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0175702448213029,
+        "pattern_floor": 0.010347575826261357,
+        "qss": {
+          "patterned": true,
+          "morphology": "spots",
+          "kstar": 0.2711256901657855,
+          "amplitude": 0.019988087549799645,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 8443,
+          "seconds": 77.25682728800166
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "spots",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.26286777208826956,
+          "amplitude": 0.020118035725850705,
+          "kstar_abs_diff_vs_qss_sim": 0.008257918077515969,
+          "kstar_abs_diff_vs_qss_linear": 0.018256145052576833,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": false,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.09879372319035785,
+          "rel_l2_dev_vs_qss": 0.42340123397256535,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 8443,
+          "dt": 0.004915506002184205,
+          "dt_over_mu": 4.915506002184205,
+          "seconds": 33.83521307600313
+        }
+      },
+      "d5/seed5": {
+        "label": "d5/seed5",
+        "provenance": {
+          "seed": 5,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed5",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed5/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 16,
+        "L": 357.60374263889537,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 8.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0175702448213029,
+        "pattern_floor": 0.010122942355711585,
+        "qss": {
+          "patterned": true,
+          "morphology": "spots",
+          "kstar": 0.2831329637356888,
+          "amplitude": 0.19894248614276877,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 12458,
+          "seconds": 105.15246776299318
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "spots",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.28367854668170195,
+          "amplitude": 0.19865201799927085,
+          "kstar_abs_diff_vs_qss_sim": 0.0005455829460131456,
+          "kstar_abs_diff_vs_qss_linear": 0.0025546295408555575,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": true,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.06458952295511217,
+          "rel_l2_dev_vs_qss": 0.2098970696391883,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 12458,
+          "dt": 0.0038984219118829333,
+          "dt_over_mu": 3.898421911882933,
+          "seconds": 44.06200033098867
+        }
+      },
+      "d5/seed6": {
+        "label": "d5/seed6",
+        "provenance": {
+          "seed": 6,
+          "run_dir": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed6",
+          "checkpoint": "experiments/diag_fft/d5/runs/m3_registry_20260812_092043_seed6/checkpoints/model.pt"
+        },
+        "form": "competitive",
+        "N": 3,
+        "periods": 16,
+        "L": 357.60374263889537,
+        "n": 128,
+        "seed": 0,
+        "device": "cuda",
+        "resolution": {
+          "points_per_wavelength": 8.0,
+          "under_resolved": false
+        },
+        "kstar_qss_linear": 0.2811239171408464,
+        "one_radial_bin": 0.0175702448213029,
+        "pattern_floor": 0.01051018060091345,
+        "qss": {
+          "patterned": true,
+          "morphology": "spots",
+          "kstar": 0.27269663038021175,
+          "amplitude": 0.02128917727618802,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 9738,
+          "seconds": 88.72010842598684
+        },
+        "lifted": {
+          "mu": 0.001,
+          "patterned": true,
+          "morphology": "spots",
+          "morphology_claimable": false,
+          "morphology_agrees_qss": true,
+          "kstar": 0.2715135371047417,
+          "amplitude": 0.021513693438583257,
+          "kstar_abs_diff_vs_qss_sim": 0.0011830932754700596,
+          "kstar_abs_diff_vs_qss_linear": 0.009610380036104704,
+          "kstar_within_one_bin_vs_qss_sim": true,
+          "kstar_within_one_bin_vs_qss_linear": true,
+          "patterned_agrees_qss": true,
+          "rel_l2_vs_qss": 0.09116403355200284,
+          "rel_l2_dev_vs_qss": 0.42548107920307165,
+          "blew_up": false,
+          "stopped_reason": "horizon",
+          "nsteps_run": 9738,
+          "dt": 0.005768806906080574,
+          "dt_over_mu": 5.768806906080574,
+          "seconds": 33.87488701500115
+        }
+      }
+    }
+  },
+  "drift_vs_p8": {
+    "d5/seed1": {
+      "p4": {
+        "kstar": 0.31626440662205413,
+        "L": 89.40093565972384,
+        "patterned": true,
+        "morphology": "mixed",
+        "amplitude": 0.15231625671917665,
+        "pattern_floor": 0.0101786458169435,
+        "points_per_wavelength": 32.0,
+        "delta_kstar_vs_p8": 0.03572662352989581,
+        "delta_kstar_vs_p8_in_bins": 0.5083398651135947,
+        "delta_kstar_vs_p8_pct": 12.735048782416378
+      },
+      "p8": {
+        "kstar": 0.2805377830921583,
+        "L": 178.80187131944768,
+        "patterned": true,
+        "morphology": "labyrinth",
+        "amplitude": 0.1587072416489462,
+        "pattern_floor": 0.0101786458169435,
+        "points_per_wavelength": 16.0,
+        "delta_kstar_vs_p8": 0.0,
+        "delta_kstar_vs_p8_in_bins": 0.0,
+        "delta_kstar_vs_p8_pct": 0.0
+      },
+      "p16": {
+        "kstar": 0.2794002235524556,
+        "L": 357.60374263889537,
+        "patterned": true,
+        "morphology": "labyrinth",
+        "amplitude": 0.15933609380926456,
+        "pattern_floor": 0.0101786458169435,
+        "points_per_wavelength": 8.0,
+        "delta_kstar_vs_p8": 0.0011375595397027372,
+        "delta_kstar_vs_p8_in_bins": 0.06474352243080372,
+        "delta_kstar_vs_p8_pct": 0.4054924535170516
+      }
+    },
+    "d5/seed3": {
+      "p4": {
+        "kstar": 0.2851212136257753,
+        "L": 89.40093565972384,
+        "patterned": true,
+        "morphology": "spots",
+        "amplitude": 0.018931337054297476,
+        "pattern_floor": 0.010347575826261357,
+        "points_per_wavelength": 32.0,
+        "delta_kstar_vs_p8": 0.014857971267813908,
+        "delta_kstar_vs_p8_in_bins": 0.21140814227300184,
+        "delta_kstar_vs_p8_pct": 5.497592324499182
+      },
+      "p8": {
+        "kstar": 0.2702632423579614,
+        "L": 178.80187131944768,
+        "patterned": true,
+        "morphology": "spots",
+        "amplitude": 0.019807382373483146,
+        "pattern_floor": 0.010347575826261357,
+        "points_per_wavelength": 16.0,
+        "delta_kstar_vs_p8": 0.0,
+        "delta_kstar_vs_p8_in_bins": 0.0,
+        "delta_kstar_vs_p8_pct": 0.0
+      },
+      "p16": {
+        "kstar": 0.26286777208826956,
+        "L": 357.60374263889537,
+        "patterned": true,
+        "morphology": "spots",
+        "amplitude": 0.020118035725850705,
+        "pattern_floor": 0.010347575826261357,
+        "points_per_wavelength": 8.0,
+        "delta_kstar_vs_p8": 0.0073954702696918395,
+        "delta_kstar_vs_p8_in_bins": 0.42090877759001183,
+        "delta_kstar_vs_p8_pct": 2.7363951550231906
+      }
+    },
+    "d5/seed5": {
+      "p4": {
+        "kstar": 0.2970981639403311,
+        "L": 89.40093565972384,
+        "patterned": true,
+        "morphology": "spots",
+        "amplitude": 0.19704291312676264,
+        "pattern_floor": 0.010122942355711585,
+        "points_per_wavelength": 32.0,
+        "delta_kstar_vs_p8": 0.01002500010453361,
+        "delta_kstar_vs_p8_in_bins": 0.1426417247809046,
+        "delta_kstar_vs_p8_pct": 3.4921411568333824
+      },
+      "p8": {
+        "kstar": 0.2870731638357975,
+        "L": 178.80187131944768,
+        "patterned": true,
+        "morphology": "spots",
+        "amplitude": 0.19841638043218426,
+        "pattern_floor": 0.010122942355711585,
+        "points_per_wavelength": 16.0,
+        "delta_kstar_vs_p8": 0.0,
+        "delta_kstar_vs_p8_in_bins": 0.0,
+        "delta_kstar_vs_p8_pct": 0.0
+      },
+      "p16": {
+        "kstar": 0.28367854668170195,
+        "L": 357.60374263889537,
+        "patterned": true,
+        "morphology": "spots",
+        "amplitude": 0.19865201799927085,
+        "pattern_floor": 0.010122942355711585,
+        "points_per_wavelength": 8.0,
+        "delta_kstar_vs_p8": 0.0033946171540955583,
+        "delta_kstar_vs_p8_in_bins": 0.19320260978832707,
+        "delta_kstar_vs_p8_pct": 1.1824919852268878
+      }
+    },
+    "d5/seed6": {
+      "p4": {
+        "kstar": 0.3162644000239438,
+        "L": 89.40093565972384,
+        "patterned": true,
+        "morphology": "spots",
+        "amplitude": 0.019143509212828914,
+        "pattern_floor": 0.01051018060091345,
+        "points_per_wavelength": 32.0,
+        "delta_kstar_vs_p8": 0.034637662563495264,
+        "delta_kstar_vs_p8_in_bins": 0.4928454742061863,
+        "delta_kstar_vs_p8_pct": 12.299138524927788
+      },
+      "p8": {
+        "kstar": 0.28162673746044853,
+        "L": 178.80187131944768,
+        "patterned": true,
+        "morphology": "spots",
+        "amplitude": 0.020551421188637075,
+        "pattern_floor": 0.01051018060091345,
+        "points_per_wavelength": 16.0,
+        "delta_kstar_vs_p8": 0.0,
+        "delta_kstar_vs_p8_in_bins": 0.0,
+        "delta_kstar_vs_p8_pct": 0.0
+      },
+      "p16": {
+        "kstar": 0.2715135371047417,
+        "L": 357.60374263889537,
+        "patterned": true,
+        "morphology": "spots",
+        "amplitude": 0.021513693438583257,
+        "pattern_floor": 0.01051018060091345,
+        "points_per_wavelength": 8.0,
+        "delta_kstar_vs_p8": 0.010113200355706842,
+        "delta_kstar_vs_p8_in_bins": 0.5755867637908594,
+        "delta_kstar_vs_p8_pct": 3.5909943945315677
+      }
+    }
+  },
+  "figures": [
+    "figures/domain_panel.png"
+  ],
+  "provenance": {
+    "git_commit": "ef53e9055477dcb8dcd3e273e53af9db8af32da1",
+    "host": "BensStudio",
+    "torch_version": "2.13.0+cu130",
+    "cuda_available": true,
+    "device_name": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+    "date": "2026-08-18 23:14:21"
+  },
+  "wall_seconds": 973.0587983949954
+}

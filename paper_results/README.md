@@ -72,9 +72,13 @@ absolute paths to the main checkout (`MAIN`) and the lift-ladder worktree (`WT`/
 Both now resolve to this pack root via `__file__`; dataset-payload and `src/` paths resolve
 to the enclosing repo checkout. Every data-reading subpath is unchanged. Each patch is
 marked with a `# Collected into paper_results/` comment at the site. All four scripts were
-re-run after patching and reproduce the committed outputs (figures regenerate with only
-byte-level PNG differences from matplotlib re-rendering; `compute_prereg_33.py` reproduces
-`results.json` — see the branch commit message for the check).
+re-run after patching (2026-08-19): every PNG regenerated **byte-identically**, and the
+headline numbers reprinted match the pack (robustness medians, topology 26/26 distinct /
+pooled 0.3333, prereg threshold 2.1072 and 7/16 conjunction). The only diffs were absolute
+`payload_path`/`run_dir` provenance strings inside `prereg_33/results.json` and
+`topology/data/topology_runs.json`, which now record this checkout; those two files were
+restored to the source-branch versions so the committed provenance still names the
+checkouts the runs actually came from.
 
 ## Initial conditions and data — where they are
 

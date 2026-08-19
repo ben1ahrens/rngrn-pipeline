@@ -24,8 +24,9 @@ Figures are committed image files — the deliverable is the `.png` itself (scop
    diagnostic and the lift demo) and `three_gene_qvar/sample_0001` (c2_P target A) are the
    **same underlying system** — byte-identical Jacobian, `interaction_matrix`,
    `params_json`, `sim_seed` (1072191045); they differ only in simulation grid (512² vs
-   96²). Only c2_P target B (`sample_0004`) is a genuinely independent second target. Do
-   not count three systems anywhere in the prose.
+   96²). Evidence: `LL/experiments/figures_paper/topology/README.md:57-61` and its
+   `caption_data.md` caveat 3. Only c2_P target B (`sample_0004`) is a genuinely
+   independent second target. Do not count three systems anywhere in the prose.
 2. **The c2_P campaign is tuning-half data.** Its targets sit in PREREG §1a's burned/tuning
    range (`sample_0000`–`sample_0007`). Any c2_P number is a tuning number, not held-out
    evidence for a §3 pass condition. The paper may report it as such; it may not present it
@@ -64,11 +65,18 @@ are Turing-unstable with all 16 under the §3.3 8.3% k\* error line.
 - Both targets (16 runs): median `kstar_fft_rel_err` **0.0296** (range 0.0053–0.0700),
   16/16 ≤ 0.083; `recovered_turing` 16/16; median `turing_volume_10pct` 1.000 (min
   0.940), median `turing_volume_4p8pct` 1.000 (all 16 exactly 1.000).
+- `trivial_kstar_err` (PREREG §3.3: a k\* number without this beside it is not
+  reportable): **0.250** for every target-A run, **0.000** for every target-B run
+  (`LL/experiments/figures_paper/prereg_33/results.json`). On target B the trivial
+  estimator hits the true k\* *exactly*, so the ≤ 8.3% clause there carries no evidential
+  weight — the informative k\* evidence is target A's.
 - D5 restart-variance contrast (10 seeds, one target, `kstar_fft_true` 0.28868): 4
   successes at `kstar_fft_rel_err` 0.0136; 6 failures pinned at the k-grid floor
   (`kstar_model` 0.00668, rel err 0.977).
 
-**Run directories:** `MAIN/experiments/c2_P_t8k8_consol/` (16 runs, git `4a61201`);
+**Run directories:** `MAIN/experiments/c2_P_t8k8_consol/` (16 runs; records committed
+`9f72e5d`, finalized `4c176a3`; read at MAIN @ `48441e4`; the runs themselves executed at
+code commit `4a61201` per their `train_results.json` provenance);
 `LL/experiments/diag_fft/d5/` (10 runs).
 
 **Tempering fact (must appear in the prose):** PREREG §3.3's full conjunction — morphology
@@ -76,8 +84,11 @@ match AND morphology distance ≤ the calibrated threshold AND k\* error ≤ 8.3
 **7/16**, not 16/16. The threshold (pooled 75th percentile of within-class distances in
 `three_gene_train` = **2.1072**, D-EVID-18) was computed 2026-08-18; all 8 runs of the
 second target (`sample_0004`) fail the distance sub-condition *despite*
-`morphology_match = True` (distances 2.74–3.80, 1.3–1.8× threshold), and the split cleaves
-exactly along the two targets, not randomly. Source:
+`morphology_match = True` (distances 2.74–3.80, 1.3–1.8× threshold). The split cleaves
+along the two targets except for one target-A run (`..._190648_seed3`), which fails by
+construction — no model-side field to compare (`morphology_scored = "target_only"`,
+D-EVID-18) — making the tally 7 pass / 9 fail, not 8/8; every run with a *measured*
+distance passes on target A and fails on target B. Source:
 `LL/experiments/figures_paper/prereg_33/` and `LL/docs/DECISIONS.md` D-EVID-18.
 
 **Caveats to carry:** tuning-half data (fact 2 above); best-of-64 restarts with non-uniform
@@ -89,12 +100,13 @@ withdrawn, but no new headline claims from it).
 
 ## Claim 2 — Learned GRN topology + parameters robust to perturbation under dynamical lift
 
-**Headline:** all four recovered D5 models remain in the Turing regime under parameter
-perturbation *and* under the finite-μ dynamical lift across the whole biological band:
-perturbation-cloud Turing volume changes by only 2–12 pp from QSS to top-of-band
-(relative drops 5.6–27.9%), surviving k\* is flat to 0.6–2.2%, and across all 27
-QSS-Turing systems surveyed, P(lifted-Turing | QSS-Turing) = **27/27 = 1.000** (Wilson
-95% lower bound **0.8754**, n=27).
+**Headline:** all four recovered D5 models stay Turing-unstable across the whole
+biological band under the finite-μ lift, and their perturbation-cloud Turing volume is
+nearly lift-invariant: it changes by only 2–12 pp from QSS to top-of-band (relative drops
+5.6–27.9%), surviving k\* is flat to 0.6–2.2%, and across all 27 QSS-Turing systems
+surveyed, P(lifted-Turing | QSS-Turing) = **27/27 = 1.000** (Wilson 95% lower bound
+**0.8754**, n=27). The supported claim is *invariance of robustness under the lift*, not
+absolute robustness of the perturbation cloud — see the disclosure below.
 
 **⚠ MANDATORY DISCLOSURE — the §3.2 bar is reinterpreted, by owner decision (D-PAPER-1,
 `LL/docs/DECISIONS.md`).** Side by side:
@@ -103,9 +115,11 @@ QSS-Turing systems surveyed, P(lifted-Turing | QSS-Turing) = **27/27 = 1.000** (
 - *Owner reinterpretation* (2026-08-18): for this claim, "robust" = **remaining in the
   Turing regime after perturbation, under the lift** (lift-invariance), NOT clearance of
   the absolute 0.90/0.95 bars by the lifted systems. PREREGISTRATION.md was not edited.
-- *Measured values*: lifted absolute Turing volumes are **0.285–0.430** — well below the
-  0.90 bar. Per model, QSS → top-of-band (μ=9.2e-3): seed1 0.430→0.310, seed3
-  0.365→0.335, seed5 0.355→0.335, seed6 0.315→0.285.
+- *Measured values*: absolute perturbation-cloud Turing volumes are **0.285–0.430** —
+  well below the 0.90 bar — **and the QSS volumes themselves (0.315–0.430) are already
+  below it; the shortfall is not caused by the lift.** Per model, QSS → top-of-band
+  (μ=9.2e-3): seed1 0.430→0.310, seed3 0.365→0.335, seed5 0.355→0.335, seed6
+  0.315→0.285.
 - *Consistency*: the standing prereg never applies §3.2's bars to lifted systems — §3.7
   (D-LIFT-1) makes the robustness-vs-μ row "Reported, never gated", and §3.6 (which would
   have applied them) was added and withdrawn on 2026-08-03 before any measurement. The
@@ -138,8 +152,10 @@ saw.
 **Survey numbers** (`LL/experiments/lift_ladder/v4/results/v4.json`): 27/27 conditional
 (23 harvested generator systems + 4 learned models); Wilson 95% LB **0.8754** — use this
 value; 0.874 appears in an older task report and is a documented arithmetic error
-(`LL/docs/DIAGNOSTICS_lift.md` §, "matches no standard z"); 2/27 systems are re-entrant in
-μ; edge-of-band effects sit 6.5–19× above the band.
+(`LL/docs/DIAGNOSTICS_lift.md` §4, "matches no standard z"); 2/27 systems are re-entrant
+in μ; only 3/27 show a band edge at all in the scanned range (at 6.5×, 6.5× — the two
+re-entrant systems — and 19.5× above the band top); the remaining 24 have `mu_crit = ∞`
+(no edge found).
 
 **Caveats to carry:** seed3 and seed6 are **marginal patterners** — amplitudes clear the
 pattern floor by only ≈1.9–2.0× (vs ≈16–20× for seed1/seed5); morphology-CLASS equality is
@@ -179,8 +195,8 @@ fails, the NOT-SUPPORTABLE statement replaces the headline.)*
 
 ## Claim 4 — Benchmark model robustness
 
-**Headline:** the 16 recovered c2_P models sit at the **ceiling** of the generator
-population's own robustness distribution: recovered median `turing_volume_10pct` =
+**Headline:** on tuning-half data (fact 2), the 16 recovered c2_P models sit at the
+**ceiling** of the generator population's own robustness distribution: recovered median `turing_volume_10pct` =
 **1.000** (mean 0.995) vs population median 0.935 at the same 10% perturbation, and
 median `turing_volume_4p8pct` = **1.000** vs population median 1.000 (mean 0.954). Both
 pre-registered §3.2 bars pass as written: 1.000 ≥ 0.90 ✓ and 1.000 ≥ 0.95 ✓ over all 16
@@ -252,8 +268,12 @@ pattern while disagreeing with the true topology and with each other.
 c2_P B 8/8 distinct sign structures at rtol 0.05; pooled median pinned `sign_match_frac`
 0.3333 (per-group structural medians: D5 0.3333, A 0.2778, B 0.2778); 19/20 pattern given
 Turing (D5 4/4, A 7/8, B 8/8); true topology `double_inhibitor` with 4 non-zero edges,
-every learned network visibly denser. True sign vector `[+,−,−,+,−,0,+,0,−]` (targets
-A/D5), `[+,0,−,+,−,0,+,0,−]` (B).
+every learned network visibly denser. True sign vectors, at structural rtol 0.05:
+`[+,−,−,+,−,0,+,0,−]` (targets A/D5), `[+,0,−,+,−,0,+,0,−]` (B — at rtol 1e-9 B's second
+entry reads `−`, which is why the tolerance tag matters). The k\* medians here must be
+read with their trivial baselines (PREREG §3.3, see claim 1): 0.250 on target A's grid
+but **0.000 on target B's** — B's 6.5% median k\* error is *worse than the trivial
+estimator*, which is exact there.
 
 **Caveats to carry:** headline score is always the **pinned** score — the 6-permutation
 score is an upper bound (fully-observed runs admit exactly the identity permutation;

@@ -4370,3 +4370,191 @@ batched spectral path yet.
 `tests/test_batched.py::test_active_mask_is_inert_without_a_spectral_context`;
 `docs/INTEGRATION_r3_collisions.md` rows 28 and 24 (both carry a T9 amendment). Read with
 **D-PERF-4**, which records the deletion of the corresponding `total.py`/`recover.py` refusals.
+
+
+---
+
+### D-R3-1 — the unrolled path's finite-difference check holds dt, the solve box and the warm state FIXED
+
+**Date:** 2026-08-19 (R3 Task 12, `feature/r3-integration`). **Status:** DECIDED
+
+**Context.** `docs/REDESIGN_rngrn.md` §4.2 gives the redesign two gradient paths, and §8 item
+14 leaves the truncated-unrolled one's segment length uncalibrated pending a measured
+gradient-error-vs-length curve. Measuring that curve requires deciding *what function* the
+finite differences are differencing. D1's own FD protocol (`scripts/diag_fft_d1.py` check 3)
+re-solves the pattern at each perturbed theta, because there the differentiated object is the
+steady state u*(theta) and the timestep is a solver detail with no effect on the answer. For
+the unrolled path that is no longer true: the differentiated object is the finite-time relax
+map Phi_S(X0; theta), and `dt`, the box `(n, L)` and `X0` are arguments to it.
+
+**The decision:** the FD check for the unrolled path perturbs **theta only**, holding `dt`,
+the solve box and the warm state `X0` fixed at their base-theta values.
+
+**Why.** All three are DETACHED in the analytic path, and deliberately: `dt = 0.2/|eig(J)|_max`
+and the box `L_solve = p*2*pi/k-hat(theta)` are geometry, and §4.3 requires solve-box geometry
+not to be differentiated; `X0` is detached because §4.2's truncation *is* that detachment. A
+detached quantity contributes exactly zero derivative, so an FD that let it move would
+difference a *different* function and disagree for a reason that is not an error — it would
+report the geometry's sensitivity as gradient bias and read as a defect in the path.
+
+**Evidence.** Under this protocol the measured unrolled-vs-FD relative error on a saturated
+warm state is **6.5e-11 to 6.9e-9** across segment lengths 1 to 2048 — five orders of magnitude
+below D1's 1e-4 acceptance, at 6 random directions in the full 36-dimensional theta space with
+the eps sweep {1e-3, 1e-4, 1e-5, 1e-6} and best-eps per direction. Run:
+`experiments/redesign_r3/unrolled_segment/results/curve.json` (method block records
+`dt_is_held_fixed_across_fd: true`).
+
+**Calibration.** Nothing is calibrated by this entry; it fixes a measurement protocol. The
+1e-4 tolerance is D1's, inherited unchanged, not re-derived here.
+
+**What was rejected.** (a) **Re-deriving dt per FD point** from the perturbed theta's
+|eig(J)|_max — rejected: it differences a function the analytic path does not compute, and the
+disagreement would be uninterpretable. (b) **Re-tiling the box per FD point** — rejected for
+the same reason, and additionally because k-hat(theta) is detached by §4.3, so the analytic
+gradient contains no box-sensitivity term to compare against. (c) **Re-relaxing X0 per FD
+point** — rejected: that is the *adjoint* path's question (D1 already answers it), not this
+one's; the truncated path is defined on a fixed warm state by construction.
+
+**Where it lives:** `scripts/r3_unrolled_segment.py` (module docstring, `perturbed_value`);
+`src/rngrn/unrolled.py` ("WHAT IS DIFFERENTIATED AND WHAT IS NOT");
+`experiments/redesign_r3/unrolled_segment/results/curve.json`. Read with **D-FFT-10** (the
+adjoint path's own FD verification) and **D-R3-2**.
+
+---
+
+### D-R3-2 — the truncated-unrolled segment length is 128 steps, SCOPED to a saturated warm state
+
+**Date:** 2026-08-19 (R3 Task 12, `feature/r3-integration`; controller ruling on the returned
+decision point). **Status:** DECIDED — CALIBRATED inside the stated regime, UNCALIBRATED
+outside it
+
+**Context.** `docs/REDESIGN_rngrn.md` §8 register item 14: the truncated-unrolled path's
+segment length is UNCALIBRATED, to be set at R3 from the measured gradient-error-vs-length
+curve. §4.2's design is "detach the warm-started state and differentiate only the final
+**saturated** segment".
+
+**The decision:** `unrolled.SEGMENT_STEPS_DEFAULT = 128`, and it is the default of
+`unrolled_relax(..., segment_steps=...)`. The number is adopted **only** for invocation from a
+saturated warm state; three conditions travel with it and are written at the constant itself:
+
+* **(a) Calibrated on ONE fixture, ONE box, ONE seed.** The D1/D2 known-Turing checkpoint at
+  k-hat = 0.17607 on the p=8, n=96 commensurate solve box, 6 FD directions, two placeholder
+  loss functionals (`amp` = mean(u_0^2) and a log band-power proxy over [0.60, 1.55]*k-hat).
+* **(b) UNCALIBRATED beyond that.** Transferability to another fixture, box, k-hat or
+  objective is not established. `docs/PLAN_redesign_R3.md` Task 14's A/B against the adjoint —
+  over BOTH converged and stalled members, and against the real objective once Task 13 wires
+  it — is the next calibrator and may move the number.
+* **(c) The path must not be invoked from a non-saturated state.** This is a caller contract,
+  not a runtime check: saturation is a property of the trajectory that produced the warm
+  state, which `unrolled_relax` cannot see, and inventing a single-field proxy for it would be
+  an uncalibrated threshold. The caller that ran the relax knows whether its detector fired.
+
+**Evidence** (`experiments/redesign_r3/unrolled_segment/results/curve.json`; CPU, 1 thread,
+810 s of measurement; `cos`/`gap` are cosine and relative-norm distance to the S=2048 point of
+the same arm, a measured reference and not a proven limit):
+
+- **Saturated arm at S=128:** cosine **0.9999937** (`amp`) / **0.9999967** (band power),
+  relative norm gap **0.394%** / **0.287%**; FD-faithful at **9.2e-10** / **3.9e-10** worst over
+  6 directions, five orders below D1's 1e-4.
+- **The curve is flat above ~128 and steep below ~32.** Norm gap: 21% / 31% at S=16, 4.97% /
+  5.17% at 32, 1.15% / 1.97% at 64, 0.394% / 0.287% at 128, 0.067% / 0.175% at 256. Doubling
+  128 -> 256 buys 0.33 / 0.11 percentage points for 1.8x the cost; 128 -> 1024 buys 0.39 /
+  0.28 for 7.4x.
+- **Growth arm, which is what condition (c) rests on.** From a warm state at 20.4% of the
+  saturated amplitude, `amp` behaves (3.61% gap at S=128) but the band-power gradient does
+  **not converge at all**: cosine wanders 0.936-0.978 and the norm gap sits at **20-41%** from
+  S=32 out to S=1024, closing only once the segment is itself long enough to reach saturation.
+  At S=128 specifically: **35.6%** norm gap, cosine 0.936. The spectral-flavoured gradient —
+  precisely the one Tasks 13/14 will use — is the one that cares.
+
+**Calibration — stated plainly.** 128 is CALIBRATED against the curve above *within* the
+saturated regime and UNCALIBRATED outside it. The two loss functionals it was calibrated
+against are **placeholders**, not `losses/spectral`'s RAPS shape term; the band-power proxy
+exercises the FFT and the band and must not be reported as the trained objective.
+`tests/test_unrolled_grad.py::test_the_adopted_segment_length_is_the_calibrated_default` pins
+the constant and the signature default together, verified red by mutation.
+
+**What was rejected.** (a) **Shipping no default at all** (the unit's own initial position) —
+rejected by the ruling: it makes every future call site re-derive a number that has now been
+measured, and an unstated default is not more honest than a stated-and-scoped one. (b) **A
+silent global default of 128** — rejected: it would be a real number applied outside the regime
+it was measured in, which is exactly the growth-arm failure. (c) **S=256 or larger for safety
+margin** — rejected: cost is linear in S and the marginal accuracy is 0.1-0.3 percentage
+points, while the FD check's own verifiability *degrades* at long segments (D-R3-3). (d) **A
+runtime saturation guard inside `unrolled_relax`** — rejected: it would need a threshold on a
+single field that nothing has calibrated, i.e. a guess dressed as a check.
+
+**Where it lives:** `src/rngrn/unrolled.py` (`SEGMENT_STEPS_DEFAULT` and its condition block,
+module docstring, `unrolled_relax` docstring);
+`tests/test_unrolled_grad.py::test_the_adopted_segment_length_is_the_calibrated_default`;
+`scripts/r3_unrolled_segment.py`;
+`experiments/redesign_r3/unrolled_segment/results/curve.json`. Read with **D-R3-1** (the
+protocol behind the numbers) and **D-R3-3** (why truncation is justified here at all).
+
+---
+
+### D-R3-3 — ANNOUNCED: §4.2's exponential-blow-up rationale for truncation did NOT reproduce; the operative rationale here is memory and FD-verifiability
+
+**Date:** 2026-08-19 (R3 Task 12, `feature/r3-integration`). **Status:** DECIDED —
+spec-expectation correction, announced loudly
+
+**Context.** `docs/REDESIGN_rngrn.md` §4.2 states the cost of the unrolled path as: "gradients
+through the exponential-growth phase of the instability can explode — mitigated by
+**truncated** backprop". That sentence is the stated *reason* the path is truncated, and
+`docs/PLAN_redesign_R3.md` Task 12 expected the measurement to exhibit blow-ups.
+
+**The finding:** it did not. **No segment length in [1, 2048] blew up on either arm** — no
+non-finite forward field and no non-finite gradient component, over 24 measured points x 2 loss
+functionals, each backed by 48 finite-difference forwards. `forward_blew_up` is `false` in
+every row of the committed curve. This holds from a growth-phase warm state as well as from a
+saturated one.
+
+**Why, mechanically.** The patterned attractor is **contracting**, so the amplification picked
+up crossing the exponential-growth phase is bounded rather than compounding. The signature is
+visible in the data: the growth arm's FD relative error rises to a **peak of 1.06e-5 at
+S=1024** and then *falls back* to 1.9e-6 at S=2048, because by 2048 steps the trajectory has
+saturated from either start and the memory of the growth phase has been contracted away.
+
+**So what truncation actually buys at this operating point** — and this is the correction:
+
+1. **Bounded activation memory.** MEASURED (n=32, N=3, float64, saved-tensor hooks): 24,576
+   B/step retained at `checkpoint_every=1` — exactly one field — against 753 kB/step
+   un-checkpointed (**30x**), and **0 B/step** for the un-differentiated warm-up at any length.
+2. **A gradient that is still finite-difference-VERIFIABLE.** What degrades at long segments is
+   the check, by five orders of magnitude on the growth arm (6e-11 -> 1.06e-5), while staying
+   under D1's 1e-4 throughout.
+3. It does **not** buy protection from an observed divergence, because there was none.
+
+**Honest caveat, and it is load-bearing.** As S grows, the loss's higher derivatives grow with
+the same transient amplification, so the central-difference *truncation* error grows even for
+an exactly correct analytic gradient. The rising FD column is therefore **not** proof that the
+analytic gradient is degrading — it is proof that this check can no longer certify it. Both
+readings fit the data and this measurement cannot separate them; a Taylor-remainder or
+complex-step check could, and neither was in scope.
+
+**Scope of the finding.** One fixture, one commensurate box (p=8, n=96), one k-hat, one seed,
+two placeholder losses, CPU float64. It is **not** a claim that the unrolled path cannot
+explode in general — a stiffer model, a larger box, or a genuinely unstable dt would be
+different questions. It **is** a claim that on the measured operating point the spec's stated
+mechanism was absent, so a reader must not cite §4.2's explosion as evidence *from this
+repository*.
+
+**Calibration.** Nothing threshold-like is set here. The blow-up detector is
+`unrolled_relax`'s own one-`isfinite`-per-call check, which raises rather than returning a NaN
+field, and which was verified to fire on a real ETDRK4 instability (dt 1000x the stability
+limit: finite at 8 steps, non-finite by 32) rather than only on an injected NaN.
+
+**What was rejected.** (a) **Reporting the curve as confirming §4.2** — rejected: it does not,
+and CLAUDE.md §8 makes a silently non-comparable rationale worse than a missing one.
+(b) **Extending the ladder until something exploded** — rejected as a fishing expedition: the
+S=2048 recovery shows the mechanism is contraction, not a not-yet-reached threshold, and a
+blow-up manufactured at an unusable dt would say nothing about the operating point.
+(c) **Editing §4.2 unilaterally** — not taken: `docs/REDESIGN_rngrn.md` is the binding spec and
+the amendment is the controller's to make; this entry is the announcement it would rest on.
+
+**Where it lives:** `experiments/redesign_r3/unrolled_segment/results/curve.json`;
+`scripts/r3_unrolled_segment.py`; `src/rngrn/unrolled.py` (the "TRUNCATED" bullet, rewritten to
+state this rather than repeat §4.2's expectation);
+`tests/test_unrolled_grad.py::test_a_blown_up_segment_raises_rather_than_returning_a_nan_field`.
+Read with **D-R3-2**, whose segment length rests on the convergence and cost argument rather
+than on a stability one, and **D-PERF-6** (the per-call blow-up check this path reuses).

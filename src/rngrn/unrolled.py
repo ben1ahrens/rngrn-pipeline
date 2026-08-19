@@ -15,9 +15,14 @@ TRUNCATED, and this is the whole design:
 
 * the warm-started state is **DETACHED** on entry, unconditionally. Whatever produced it —
   a gradient-free relax, or a previous differentiated segment — contributes exactly zero.
-* only the final `segment_steps` are differentiated. §4.2 warns that gradients taken through
-  the exponential-growth phase of the instability can blow up; truncation is the mitigation,
-  which is why the segment length is a knob and not a constant.
+* only the final `segment_steps` are differentiated, from a **saturated** warm state. §4.2
+  gives the rationale as gradients exploding through the exponential-growth phase of the
+  instability — that explosion **did not reproduce** on the measured fixture (no segment
+  length in [1, 2048] produced a non-finite field or gradient, either from a saturated or
+  from a growth-phase start; D-R3-3). What truncation actually buys here is bounded
+  activation memory and a gradient that is still finite-difference-VERIFIABLE; what a
+  non-saturated start actually costs is a 35.6% band-power gradient error that no segment
+  length up to 1024 repairs. The knob stays a knob for those reasons.
 * those steps run under **gradient checkpointing** (`checkpoint_every`), so retained
   activation memory is set by the number of block boundaries rather than by the step count.
   MEASURED at n=32, N=3, float64 (`tests/test_unrolled_grad.py`): 24,576 B/step retained at
@@ -31,11 +36,13 @@ n=96 by shape alone (~110 MB, UNMEASURED). It dominates the activation budget at
 segments. Trading it away means giving up the theta_D gradient or checkpointing the
 coefficient build as well; neither is done here.
 
-**The segment length is UNCALIBRATED.** `docs/REDESIGN_rngrn.md` §8 item 14 assigns its
-calibration to R3, from the measured unrolled-vs-finite-difference error against segment
-length. That curve is `scripts/r3_unrolled_segment.py`, committed under
-`experiments/redesign_r3/unrolled_segment/`; this module ships NO default segment length,
-so a caller cannot inherit an uncalibrated number without choosing it.
+**The segment length is CALIBRATED ONLY INSIDE THIS PATH'S DESIGNED OPERATING REGIME.**
+`docs/REDESIGN_rngrn.md` §8 item 14 assigned that calibration to R3; the measured curve
+(`scripts/r3_unrolled_segment.py`, committed under
+`experiments/redesign_r3/unrolled_segment/`) set `SEGMENT_STEPS_DEFAULT = 128` for a
+**saturated** warm start, and for nothing else. Read that constant before using the default —
+it carries the three conditions the ruling attaches to it (D-R3-2), the load-bearing one being
+that this path **must not be invoked from a non-saturated state at all**.
 
 WHAT IS DIFFERENTIATED AND WHAT IS NOT. The reaction's parameters (KA, KR, alpha, beta,
 delta) and the ETDRK4 coefficients (through D, which enters only via the linear operator
@@ -66,16 +73,45 @@ from .etdrk4_torch import (_torch_reaction_builder, integrate_etdrk4_rfft_torch,
                            torch_half_coeffs)
 from .model import RNGRN
 
+#: Differentiated steps in the truncated segment. ADOPTED by controller ruling (D-R3-2)
+#: from the measured gradient-error-vs-segment-length curve,
+#: `experiments/redesign_r3/unrolled_segment/results/curve.json`. Three conditions travel
+#: with the number and none of them is optional:
+#:
+#: (a) CALIBRATED on ONE fixture, ONE solve box, ONE seed — the D1/D2 known-Turing checkpoint
+#:     at k-hat=0.17607 on the p=8, n=96 commensurate box, 6 FD directions, two placeholder
+#:     loss functionals. At 128 the gradient sits at cosine 0.999994 (amp) / 0.999997
+#:     (log band power) and relative norm gap 0.394% / 0.287% against the S=2048 reference,
+#:     FD-faithful at 9.2e-10 / 3.9e-10 — five orders below D1's 1e-4 acceptance.
+#: (b) UNCALIBRATED beyond that point. It is not established as transferable to another
+#:     fixture, box, k-hat or objective. `docs/PLAN_redesign_R3.md` Task 14's A/B against the
+#:     adjoint — over BOTH converged and stalled members, and against the real objective once
+#:     Task 13 wires it — is the next calibrator, and may move this number.
+#: (c) THE PATH MUST NOT BE INVOKED FROM A NON-SATURATED STATE. Measured from a growth-phase
+#:     warm start (20.4% of saturated amplitude), the band-power gradient is 35.6% off in
+#:     norm at S=128 (cosine 0.936) and NO segment length up to 1024 repairs it — the error
+#:     only closes once the segment is itself long enough to reach saturation. §4.3's
+#:     stall-switch must therefore hand this path a SATURATED field; a stalled Newton polish
+#:     is not the same condition as an unsaturated relax, and only the latter is disqualifying.
+SEGMENT_STEPS_DEFAULT = 128
+
 
 def unrolled_relax(model: RNGRN, X0: torch.Tensor, n: int, L: float, dt: float,
-                   segment_steps: int, warmup_steps: int = 0,
+                   segment_steps: int = SEGMENT_STEPS_DEFAULT, warmup_steps: int = 0,
                    checkpoint_every: int | None = None,
                    device: torch.device | None = None) -> torch.Tensor:
     """`warmup_steps` un-differentiated ETDRK4 steps, then `segment_steps` differentiated.
 
-    `X0` is the warm state, (N, n, n) or (B, N, n, n); the returned field has the same rank.
-    It is DETACHED on entry — §4.2's truncation — so a caller may pass a tensor that still
-    carries a graph without silently widening the differentiated stretch.
+    `X0` is the warm state and **must be SATURATED** — see `SEGMENT_STEPS_DEFAULT` condition
+    (c): from a growth-phase field the band-power gradient is 35.6% off in norm at the default
+    segment length and no length up to 1024 repairs it. That condition is a CALLER CONTRACT,
+    not a check: saturation is a property of the trajectory that produced `X0`, which this
+    function does not see, and inventing a single-field proxy for it here would be a threshold
+    nothing has calibrated. The caller that ran the relax knows whether its detector fired.
+
+    `X0` is (N, n, n) or (B, N, n, n); the returned field has the same rank. It is DETACHED on
+    entry — §4.2's truncation — so a caller may pass a tensor that still carries a graph
+    without silently widening the differentiated stretch.
 
     `checkpoint_every` is the gradient-checkpointing block size in steps: `None` runs the
     segment as one plain graph (every step's activations retained), an integer re-runs each

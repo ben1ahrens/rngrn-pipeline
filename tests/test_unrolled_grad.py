@@ -29,6 +29,7 @@ not measurements of it. The measurement — unrolled-vs-FD relative error agains
 length at the n=96 commensurate box — is `scripts/r3_unrolled_segment.py` and its committed
 result under `experiments/redesign_r3/unrolled_segment/`.
 """
+import inspect
 import pathlib
 
 import numpy as np
@@ -36,6 +37,7 @@ import pytest
 import torch
 
 import rngrn.solve_box as sb
+import rngrn.unrolled as unrolled
 from rngrn.losses.terms import steady_state
 from rngrn.model import RNGRN, THETA_NAMES
 from rngrn.unrolled import unrolled_relax
@@ -226,6 +228,18 @@ def test_a_blown_up_segment_raises_rather_than_returning_a_nan_field(setup):
     model, X0, n, L, dt = setup
     with pytest.raises(RuntimeError, match="blew up"):
         unrolled_relax(model, X0, n, L, 1e3 * dt, segment_steps=32, checkpoint_every=8)
+
+
+def test_the_adopted_segment_length_is_the_calibrated_default():
+    """D-R3-2's ruling, pinned. A DRIFT TRIPWIRE, not a behaviour test: 128 is calibrated in
+    `experiments/redesign_r3/unrolled_segment/results/curve.json` on ONE fixture, box and
+    seed, so a silent change would move what every unrolled gradient means without touching a
+    single call site. Verified red by mutating the constant."""
+    assert unrolled.SEGMENT_STEPS_DEFAULT == 128
+    default = inspect.signature(unrolled.unrolled_relax).parameters["segment_steps"].default
+    assert default == unrolled.SEGMENT_STEPS_DEFAULT, (
+        "the signature default drifted from the calibrated constant, so callers relying on "
+        "the default are no longer getting the adopted number")
 
 
 def test_segment_steps_must_be_positive(setup):

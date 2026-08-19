@@ -47,6 +47,14 @@ RECOVERY_SIDE = [
     # geometry plus (frame-derived RAPS, k*_obs) — both legal recovery quantities,
     # SPEC_fourier_training.md 7. Its only rngrn import is losses.spectral.SpectralConfig
     # (already RECOVERY_SIDE), for B_train's closed edges.
+    "unrolled.py",                                  # Task 12 (R3 redesign): the truncated-
+    # unrolled gradient path (REDESIGN_rngrn.md 4.2), the second of the two gradient paths.
+    # Runs INSIDE the training loop and is the same character as forward.py, which it is the
+    # alternative to: it backpropagates through the ETDRK4 relax of the model's OWN
+    # parameters on a caller-supplied field and grid. Imports only etdrk4_torch.py and
+    # model.py, both already RECOVERY_SIDE. It reads no observed frame at all -- what is
+    # SCORED on the relaxed field (the interpolated spectral targets) is deliberately not
+    # wired here; that is Tasks 13/14.
 ]
 
 # SCORING-side modules under losses/ and eval/. These MAY read the answer key; they are
@@ -176,7 +184,8 @@ def test_every_loss_and_eval_module_is_classified():
     # classification for EVERY package-root module (cli, config, io, index, train, validate,
     # export, plotdata, viz, tracking, ...), most of which fit neither existing category. It
     # is a taxonomy change, out of Task 11's scope; recorded here as the standing gap.
-    discovered = {"history.py", "forward.py", "etdrk4_torch.py", "solve_box.py"}
+    discovered = {"history.py", "forward.py", "etdrk4_torch.py", "solve_box.py",
+                  "unrolled.py"}
     for pkg in ("losses", "eval"):
         for path in sorted((SRC / pkg).glob("*.py")):
             if path.name == "__init__.py":

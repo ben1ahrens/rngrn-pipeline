@@ -3323,18 +3323,27 @@ gradient — the load-bearing untested item the review calls C2 — is out of sc
 remains unverified; the accepts-test above exercises `compute_terms_batched`'s per-member
 wiring with a hand-written stub solver, not the real `forward.BatchedPatternSolver`.
 
-**Open — returned to the orchestrator, not decided here:**
-`tests/test_ignition_gating.py::test_recover_raises_on_batched_with_a_spectral_weight`
-(`:194`) is left UNCHANGED by this task — still vacuously green for the reason above. Per its
-own docstring and the `recover.py:396-401` evidence cited above, the current contract makes
-`batched=True` + a non-zero spectral weight **legal**, so this test's name and assertion
-(`pytest.raises(ValueError, match="batched")`) no longer describe anything the library does.
-Its correct replacement is an end-to-end `batched=True, lbfgs_steps=0` spectral `recover()`
-run checked against its serial twin — which needs the equivalence-test machinery R3 tasks
-2/4 are building, not a two-line fix. Left as-is rather than deleted or weakened further,
-pending that task.
+**RULED — controller ruling 2026-08-19, same task:** the legality shape found above is
+CONFIRMED as the current contract: `batched=True` combined with a non-zero spectral weight is
+**legal**, not refused.
+`tests/test_ignition_gating.py::test_recover_raises_on_batched_with_a_spectral_weight` (`:194`)
+is renamed to `test_recover_accepts_batched_with_a_spectral_weight` and rewritten to PIN that
+contract non-vacuously: `R.recover(ri, strategy=_spectral_on_strategy(), batched=True,
+lbfgs_steps=0, adam_steps=0, n_restarts=1)` is asserted to complete WITHOUT raising
+(`lbfgs_steps=0` explicit so the unrelated LBFGS guard cannot be what fires or what doesn't;
+`adam_steps=0` keeps it a fast validation-layer check, ~3.2 s measured). It asserts only that
+the combination is accepted at the validation layer — nothing about the recovered result's
+numerical correctness.
+
+**Still assigned onward — end-to-end equivalence is Task 4's job, not this task's:** an
+end-to-end `batched=True, lbfgs_steps=0` spectral `recover()` run checked NUMERICALLY against
+its serial twin (the batched-vs-serial equivalence `docs/REVIEW_gpu_optim_delta.md` C1/C2
+still want) remains unwritten. `:194`'s docstring names Task 4 explicitly as the completing
+test. `BatchedPatternSolve.backward`'s untested adjoint gradient (C2) is still out of scope for
+this task and remains unverified — see "Not independently validated" above.
 
 **Where it lives:** `src/rngrn/losses/total.py::compute_terms_batched`;
 `tests/test_ignition_gating.py::test_compute_terms_batched_accepts_a_batched_spectral_context`,
 `::test_compute_terms_batched_refuses_a_serial_solver`,
-`::test_compute_terms_batched_refuses_a_non_batched_model`.
+`::test_compute_terms_batched_refuses_a_non_batched_model`,
+`::test_recover_accepts_batched_with_a_spectral_weight`.

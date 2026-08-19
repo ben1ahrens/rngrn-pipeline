@@ -267,12 +267,29 @@ def test_recover_raises_on_split_hinges_off_with_a_spectral_weight():
                   adam_steps=0, n_restarts=1)
 
 
-def test_recover_raises_on_batched_with_a_spectral_weight():
+def test_recover_accepts_batched_with_a_spectral_weight():
+    """PINS THE CURRENT CONTRACT (D-PERF-4, controller ruling 2026-08-19): batched=True
+    combined with a non-zero spectral weight is LEGAL, not refused -- `recover.py:396-401`'s
+    docstring states this in place ("the refusal is now DELETED because the solve gained a
+    member axis"), and `_batched_restarts` wires a real `forward.BatchedPatternSolver` into
+    the spectral context whenever a spectral weight is on. This test used to assert the
+    OPPOSITE (`pytest.raises(ValueError, match="batched")`) without passing `lbfgs_steps`,
+    which made it pass VACUOUSLY -- it tripped `recover()`'s unrelated LBFGS guard (whose
+    message also happens to contain "batched"), never the thing its name claimed to test. Here
+    `lbfgs_steps=0` is explicit so that guard cannot fire, and `adam_steps=0` keeps this a fast
+    validation-layer check: the point is that NO ValueError fires, not that anything converges.
+
+    NOT COVERED HERE, is Task 4's job: an end-to-end `batched=True, lbfgs_steps=0` spectral
+    recover() run checked NUMERICALLY against its serial twin (the batched-vs-serial
+    equivalence C1/C2 of docs/REVIEW_gpu_optim_delta.md still want). This test only pins that
+    the combination is ACCEPTED at the validation layer -- it asserts nothing about the
+    recovered result's correctness.
+    """
     from rngrn import recover as R
     ri = _tiny_recovery_input_np()
-    with pytest.raises(ValueError, match="batched"):
-        R.recover(ri, strategy=_spectral_on_strategy(), batched=True,
-                  adam_steps=0, n_restarts=1)
+    result = R.recover(ri, strategy=_spectral_on_strategy(), batched=True,
+                       lbfgs_steps=0, adam_steps=0, n_restarts=1)
+    assert result is not None
 
 
 def test_recover_raises_on_non_identity_observed_idx_with_a_spectral_weight():

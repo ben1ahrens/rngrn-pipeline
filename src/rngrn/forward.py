@@ -626,12 +626,12 @@ def relax_to_pattern_torch(model: RNGRN, xstar: np.ndarray, n: int, L: float,
     The saturation detector runs ON THE DEVICE: `observables.kstar_of_torch` (the parity
     port of `kstar_of`) instead of pulling the whole channel-0 frame back per chunk — up
     to 400 x 2 MB of D2H plus a host FFT per solve at 512^2. Only the two summary scalars
-    cross per chunk. `kstar_of_torch` bins by `floor(|k|/dk)` where `kstar_of` bins by
-    `digitize`, equal for these uniform bins except where an ulp of the division lands a
-    point on a bin edge, so a chunk's k* can differ from the numpy path's in the last
-    bits and the flatness detector can stop one chunk earlier or later. The std is taken
-    with `correction=0` to keep numpy's population convention (the ratio test is
-    invariant to that factor either way)."""
+    cross per chunk. `kstar_of_torch` uses `kstar_of`'s OWN `np.digitize` binning (since
+    2026-08-19, D-OBS-1) and is pinned against it by `tests/test_raps_torch_parity.py`, so
+    a chunk's k* now differs from the numpy path's only by FFT backend and summation order
+    (<= 4.5e-16 measured), not by a bin reassignment. The std is taken with `correction=0`
+    to keep numpy's population convention (the ratio test is invariant to that factor
+    either way)."""
     D = model.D.detach().cpu().numpy()
     reaction_t = _torch_reaction_builder(model, device)
     coeffs = torch_half_coeffs(D, n, L, dt, device)

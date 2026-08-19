@@ -83,6 +83,13 @@ def _raps_torch_bins(n: int, L: float, device, dtype):
     `KR.max().item()` sync that used to decide the bin count, and makes the edges
     bit-identical to `raps`'s on every device instead of depending on whether the device's
     `sqrt` rounds a lattice radius the way numpy's does.
+
+    The bin assignment is `raps`'s OWN `np.digitize(...) - 1`, clipped — not an arithmetic
+    stand-in for it. It was `floor(|k|/dk)` until 2026-08-19, justified by torch having no
+    `digitize`; that justification ended when the binning moved to the host, and the two
+    are NOT equal (D-OBS-1 in `docs/DECISIONS.md`). `tests/test_raps_torch_parity.py`
+    pins this equality point for point, on a geometry that provably has the bin-edge
+    lattice radii where the two can differ.
     """
     import torch
     key = (int(n), float(L), device, dtype)
@@ -95,7 +102,7 @@ def _raps_torch_bins(n: int, L: float, device, dtype):
     dk = 2 * np.pi / L                                          # fundamental
     kbins = np.arange(0, KR.max() + dk, dk)
     nbins = len(kbins) - 1
-    which = np.clip(np.floor(KR.ravel() / dk).astype(np.int64), 0, nbins - 1)
+    which = np.clip(np.digitize(KR.ravel(), kbins) - 1, 0, nbins - 1)
     counts = np.maximum(np.bincount(which, minlength=nbins), 1).astype(np.float64)
     kcent = 0.5 * (kbins[:-1] + kbins[1:])
     ent = (torch.from_numpy(which).to(device),
@@ -111,33 +118,34 @@ def raps_torch(field, L: float = 1.0):
     device tensors (real, same device/dtype as `field`) and `k_star` as a plain python
     float, mirroring `raps`'s (ndarray, ndarray, float) return.
 
-    Same binning as `raps`: bins of width `dk = 2*pi/L` starting at k=0, a power-weighted
-    centroid over the 5 bins around the peak, k=0 bin dropped before the peak search.
-    `np.digitize(x, kbins) - 1, clipped` is replaced by `floor(x / dk), clamped`, and
-    accumulation is `scatter_add_` in place of numpy's `bincount`.
+    Same binning as `raps`, and the same CODE for it: bins of width `dk = 2*pi/L` starting
+    at k=0 with `np.digitize(|k|, kbins) - 1` clipped, a power-weighted centroid over the 5
+    bins around the peak, k=0 bin dropped before the peak search. Only the accumulation
+    differs — `scatter_add_` in place of numpy's `bincount`.
 
     The bin assignment is built ONCE per (n, L, device, dtype) by `_raps_torch_bins` and
     cached, so a call does no host work, no host-to-device transfer and no `KR.max()`
-    sync; only the FFT, the scatter and the peak `argmax` remain. The arithmetic is
-    otherwise unchanged.
+    sync; only the FFT, the scatter and the peak `argmax` remain.
 
-    KNIFE EDGE — `floor` and `digitize` are NOT exactly equal here, contrary to what this
-    docstring used to claim. On these grids every lattice radius lying on an axis is an
-    exact multiple of `dk`, i.e. exactly ON a bin edge, and `x / dk` can evaluate 1 ulp
-    low there, putting the point one bin down where `digitize` puts it up. Measured
-    2026-08-17: on a saturated 64^2 pattern `kstar_of_torch` and `kstar_of` agree to 3e-16
-    relative — the regime `forward.relax_to_pattern_torch`'s detector runs in — but on a
-    pure-noise 16^2 field one bin differed by 14% and k* by 0.24%, where the RAPS has no
-    real peak and the centroid is ill-posed anyway. Same class as finding F-D6-1
-    (`docs/DIAGNOSTICS_fft.md`), which is why `losses/spectral.py::raps_torch` keeps its
-    OWN integer-arange/`digitize` binning instead of calling this one. Now that the
-    binning is computed host-side, `np.digitize` is available here too and the original
-    "torch has no digitize" justification no longer applies; switching would change values
-    for a shared observable, so it is left as a flagged follow-up, not taken here.
+    PARITY PORT, PINNED by `tests/test_raps_torch_parity.py`, which asserts the bin
+    assignment against `np.digitize` point for point and the power/k* against `raps` on a
+    saturated 64^2 pattern and at the relax detector's own operating point (x* + 1e-2
+    noise, n = 16/32/64/96). Bars are `1e-12` per bin and `1e-14` on k*, ~20x above the
+    MEASURED round-off floor of 4.80e-14 / 4.50e-16 (2026-08-19, CPU float64) — that floor
+    is FFT backend plus summation order, since a bin's power is an unordered sum of up to
+    n^2 terms and `bincount` and `scatter_add_` add them in different orders.
 
-    PARITY PORT: faithful by construction and now MEASURED against `raps` on patterned and
-    noise fields (above), but still not PINNED by a test — add one before any further
-    caller relies on it. Wired into `forward.relax_to_pattern_torch`'s saturation detector.
+    Until 2026-08-19 the binning here was `floor(|k|/dk)`, which is NOT equal to `digitize`
+    on these grids: a lattice radius that is an exact multiple of `dk` sits exactly ON a
+    bin edge, and `|k|/dk` can evaluate 1 ulp low there. Those radii are the ON-AXIS modes,
+    which carry the pattern's dominant power, so the effect was not small — measured up to
+    22.5% on a bin and 30.2% on k* at the detector's operating point. See D-OBS-1
+    (`docs/DECISIONS.md`); same class as finding F-D6-1 (`docs/DIAGNOSTICS_fft.md`).
+    `losses/spectral.py::raps_torch` remains a separate function with its own
+    integer-arange edges (F-D6-1's fix) and is not called from here.
+
+    Wired into `forward.relax_to_pattern_torch`'s saturation detector and, through the
+    shared cached binning, into `forward._kstar_of_torch_batched`.
     """
     import torch
     f = field - field.mean()

@@ -3347,3 +3347,119 @@ this task and remains unverified — see "Not independently validated" above.
 `::test_compute_terms_batched_refuses_a_serial_solver`,
 `::test_compute_terms_batched_refuses_a_non_batched_model`,
 `::test_recover_accepts_batched_with_a_spectral_weight`.
+
+---
+
+### D-OBS-1 — the relax saturation detector's k\* estimator is `observables.kstar_of_torch`, and that function now bins with `raps`'s own `np.digitize`, not `floor`
+
+**Date:** 2026-08-19 (R3 task 3, branch `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` C3). **Status:** DECIDED
+**Decided by:** the controller, on measurements taken by the implementing agent under
+delegated authority.
+
+One entry, two coupled facts: the estimator **swap** that `feature/gpu-optim` made silently
+(semantic change #6), and the **binning fix** that makes the swap legitimate.
+
+**The decision (part 1 — the swap, now recorded).** `forward.relax_to_pattern_torch`'s
+saturation detector evaluates k\* with `observables.kstar_of_torch` instead of pulling the
+channel-0 frame back to the host and calling `observables.kstar_of`; `forward._kstar_of_torch_batched`
+is its batched twin and shares the same cached binning. The motive is transfer, not
+arithmetic: the numpy detector costs up to 400 × 2 MB of device-to-host copy plus a host FFT
+per solve at 512², where the torch one moves two scalars per chunk. This swap was made in
+`feature/gpu-optim` with no register entry; that omission is what this decision closes. The
+serial CPU path (`relax_to_pattern`, chosen by `PatternSolver._relax` when the device is CPU)
+still calls `kstar_of` and is unchanged.
+
+**The decision (part 2 — the binning).** `observables._raps_torch_bins` assigns bins with
+`np.clip(np.digitize(|k|, kbins) - 1, 0, nbins - 1)` — literally `raps`'s expression. It was
+`np.clip(np.floor(|k| / dk), 0, nbins - 1)`. `observables.raps` (the unwindowed RAPS,
+register item 15's **primary** k\* estimator) is untouched, as is every numpy consumer of it
+(`recover`, `eval/rollout`, `eval/lifted`, `relax_to_pattern`, `morphology`).
+
+**Evidence.** All measured 2026-08-19 in this worktree's `.venv`, CPU float64, one thread,
+sandbox disabled; the tracked checkpoint
+`experiments/tune_comp/runs/m3_registry_20260803_190250_seed3/checkpoints/model.pt` on a box
+of 4 periods of its fastest-growing linear mode (L = 142.74286494132343). Reproduced by
+`tests/test_raps_torch_parity.py`.
+
+- **`floor` is not equal to `digitize` here, and not by a little.** Against `raps`, the
+  `floor` binning gave, worst per configuration: saturated 64² pattern **11.9 % on a bin,
+  0.36 % on k\***; the detector's own operating point (x\* + 1e-2 noise, n ∈ {16, 32, 64, 96}
+  × seeds {0,1,2}) **22.5 % on a bin, 30.2 % on k\***.
+- **Mechanism.** A lattice radius that is an exact integer multiple of `dk = 2π/L` sits
+  exactly ON a bin edge, where `|k|/dk` can evaluate 1 ulp low and `floor` drops the point a
+  bin. At this L those radii are the **on-axis** modes — m = 5 (n=16), 5,10 (n=32), 5,10,20
+  (n=64), 5,10,20,40,43 (n=96), i.e. 4/8/12/20 of the n² points. The box is 4 periods, so
+  m = 5 is adjacent to the pattern's dominant mode: the misbinned modes carry the most power,
+  which is why a 1-ulp defect moves a bin by double-digit percent.
+- **No bound on the divergence generalises.** Which radii collide turns on the last bits of
+  the float L: truncating L to 142.7429 makes n = 16 and n = 32 collision-free (the two then
+  agree to 5.08e-16) while giving n = 64 a *different* collision set (m = 29, 35).
+- **The fix closes it to round-off.** With `digitize`: **1.59e-15** worst bin on the 64²
+  pattern (k\* exactly 0.0) and **8.36e-16 / 3.72e-16** worst over the 12 operating-point
+  configurations.
+- **The round-off floor itself is measured, not assumed.** On 13 (n, L) geometries where the
+  two binnings provably assign every lattice point identically, over 78 field/geometry pairs
+  (noise and multi-mode cosine, n = 16…128): worst per-bin **4.80e-14**, worst k\*
+  **4.50e-16**. That residue is FFT backend plus summation order (`np.bincount` vs
+  `scatter_add_`). `tests/test_raps_torch_parity.py` sets its bars at 1e-12 / 1e-14, ~20×
+  above the floor.
+- **Detector exposure, measured before the fix.** One trajectory of the torch integrator,
+  **both** estimators evaluated on every chunk, the flatness detector then replayed over each
+  series (this isolates the estimator; a numpy-vs-torch relax would confound it with FFT
+  backend). 16 trajectories = seeds 0–7 × {32², 64²}, `chunk=500`, production
+  `flat_tol=1e-4`: the stop chunk was **identical in 16/16** and the returned u\* differed by
+  **exactly 0.0**. The detector tests a *relative* spread, and the divergence was close to a
+  constant offset per trajectory, which cancels out of that ratio.
+
+**Consequence for existing numbers — stated plainly in both directions.**
+
+- **No recorded result changes meaning.** The detector's decisions are demonstrably unchanged
+  at the production tolerance (16/16 identical stop chunks, u\* difference exactly 0.0), the
+  primary `raps` is untouched, and the GPU relax path exists only on this unmerged, unvalidated
+  branch — nothing on `main` has ever run it.
+- **ANNOUNCED LOUDLY (§10.4): `observables.raps_torch` / `kstar_of_torch` /
+  `forward._kstar_of_torch_batched` return DIFFERENT VALUES from this commit forward** — by up
+  to 30.2 % on k\* and 22.5 % on a bin at the relax detector's operating point. Any k\* read
+  off the torch path before this commit is not comparable to one read after it. `raps` /
+  `kstar_of` values are unchanged.
+- **The case rests on the estimator contract and a 1.6× margin, not on a demonstrated
+  failure.** No stop-chunk split was observed at `flat_tol=1e-4`. What was observed: the
+  detector's flatness ratio differs between the two estimators by up to **45 %** at the firing
+  window (n=64 seed 7: 7.83e-06 vs 1.42e-05), and sweeping `flat_tol` over 41 values in
+  [1e-6, 1e-2] the two return **different stop chunks for 8/8 seeds at 64²** and 1/8 at 32² —
+  at n=64 seed 1 they split at `flat_tol` = 6.3e-5 and 7.9e-5, within a factor **1.6** of the
+  production value. The observed exposure is bounded; the possible exposure is not.
+
+**What was rejected and why.** Keeping `floor` and recording the divergence as accepted
+(option (b), explicitly considered and measured before being rejected). Register item 15 makes
+the unwindowed `raps` the **primary** estimator and forbids silent swaps, precisely because the
+sub-bin centroid k\* and the one-bin bar are calibrated on it. A detector that reads k\* from a
+port diverging 30.2 % from the primary at its own operating point is a **second estimator**,
+not a port, and formalising it as one would need owner sign-off it does not have. The
+measurements say `floor` is not an alternative convention but a **defective implementation of
+the documented half-open binning** `[m·dk, (m+1)·dk)`; the cost of the fix is zero (the binning
+is built host-side in numpy and cached per (n, L, device, dtype), so `np.digitize` was already
+available — the original "torch has no `digitize`" justification died when the binning moved to
+the host); and under (b) the only honest test is one pinning a 30 % divergence, which is a
+worse artefact than the defect it documents.
+
+**Two prior claims corrected — neither was reproducible.** `raps_torch`'s docstring stated
+"on a saturated 64² pattern `kstar_of_torch` and `kstar_of` agree to 3e-16" and "on a
+pure-noise 16² field one bin differed by 14 % and k\* by 0.24 %", and
+`docs/REVIEW_gpu_optim_delta.md` C3 quotes the latter as the measured divergence. Measured here
+at the fixture geometry: **3.58e-03** (not 3e-16) and up to **22.5 % / 30.2 %** (not
+14 % / 0.24 %). The 3e-16 figure is what a *collision-free* L produces, i.e. it was luck of the
+float. Both figures are removed from the docstring; `tests/test_raps_torch_parity.py` is the
+first measurement of this parity with provenance, and it pins the measured round-off floor
+instead.
+
+**Not independently validated:** every number above is CPU float64 at n ≤ 96 on one
+checkpoint. No CUDA measurement was taken (the torch relax path's reason for existing is GPU
+transfer, and no GPU run was made here), and the detector-exposure sweep covers 8 seeds × 2
+grid sizes on a single model, not the config space.
+
+**Where it lives:** `src/rngrn/observables.py::_raps_torch_bins` (the `digitize` line and its
+docstring), `::raps_torch` (docstring);
+`src/rngrn/forward.py::relax_to_pattern_torch` (docstring), `::_kstar_of_torch_batched`;
+`tests/test_raps_torch_parity.py`.

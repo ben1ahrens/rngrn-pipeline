@@ -123,8 +123,9 @@ def raps_torch(field: torch.Tensor, L: float) -> tuple[np.ndarray, torch.Tensor]
     The binning itself is CACHED per (n, L, device, dtype) by `_raps_bins`, so a per-step
     call does no host work and no host-to-device transfer. The arithmetic is unchanged
     and the returned `k_centers` is the cached (read-only) array, not a fresh copy. This
-    is deliberately NOT `observables.raps_torch`, whose bins come from a float-step arange
-    and `floor` rather than F-D6-1's integer edges and `digitize`.
+    is deliberately NOT `observables.raps_torch`: both bin with `digitize` since D-OBS-1
+    (2026-08-19), but this one's EDGES are F-D6-1's integer arange where that one keeps
+    `observables.raps`'s float-step arange, so the two are still separate functions.
     """
     if field.shape[-2] != field.shape[-1]:
         # observables.raps assumes a square periodic box (one fftfreq grid for both axes);

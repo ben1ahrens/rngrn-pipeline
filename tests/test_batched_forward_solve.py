@@ -50,13 +50,22 @@ MEMBER_SPREAD = 2e-2
 #: Central-difference step for the FD tripwire, and the number of random directions.
 FD_EPS = 1e-4
 FD_DIRECTIONS = 10
-#: IFT-vs-FD regression tripwire, MEASURED here rather than inherited: worst 2.2e-6 and
-#: median 6.7e-7 over these 10 directions (2026-08-19, 32^2, B=3, CPU float64), so 1e-4
-#: sits ~46x above what the chain actually delivers. Tighter than the serial path's 5e-3
-#: (test_forward_solve.py:181) because that value is a best-of-two-eps on ONE direction
-#: at 64^2; nothing here is weakened by it. Like the serial one this is a TRIPWIRE, not a
-#: re-acceptance of D1 — the failures it guards (wrong adjoint, dropped correction, sign
-#: error, blended scatter) produce O(1) error, not tolerance-scale error.
+#: IFT-vs-FD regression tripwire. The VALUE IS MANDATED, not chosen here:
+#: `docs/REDESIGN_rngrn.md` §4.2 "A/B discipline" (on branch `docs/redesign-rngrn`)
+#: specifies a D1-style finite-difference check of "10 directions x the active loss
+#: terms, tol 1e-4", and R3's hard gate in the same document is "FD-faithfulness at
+#: tol 1e-4". FD_DIRECTIONS = 10 comes from that same sentence.
+#:
+#: Supporting evidence that the batched chain clears the mandated bar with room, not the
+#: bar's origin: worst 2.16e-06, median 6.65e-07 over these 10 directions (2026-08-19,
+#: 32^2, B=3, CPU float64) — a ~46x margin. It is tighter than the serial path's 5e-3
+#: (test_forward_solve.py:181), which is a best-of-two-eps on ONE direction at 64^2, so
+#: nothing is weakened by applying the mandated value here.
+#:
+#: Like the serial one this is a TRIPWIRE, not a re-acceptance of D1 — the failures it
+#: guards (a wrong adjoint, a dropped correction, a sign error) produce O(1) error, not
+#: tolerance-scale error. A permuted or member-blended scatter is caught by the two tests
+#: that follow this one, not by this one.
 FD_TOL = 1e-4
 #: The serial solver's whole reason vocabulary (PatternSolver's docstring); the batched
 #: solver's docstring claims parity with it, and this module checks that claim.
@@ -470,15 +479,22 @@ def test_solve_subset_keys_warm_state_by_global_member_and_clears_it_on_failure(
     assert solver._warm[1] is sentinel, (
         "solving members [0, 2] must not touch member 1's warm slot")
 
-    def flat_relax(model, idx, *a, **k):
-        return [flat[m].clone() for m in idx.tolist()], [None] * int(idx.shape[0])
+    # CLEARING, arranged so the assertion is load-bearing. Member 0 is seeded with a
+    # HOMOGENEOUS warm field and settled by the warm Newton pass itself, so its slot
+    # holds a non-None value that only `solve_subset`'s clearing loop can remove; delete
+    # that loop and the assertion below fails. (The obvious arrangement — reset _warm to
+    # None and drive the homogeneous field in through the relax — is VACUOUS: the slot is
+    # already None whatever the solver does, and the only code that could refill it sits
+    # behind the `if not ok_members: return` this path takes.)
+    def _no_relax(*a, **k):
+        raise AssertionError("the warm Newton pass must settle member 0 without a relax")
 
-    # Drop the warm state so the second solve goes through the (now homogeneous) relax
-    # rather than the warm Newton pass — the clearing rule is about what the solve
-    # RETURNS, and a warm member never reaches the relax.
-    solver._warm = [None] * B
-    monkeypatch.setattr(fwd, "relax_to_pattern_torch_batched", flat_relax)
-    u, ok_members, reasons = solver.solve_subset([0, 1, 2], xs)
-    assert u is None and ok_members == [] and set(reasons.values()) == {"not_patterned"}
-    assert solver._warm == [None] * B, (
-        "a homogeneous member must not survive as a warm start")
+    monkeypatch.setattr(fwd, "relax_to_pattern_torch_batched", _no_relax)
+    solver._warm[0] = flat[0].clone()
+    u, ok_members, reasons = solver.solve_subset([0], xs)
+    assert u is None and ok_members == [] and reasons == {0: "not_patterned"}
+    assert solver._warm[0] is None, (
+        "a homogeneous member must not survive as a warm start — Newton from it "
+        "re-converges homogeneous forever")
+    assert solver._warm[2] is not None, (
+        "solving member 0 must not touch member 2's warm slot")

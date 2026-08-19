@@ -170,6 +170,26 @@ class TrainConfig:
     # endpoints are interpolated. See docs/DECISIONS.md D-PLOT-2.
     history_every: int = 10                 # unit P1
 
+    # ---- Task 13 (R3 redesign): stall accounting + the two-path switch, spec 4.3 --------
+    # stall_switch=False (DEFAULT, unchanged behaviour) leaves recover()'s serial spectral
+    # solve on forward.PatternSolver, exactly as before this task. True installs
+    # recover._StallSwitchSolver instead: an ignited member whose Newton polish misses the
+    # 1e-9 bar (a "stall") gets the truncated-unrolled gradient path instead of losing its
+    # gradient for that step. Requires train.batched=False (recover() raises otherwise --
+    # unrolled.unrolled_relax has no BatchedRNGRN twin yet, Task 14). No-op unless a
+    # spectral loss weight is also non-zero. Threaded into recover() by fit() below, so
+    # (unlike the unit-C1 class of defect this file's history already records once) this is
+    # NOT a silent no-op.
+    stall_switch: bool = False                       # Task 13
+    # stall_switch_fraction: the spec's ~20%, UNCALIBRATED -- docs/PLAN_redesign_R3.md
+    # Task 16 calibrates it from the measured stall-rate distribution, against the measured
+    # gradient-error difference between the two paths ("not for convenience", spec 4.3
+    # verbatim). recover() does not gate per-member routing on it (controller ruling,
+    # 2026-08-19: the plan's own Step-1 test spec is per-member unconditional); it is
+    # recorded on RecoveryResult and the run-index row so Task 16 can read the measured
+    # rate against it. NOT a bug that it does not branch anything today.
+    stall_switch_fraction: float = 0.20              # Task 13, UNCALIBRATED
+
 
 @dataclass
 class SolverConfig:

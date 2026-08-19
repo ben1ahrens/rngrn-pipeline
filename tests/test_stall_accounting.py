@@ -15,6 +15,18 @@ Four contracts, in the order `docs/PLAN_redesign_R3.md` Task 13 states them:
 4. The counter survives into the run index as a FLAT SCALAR — rows are built by
    `dict.update()`, never `**`-expansion (CLAUDE.md §4).
 
+Plus two controller-mandated follow-ups (2026-08-19), against the REAL `train.py` code
+paths rather than a hand-rolled stand-in:
+
+5. `train._stall_columns(result, stall_switch)` — the exact helper `fit()`'s row-building
+   calls — returns the three flat scalars from a `RecoveryResult` with a KNOWN stall count
+   when `stall_switch=True`, and `{}` (the columns stay ABSENT from the row, not 0/NaN)
+   when `False`.
+6. `cfg.train.stall_switch` / `cfg.train.stall_switch_fraction` are threaded from `Config`
+   into `recover()`'s call inside `train.fit()` — a call-site spy on `train.R.recover`, the
+   same technique `test_smoke.py::test_model_init_is_threaded_from_config_into_recover`
+   already uses for the `model.init` unit-C1 regression class this guards against too.
+
 Contracts 1 and 3 are tested against `recover._account_for_stall` directly: it is pure
 bookkeeping (no relax, no Newton), so a fake solver stub exercises it in milliseconds.
 
@@ -36,17 +48,23 @@ side effect — and it never touches `CONVERGENCE_TOL` itself, which is read fro
 off the table; `test_stall_switch_refuses_the_convergence_bar_as_a_parameter` below pins
 that the switch has no `tol`-shaped parameter to loosen it through).
 """
+import os
 import pathlib
+import tempfile
 
 import numpy as np
 import pytest
 import torch
 
 import rngrn.recover as R
+import rngrn.train as T
+from rngrn.config import apply_overrides, load_config
 from rngrn.forward import PatternSolver
 from rngrn.history import TrainingHistory
 from rngrn.losses.terms import steady_state
 from rngrn.model import RNGRN, THETA_NAMES
+
+CONFIGS = os.path.join(os.path.dirname(__file__), "..", "configs")
 
 torch.set_default_dtype(torch.float64)
 
@@ -225,3 +243,102 @@ def test_stall_counters_default_to_zero_when_the_switch_is_off():
                               kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={})
     assert result.n_ignited_solves == 0
     assert result.n_stalled_solves == 0
+
+
+# ----------------------------------------------------------------------------------------
+# contract 5 (controller follow-up): the REAL train.py row-building helper, pinned
+# ----------------------------------------------------------------------------------------
+def test_stall_columns_are_flat_and_correct_from_a_result_with_a_known_stall():
+    """`train._stall_columns` is the exact function `fit()`'s row-building calls
+    (`row.update(_stall_columns(result, cfg.train.stall_switch))`). A "run with a known
+    stall": 9 ignited solves, 4 of them stalls."""
+    result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
+                              kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={},
+                              n_ignited_solves=9, n_stalled_solves=4,
+                              stall_switch_fraction=0.20)
+    cols = T._stall_columns(result, stall_switch=True)
+    assert cols == {"n_ignited_solves": 9, "n_stalled_solves": 4,
+                    "stall_switch_fraction": 0.20}
+    assert isinstance(cols["n_ignited_solves"], int) and isinstance(cols["n_stalled_solves"], int)
+    assert isinstance(cols["stall_switch_fraction"], float)
+
+
+def test_stall_columns_are_absent_not_zero_or_nan_when_the_switch_is_off():
+    """Every run before this task, and every batched run (the switch is refused there) —
+    the columns must not appear on the row at all, per the controller's "pick absent unless
+    the row schema requires the key" ruling (`index.py`'s docstring: both the jsonl and the
+    additive-sqlite backend tolerate a row missing a key)."""
+    result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
+                              kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={},
+                              n_ignited_solves=9, n_stalled_solves=4)   # non-zero on purpose:
+    # even a result that DID stall must not leak into the row when the config said off.
+    assert T._stall_columns(result, stall_switch=False) == {}
+
+
+def test_stall_columns_survive_a_real_dict_update_row_build():
+    """The helper's output actually merges into a row exactly as `fit()` uses it, run
+    identity re-applied last as `train.py`'s rows do."""
+    result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
+                              kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={},
+                              n_ignited_solves=9, n_stalled_solves=4,
+                              stall_switch_fraction=0.20)
+    row = dict(run_id="fake-run")
+    row.update(T._stall_columns(result, stall_switch=True))
+    row.update(run_id="fake-run")
+    assert row == {"run_id": "fake-run", "n_ignited_solves": 9, "n_stalled_solves": 4,
+                   "stall_switch_fraction": 0.20}
+
+
+# ----------------------------------------------------------------------------------------
+# contract 6 (controller follow-up): config -> recover() threading, at the real call site
+# ----------------------------------------------------------------------------------------
+def _tiny_cfg(**overrides):
+    cfg = load_config(os.path.join(CONFIGS, "milestone1_schnak.yaml"))
+    ov = [
+        "data.resolution=32", "data.T_max=5.0", "data.dt=0.05",
+        "model.N=2", "model.m=2",
+        "train.n_restarts=1", "train.adam_steps=8", "train.lbfgs_steps=0",
+        "solver.n_grid=32", "solver.robustness_samples=5",
+    ] + [f"{k}={v}" for k, v in overrides.items()]
+    return apply_overrides(cfg, ov)
+
+
+def test_stall_switch_and_fraction_are_threaded_from_config_into_recover(monkeypatch):
+    """unit-C1-class regression guard (same technique as
+    `test_smoke.py::test_model_init_is_threaded_from_config_into_recover`): a config value
+    that reaches `frozen_config.yaml`/the run index but not `recover()` is worse than one
+    that reaches neither -- `cfg.train.stall_switch` must actually change what the training
+    call does, not just what the row later claims it did."""
+    seen = {}
+
+    def _spy(ri, **kw):
+        seen.update(kw)
+        raise RuntimeError("stop after capturing kwargs")
+
+    monkeypatch.setattr(T.R, "recover", _spy)
+    cfg = _tiny_cfg(**{"train.stall_switch": "true", "train.stall_switch_fraction": "0.15"})
+    with pytest.raises(RuntimeError, match="stop after capturing"):
+        T.fit(cfg, runs_root=tempfile.mkdtemp())
+    assert seen.get("stall_switch") is True, (
+        "train.fit() did not hand train.stall_switch to recover() -- the row would record "
+        f"a switch state the run never used. saw stall_switch={seen.get('stall_switch')!r}")
+    assert seen.get("stall_switch_fraction") == pytest.approx(0.15), (
+        f"saw stall_switch_fraction={seen.get('stall_switch_fraction')!r}")
+
+
+def test_stall_switch_defaults_to_false_when_not_overridden(monkeypatch):
+    """The default config must thread `stall_switch=False` explicitly (not merely omit the
+    kwarg and rely on recover()'s own default) -- so a reader of the spy trace can tell
+    "off by config" from "kwarg forgotten" the same way unit C1 could not."""
+    seen = {}
+
+    def _spy(ri, **kw):
+        seen.update(kw)
+        raise RuntimeError("stop after capturing kwargs")
+
+    monkeypatch.setattr(T.R, "recover", _spy)
+    cfg = _tiny_cfg()
+    with pytest.raises(RuntimeError, match="stop after capturing"):
+        T.fit(cfg, runs_root=tempfile.mkdtemp())
+    assert seen.get("stall_switch") is False
+    assert seen.get("stall_switch_fraction") == pytest.approx(0.20)

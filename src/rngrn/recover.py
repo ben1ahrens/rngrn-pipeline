@@ -505,7 +505,13 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             # ---- Task 13 (R3 redesign): stall accounting + the two-path switch, spec 4.3 --
             stall_switch=False,        # Task 13
             stall_switch_fraction=0.20):   # Task 13, UNCALIBRATED -- Task 16 calibrates it
-                                            # from the measured stall-rate distribution
+                                            # from the measured stall-rate distribution.
+                                            # NOT A BUG that this does not gate anything
+                                            # below: controller ruling 2026-08-19 confirmed
+                                            # per-solve routing is UNCONDITIONAL (the plan's
+                                            # own Step-1 test spec is per-member, not
+                                            # rate-gated); this knob is recorded for Task 16
+                                            # to compare the measured rate against, only.
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
@@ -605,10 +611,13 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     stall_switch_fraction: 0.20 (the spec's ~20%), UNCALIBRATED -- `docs/PLAN_redesign_R3.md`
         Task 16 calibrates it from the measured stall-rate distribution, against the
         measured gradient-error difference between the two paths, "not for convenience"
-        (spec 4.3 verbatim). Recorded for that comparison; this call does NOT gate the
-        per-member switch on it -- routing is unconditional on whether THIS solve stalled,
-        per the spec's "Interfaces" line (a per-run counter + a per-member switch "for those
-        members" that missed the bar). Only meaningful when `stall_switch=True`.
+        (spec 4.3 verbatim). Recorded for that comparison (on `RecoveryResult` and, when
+        `stall_switch=True`, the run-index row); this call does NOT gate the per-member
+        switch on it -- routing is unconditional on whether THIS solve stalled, per the
+        spec's "Interfaces" line (a per-run counter + a per-member switch "for those
+        members" that missed the bar). CONFIRMED, not a local guess: controller ruling
+        2026-08-19 read the plan's own Step-1 test spec the same way and let this design
+        stand. Only meaningful when `stall_switch=True`.
     """
     ri = recovery_input
     model_seed = seed if model_seed is None else model_seed

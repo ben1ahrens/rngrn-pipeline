@@ -450,9 +450,11 @@ def test_recover_accepts_batched_with_a_spectral_weight():
                        gradient_path="adjoint",
                        lbfgs_steps=0, adam_steps=0, n_restarts=1)
     assert result is not None
-    assert result.gradient_path == "adjoint", (
-        "the run must record the estimator it actually used -- a batched spectral run is on "
-        "the adjoint path (D-R3-5 rider 6)")
+    # `gradient_path` stays None here, and that is the fix-round-1 rule, not an oversight: the
+    # field records the SWITCH-AWARE SERIAL solver's estimator, and the batched path builds a
+    # `forward.BatchedPatternSolver` instead, never entering the serial loop. Its estimator is
+    # the adjoint one by construction, there being no batched unrolled twin at all.
+    assert result.gradient_path is None
 
 
 def test_recover_raises_on_non_identity_observed_idx_with_a_spectral_weight():

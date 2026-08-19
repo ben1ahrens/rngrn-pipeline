@@ -125,16 +125,21 @@ def test_a_batched_run_with_no_spectral_weight_is_untouched_by_the_promotion():
     r = R.recover(_make_input(N=2, m=2), weights=dict(A0_WEIGHTS), gradient_path="unrolled",
                   batched=True, n_restarts=2, adam_steps=2, adam_lr=0.05, lbfgs_steps=0,
                   seed=1, model_seed=1)
-    assert r.gradient_path == "unrolled"
     assert r.n_ignited_solves == 0, "a batched run must not touch the serial stall counters"
+    assert r.gradient_path is None, (
+        "no solver was built (no spectral weight, and the batched path never enters the "
+        "serial loop), so the run must name no estimator — fix-round-1 ruling")
+    assert T._stall_columns(r) == {}
 
 
 # ----------------------------------------------------------------------------------------
 # 3. the counters stay live on the promoted default
 # ----------------------------------------------------------------------------------------
-def test_uses_switch_solver_is_the_single_predicate_for_all_three_combinations():
-    """`recover()` and `train._stall_columns` both ask this one function, so the run and the
-    row it writes cannot disagree about whether the counters mean anything."""
+def test_uses_switch_solver_answers_the_ROUTING_question_not_the_row_gate():
+    """`recover()`'s ROUTING predicate: which solver class the serial loop would install. It
+    is deliberately NOT the run-index gate — see the next three tests. It is True for the
+    promoted default whether or not any spectral weight is on, because it answers "which
+    solver WOULD be built", not "was one built"."""
     assert R.uses_switch_solver("unrolled", False) is True, (
         "the promoted default installs the switch-aware solver — the stall counters are "
         "instrumentation now (D-R3-5), not the router they were under Task 13")
@@ -146,30 +151,58 @@ def test_uses_switch_solver_is_the_single_predicate_for_all_three_combinations()
         R.uses_switch_solver("newton", False)
 
 
-def test_the_run_index_row_carries_the_counters_and_the_estimator_on_the_default():
-    """RE-TARGETED by the promotion: `_stall_columns` used to key off `stall_switch` alone,
-    which since the flip would omit the counters from every DEFAULT run. It now keys off
-    `uses_switch_solver`, and emits `gradient_path` alongside them — a gradient-derived
-    number whose estimator is not recorded cannot be compared to one whose estimator is."""
+def test_the_row_carries_the_counters_and_the_estimator_when_a_solve_was_possible():
+    """`_stall_columns` emits iff `recover()` actually BUILT the switch-aware solver, which it
+    reports by setting `RecoveryResult.gradient_path` to a string rather than None.
+    `gradient_path` rides alongside the counters and is gated identically."""
     result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
                               kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={},
                               n_ignited_solves=9, n_stalled_solves=4,
                               stall_switch_fraction=0.20, gradient_path="unrolled")
-    live = R.uses_switch_solver("unrolled", False)
     row = dict(run_id="fake-run")
-    row.update(T._stall_columns(result, live))
+    row.update(T._stall_columns(result))
     row.update(run_id="fake-run")           # run identity re-applied last, as train.py does
     assert row == {"run_id": "fake-run", "n_ignited_solves": 9, "n_stalled_solves": 4,
                    "stall_switch_fraction": 0.20, "gradient_path": "unrolled"}
     assert isinstance(row["gradient_path"], str), "must be a flat scalar, not an enum/tensor"
 
 
+def test_the_columns_stay_absent_when_no_spectral_solve_was_possible():
+    """THE FIX-ROUND-1 RULING, and the reason the row is not gated on `uses_switch_solver`.
+    A run with no spectral weight — every A0 run, every config in `configs/` today — builds no
+    solver and attempts no solve, so it must carry NO estimator columns at all.
+    `uses_switch_solver("unrolled", False)` is True for such a run: gating on it would write
+    0/0 and an estimator name, making the row indistinguishable from "spectral on, nothing
+    ignited" and naming an estimator for a computation that never happened."""
+    assert R.uses_switch_solver("unrolled", False) is True, "the looser predicate would fire"
+    result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
+                              kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={})
+    assert result.gradient_path is None, (
+        "a RecoveryResult from a call with no spectral solve must not name an estimator")
+    assert T._stall_columns(result) == {}, (
+        "ABSENT, not 0/0 — the earlier ruling stands (controller, fix round 1)")
+
+
+def test_an_a0_run_writes_no_estimator_columns_end_to_end():
+    """The same rule through the REAL `recover()` rather than a hand-built result: the A0
+    objective on the promoted default must leave `gradient_path` unset, so its row carries
+    none of the four columns."""
+    r = R.recover(_make_input(), weights=dict(A0_WEIGHTS), gradient_path="unrolled",
+                  n_restarts=1, adam_steps=2, adam_lr=0.05, lbfgs_steps=0, seed=7,
+                  model_seed=3)
+    assert r.gradient_path is None, (
+        "an A0 run attempted no spectral solve — naming an estimator would state a fact "
+        "about a computation that never ran")
+    assert T._stall_columns(r) == {}
+
+
 def test_the_columns_stay_absent_on_the_pre_promotion_combination():
+    """`gradient_path="adjoint"` with `stall_switch=False` goes to `forward.PatternSolver`,
+    which has no stall accounting at all — so the field stays None there too."""
     result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
                               kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={},
-                              n_ignited_solves=9, n_stalled_solves=4,
-                              gradient_path="adjoint")
-    assert T._stall_columns(result, R.uses_switch_solver("adjoint", False)) == {}
+                              n_ignited_solves=9, n_stalled_solves=4)
+    assert T._stall_columns(result) == {}
 
 
 # ----------------------------------------------------------------------------------------

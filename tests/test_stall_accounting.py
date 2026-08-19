@@ -18,10 +18,11 @@ Four contracts, in the order `docs/PLAN_redesign_R3.md` Task 13 states them:
 Plus two controller-mandated follow-ups (2026-08-19), against the REAL `train.py` code
 paths rather than a hand-rolled stand-in:
 
-5. `train._stall_columns(result, stall_switch)` — the exact helper `fit()`'s row-building
-   calls — returns the three flat scalars from a `RecoveryResult` with a KNOWN stall count
-   when `stall_switch=True`, and `{}` (the columns stay ABSENT from the row, not 0/NaN)
-   when `False`.
+5. `train._stall_columns(result)` — the exact helper `fit()`'s row-building
+   calls — returns the four flat scalars from a `RecoveryResult` with a KNOWN stall count
+   when a spectral solve was possible, and `{}` (the columns stay ABSENT from the row, not
+   0/NaN) otherwise. The gate is `RecoveryResult.gradient_path is not None`, which `recover()`
+   sets only when it actually BUILT the switch-aware solver (fix round 1).
 6. `cfg.train.stall_switch` / `cfg.train.stall_switch_fraction` are threaded from `Config`
    into `recover()`'s call inside `train.fit()` — a call-site spy on `train.R.recover`, the
    same technique `test_smoke.py::test_model_init_is_threaded_from_config_into_recover`
@@ -302,13 +303,23 @@ def test_stall_counters_survive_a_dict_update_built_row_as_flat_scalars():
     assert not hasattr(row["n_ignited_solves"], "__len__"), "must not be collection-valued"
 
 
-def test_stall_counters_default_to_zero_when_the_switch_is_off():
-    """`stall_switch=False` (the default) must be bit-identical to every call before this
-    task — including the counter reading 0/0 rather than something stale or None."""
+def test_stall_counters_are_zero_and_the_estimator_unset_when_no_solve_was_attempted():
+    """A `RecoveryResult` from a call that attempted NO spectral solve — every A0 run, every
+    config in `configs/` today, and every call before Task 13. RENAMED in fix round 1: this
+    used to say "stall_switch=False (the default)", which described the PRE-promotion default
+    and is no longer what the default is (`gradient_path="unrolled"` now installs the
+    switch-aware solver whenever a spectral weight is on).
+
+    The counters read a flat 0/0 rather than something stale or None, and `gradient_path` is
+    None rather than an estimator name — which is what keeps the four columns OFF such a run's
+    index row entirely (`train._stall_columns`, controller ruling fix round 1)."""
     result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
                               kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={})
     assert result.n_ignited_solves == 0
     assert result.n_stalled_solves == 0
+    assert result.gradient_path is None, (
+        "no solve was attempted, so the result must name no estimator — a run that recorded "
+        "one would be indistinguishable from 'spectral on, nothing ignited'")
 
 
 # ----------------------------------------------------------------------------------------
@@ -318,15 +329,16 @@ def test_stall_columns_are_flat_and_correct_from_a_result_with_a_known_stall():
     """`train._stall_columns` is the exact function `fit()`'s row-building calls. A "run with
     a known stall": 9 ignited solves, 4 of them stalls.
 
-    RE-TARGETED by register item 8's promotion (D-R3-5): the helper's second parameter is now
-    `recover.uses_switch_solver(gradient_path, stall_switch)` rather than `stall_switch`
-    alone, and the column set gained `gradient_path`. This case is Task 13's adjoint-primary
-    switch; `tests/test_gradient_path.py` covers the promoted default."""
+    RE-TARGETED by register item 8's promotion (D-R3-5) and again by its fix round 1: the
+    helper now takes the result ALONE and gates on `RecoveryResult.gradient_path` being set,
+    which `recover()` does only when it actually BUILT the switch-aware solver. The column set
+    gained `gradient_path`. This case is Task 13's adjoint-primary switch;
+    `tests/test_gradient_path.py` covers the promoted default and the absent case."""
     result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
                               kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={},
                               n_ignited_solves=9, n_stalled_solves=4,
                               stall_switch_fraction=0.20, gradient_path="adjoint")
-    cols = T._stall_columns(result, R.uses_switch_solver("adjoint", stall_switch=True))
+    cols = T._stall_columns(result)
     assert cols == {"n_ignited_solves": 9, "n_stalled_solves": 4,
                     "stall_switch_fraction": 0.20, "gradient_path": "adjoint"}
     assert isinstance(cols["n_ignited_solves"], int) and isinstance(cols["n_stalled_solves"], int)
@@ -335,17 +347,17 @@ def test_stall_columns_are_flat_and_correct_from_a_result_with_a_known_stall():
 
 
 def test_stall_columns_are_absent_not_zero_or_nan_when_no_switch_solver_ran():
-    """Every run before this task, and every batched run (both switch-aware combinations are
-    refused there) — the columns must not appear on the row at all, per the controller's
-    "pick absent unless the row schema requires the key" ruling (`index.py`'s docstring: both
-    the jsonl and the additive-sqlite backend tolerate a row missing a key). Since the
-    promotion that is exactly the pre-promotion combination, adjoint-primary without the
-    switch."""
+    """Every run before Task 13, every run with no spectral weight, and every batched run —
+    the columns must not appear on the row at all, per the controller's "pick absent unless
+    the row schema requires the key" ruling (`index.py`'s docstring: both the jsonl and the
+    additive-sqlite backend tolerate a row missing a key). The signal is
+    `gradient_path is None`, which `recover()` leaves unset unless it built the switch-aware
+    solver."""
     result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
                               kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={},
                               n_ignited_solves=9, n_stalled_solves=4)   # non-zero on purpose:
     # even a result that DID stall must not leak into the row when the config said off.
-    assert T._stall_columns(result, R.uses_switch_solver("adjoint", stall_switch=False)) == {}
+    assert T._stall_columns(result) == {}
 
 
 def test_stall_columns_survive_a_real_dict_update_row_build():
@@ -356,7 +368,7 @@ def test_stall_columns_survive_a_real_dict_update_row_build():
                               n_ignited_solves=9, n_stalled_solves=4,
                               stall_switch_fraction=0.20, gradient_path="adjoint")
     row = dict(run_id="fake-run")
-    row.update(T._stall_columns(result, R.uses_switch_solver("adjoint", stall_switch=True)))
+    row.update(T._stall_columns(result))
     row.update(run_id="fake-run")
     assert row == {"run_id": "fake-run", "n_ignited_solves": 9, "n_stalled_solves": 4,
                    "stall_switch_fraction": 0.20, "gradient_path": "adjoint"}

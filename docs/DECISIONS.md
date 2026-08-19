@@ -4772,10 +4772,16 @@ band-limited copy of the SAME physical 512² initial condition.
    512** — the band `[0.6, 1.55] k/k*` is resolved identically at every grid, because the bin
    count is set by the block size `p`, not by n. So raising n cannot improve the one thing a
    spectral objective reads off the band.
-3. **512² costs 58-69x per rollout** (`seconds_mean` at 512 vs 96: 69.1x `tune_comp_seed3`,
-   61.6x `d5_seed3`, 58.3x `d5_seed5`). *(Quoted from the artefact and recomputed here; an
-   earlier informal figure of "60-78x" circulated — this range is the one the committed JSON
-   supports, and it is the one to cite.)*
+3. **512² costs 58.3-69.1x per rollout on the PAIRED sweep** (`seconds_mean` at 512 vs 96 in
+   `raps_fidelity_paired.json`: 69.1x `tune_comp_seed3`, 61.6x `d5_seed3`, 58.3x `d5_seed5`).
+   **Two artefact-supported cost ranges exist for this quantity and they are not
+   interchangeable.** Task 15's reviewed report quotes **59.6-77.6x** — the same ratio measured
+   on the **UNPAIRED** sweep (`raps_fidelity.json`). Both come from committed JSON and neither
+   is informal; they differ because the two designs integrate different initial conditions.
+   **This entry's basis is the paired sweep throughout**, D-R3-4 having superseded the unpaired
+   one for exactly this comparison, so 58.3-69.1x is the range to cite alongside this ruling
+   and 59.6-77.6x is the range to cite when discussing the unpaired sweep on its own terms.
+   The rejection below does not turn on which is used.
 
 **What was rejected.**
 - **n = 128 or 256.** Both show real paired gains (worst per-bin at `tune_comp_seed3`: 16.78 %
@@ -4783,7 +4789,8 @@ band-limited copy of the SAME physical 512² initial condition.
   1.85x margin, while 128/256 cost 2-8x per rollout for no BAR-RELEVANT gain. A cost that buys
   a better number nobody is judged on is not a reason.
 - **n = 512.** Trivially clears (it is the reference), and reprices the entire training loop
-  ~58-69x. Not defensible against a bar already met.
+  by ~58-69x paired (~60-78x unpaired). Not defensible against a bar already met on either
+  measurement.
 
 **The open lever, routed to Task 17 — this is what the evidence actually reframes.** The
 quantity that does NOT shrink with n is nonlinear PATTERN-SELECTION variance across initial

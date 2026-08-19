@@ -124,10 +124,17 @@ class RecoveryResult:
     # (echoed regardless of stall_switch, so Task 16 can read n_stalled_solves/
     # n_ignited_solves against it without re-reading the run's frozen config)
     # ---- register item 8 promotion (appended; has a default) --------------------------
-    # Which of the two 4.2 gradient estimators this call's PRIMARY path was. Recorded
-    # because it changes what every gradient-derived number means, and a silently
-    # non-comparable number is worse than a missing one (CLAUDE.md 8).
-    gradient_path: str = "unrolled"
+    # Which of the two 4.2 gradient estimators this call's PRIMARY path was -- set ONLY when
+    # a spectral solve was actually POSSIBLE, i.e. when `recover()` built the switch-aware
+    # solver (`uses_switch_solver(...) and use_spectral`, serial path). **None on every other
+    # call**, including every A0 / zero-spectral-weight run and every batched run: no solver
+    # was constructed, no solve was attempted, and "which estimator ran" then has no truth
+    # value. Recording "unrolled" there would state a fact about a computation that never
+    # happened -- which is why the field is None-able rather than defaulted to the config's
+    # value (controller ruling, fix round 1). When it IS set it must be reported with every
+    # gradient-derived number: a silently non-comparable number is worse than a missing one
+    # (CLAUDE.md 8).
+    gradient_path: str | None = None
 
 
 def _restart_seed(model_seed, r):
@@ -952,6 +959,14 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     # promotion the counters stay live on the PROMOTED DEFAULT too -- they are instrumentation
     # (the stall rate T16 measured), not the router they were under Task 13.
     switch_solver = uses_switch_solver(gradient_path, stall_switch)
+    # ... and whether it was ACTUALLY BUILT, which is the stricter question the run-index row
+    # is gated on (controller ruling, fix round 1). The solver is constructed at `if
+    # use_spectral:` inside the serial loop, so a run with no spectral weight -- every A0 run,
+    # every config in `configs/` -- attempts no solve at all, and a batched run never enters
+    # that loop. Reporting 0/0 counters and an estimator name for such a run would make it
+    # indistinguishable from "spectral on, nothing ignited": the silently-non-comparable
+    # class. `RecoveryResult.gradient_path` and the three stall columns are all gated on this.
+    switch_solver_built = bool(switch_solver and use_spectral and not batched)
     stall_counts = [0, 0]
     # the serial loop is skipped entirely when the batched path ran; it stays the REFERENCE
     # implementation and the default, so no pre-existing number changes method.
@@ -1152,4 +1167,6 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                           q_model=kstar_model_hat / (2.0 * math.pi),
                           n_ignited_solves=stall_counts[0], n_stalled_solves=stall_counts[1],
                           stall_switch_fraction=float(stall_switch_fraction),
-                          gradient_path=str(gradient_path))
+                          # None unless a spectral solve was possible -- see the field's own
+                          # comment on RecoveryResult and `switch_solver_built` above.
+                          gradient_path=(str(gradient_path) if switch_solver_built else None))

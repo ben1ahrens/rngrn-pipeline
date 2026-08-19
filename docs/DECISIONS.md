@@ -3483,3 +3483,46 @@ on only 6 pairs from 4 samples, too weak to adjudicate against alone (consistent
 
 **Where it lives:** `experiments/figures_paper/prereg_33/` (`compute_prereg_33.py`,
 `results.json`, `README.md`, `distance_distribution.png`); `docs/PREREGISTRATION.md` §3.3.
+
+### D-PAPER-1 — Paper claim 2's "robust" is judged as lift-invariance of the Turing regime, not PREREG §3.2's absolute volume bars (owner reinterpretation, disclosed)
+
+**Date:** 2026-08-19 (owner ruling given live 2026-08-18 ~23:00; recorded here next
+session). **Status:** OWNER DECISION. **Decided by:** the owner — this is an interpretive
+choice about the word "robust" in a paper claim, which is owner territory, not a §10
+unilateral call.
+
+**The decision:** for the paper's claim 2 ("learned GRN topology + parameters robust to
+perturbation under dynamical lift"), robustness is defined as *remaining in the Turing
+regime after parameter perturbation, under the finite-μ lift across the biological band* —
+i.e. lift-invariance of the perturbation-cloud Turing volume and surviving k*. It is NOT
+judged by applying PREREG §3.2's absolute bars (median `turing_volume_10pct` ≥ 0.90,
+median `turing_volume_4p8pct` ≥ 0.95) to the lifted systems. `docs/PREREGISTRATION.md` is
+NOT edited — it is binding and dated ahead of the runs it judges.
+
+**Measured values that force the disclosure** (the pack must show original bar,
+reinterpretation, and measured values side by side — `experiments/figures_paper/robustness/`,
+`experiments/lift_ladder/v4/results/v4.json`):
+- Per-model perturbation-cloud Turing volume, QSS → top-of-band (μ = 9.2e-3): seed1
+  0.430 → 0.310, seed3 0.365 → 0.335, seed5 0.355 → 0.335, seed6 0.315 → 0.285. Relative
+  drops 5.6–27.9%; **absolute volumes 0.285–0.430, well below §3.2's 0.90 bar**.
+- Aggregate lift-invariance: P(lifted-Turing across the band | QSS-Turing) = 27/27 =
+  1.000, Wilson 95% LB 0.8754 at n=27.
+- §3.2's bars as written are still passed where they were designed to apply — the
+  recovered models' unlifted local volumes (claim 4: 16/16, medians 1.000/1.000). That
+  use is unchanged by this decision.
+
+**Consistency note:** the standing prereg already points this way — §3.7 (D-LIFT-1) makes
+the robustness-vs-μ row "Reported, never gated", and §3.6 (which would have applied §3.2's
+bars to the lifted Jacobian) was added and withdrawn the same day (2026-08-03) before any
+measurement existed against it. So the reinterpretation does not contradict a binding pass
+condition; it is nevertheless recorded as an owner decision because the paper word
+"robust" now means the invariance claim, not the absolute-volume claim.
+
+**What was rejected and why:** editing PREREGISTRATION.md to fit the measured values
+(binding document — weakening it is exactly what it exists to prevent); and using
+"robust" in the paper without disclosing the original bar (a silently non-comparable
+claim is worse than a missing one, CLAUDE.md §8).
+
+**Where it lives:** `docs/PAPER_RESULTS_PACK.md` (claim 2 section, docs/paper-results-pack
+branch); `experiments/figures_paper/robustness/README.md` + `caption_data.md`;
+`docs/PREREGISTRATION.md` §3.2 (unchanged) and §3.7.

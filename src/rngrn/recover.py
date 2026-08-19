@@ -189,8 +189,24 @@ def _clip_grad_norm_per_member(params, max_norm, B):
 def _spectral_solve_with_stall_switch(model, n, L, seed, *, device=None,
                                       noise=1e-2, chunk=500, max_chunks=400,
                                       newton_iter=30, segment_steps=SEGMENT_STEPS_DEFAULT):
-    """One commensurate-box forward solve (`docs/REDESIGN_rngrn.md` §4.3), returning a
-    differentiable u* on WHICHEVER of the two §4.2 gradient paths this one solve earns:
+    """One forward solve on WHATEVER (n, L) grid the caller passes in.
+
+    **Correction (2026-08-19 review): this is NOT yet a commensurate-box solve.** An
+    earlier version of this docstring said "commensurate-box forward solve
+    (`docs/REDESIGN_rngrn.md` §4.3)" -- that overclaimed. `n`/`L` are plain parameters
+    this function is handed; it does not itself build or consult
+    `solve_box.py`'s adaptive commensurate geometry (`L_solve = p*2*pi/k_hat(theta)`,
+    re-tile hysteresis). `recover()`'s only caller today passes `n=frame.shape[-1],
+    L=L_model` -- the DATA box, exactly what `forward.PatternSolver` already solves on
+    for the non-switch path -- so the stall counter this function feeds presently counts
+    stalls on the CALLER's grid, not a commensurate one. Wiring `solve_box.py` into
+    `recover()` (constructing the commensurate box and re-tiling on it) is Task 14's
+    driver / R4's integration, ruled out of this task's scope by the controller
+    (2026-08-19): correct this docstring rather than the wiring. §4.2's gradient-path
+    switch itself (the actual subject of this function) is unaffected by which grid it
+    runs on.
+
+    On WHICHEVER of the two §4.2 gradient paths this one solve earns:
 
       * Newton meets `forward.PatternSolver.CONVERGENCE_TOL` (1e-9, D1 verbatim -- READ
         here, never redefined: F-D1-5 option (b), loosening the bar, stays off the table)

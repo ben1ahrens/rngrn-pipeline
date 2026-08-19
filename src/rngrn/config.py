@@ -151,6 +151,14 @@ class TrainConfig:
     # endpoints are interpolated. See docs/DECISIONS.md D-PLOT-2.
     history_every: int = 10                 # unit P1
 
+    # ---- paper-wnoise unit (Unit A): train-time WEIGHT noise ---------------------------
+    # Per-Adam-step lognormal multiplicative noise on the positive physical parameters
+    # (smoothed-objective estimator; recover._weight_noise_perturb). 0.0 is the identity
+    # path; sigma>0 requires weight_noise_seed (fail loud). Probe levels are UNCALIBRATED
+    # — see docs/DECISIONS.md D-WNOISE-1.
+    weight_noise_sigma: float = 0.0         # paper-wnoise unit
+    weight_noise_seed: Optional[int] = None  # paper-wnoise unit
+
 
 @dataclass
 class SolverConfig:

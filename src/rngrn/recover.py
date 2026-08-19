@@ -147,6 +147,65 @@ def _topology(model):
     return dict(sign=sign, magnitude=s, gate=g, KA=KA, KR=KR)
 
 
+# ---- paper-wnoise unit (Unit A): train-time weight noise -----------------------------
+# Raw-parameter families noised, split by their raw->physical transform. theta_g (the
+# gate logit) is deliberately ABSENT: the gate is a bounded (0,1) split of the binding
+# budget s into KA/KR, not a positive scale parameter, so "lognormal multiplicative"
+# is not defined for it — and leaving it clean preserves the perturbation's sign
+# structure, exactly as the evaluation perturbation model does
+# (eval/analysis._draw_JD_cloud perturbs magnitudes with lognormal factors and never
+# flips a sign). Note KA = s*g and KR = s*(1-g), so noising s multiplies KA and KR of
+# the same edge by the SAME lognormal factor (correlated within the pair, independent
+# across edges) — stated precisely in docs/DECISIONS.md D-WNOISE-1.
+_WNOISE_SOFTPLUS_THETAS = ("theta_s", "theta_alpha", "theta_delta", "theta_beta")
+_WNOISE_EXP_THETAS = ("theta_D",)
+
+
+def _softplus_inverse(y):
+    """Exact inverse of softplus for y > 0: x = y + log(1 - exp(-y)), the numerically
+    stable form (never materialises exp(y))."""
+    return y + torch.log(-torch.expm1(-y))
+
+
+def _weight_noise_perturb(model, sigma, gen):
+    """Perturb the model's raw parameters IN PLACE so every positive physical parameter
+    p in {s, alpha, delta, beta, D} becomes p * exp(sigma * z), z ~ N(0,1) elementwise —
+    exact lognormal multiplicative noise on the physical positives. theta_D is a log
+    (D = exp(theta_D)) so it takes sigma*z additively; the softplus families go through
+    the exact softplus inverse. theta_g is untouched (see _WNOISE_SOFTPLUS_THETAS note).
+
+    Works on RNGRN and BatchedRNGRN alike (same THETA_NAMES, one extra leading dim).
+    z is drawn on the CPU from `gen` (a CPU torch.Generator) and moved to the parameter's
+    device, so the draw sequence is device-independent and exactly reproducible from the
+    generator's seed. Returns {name: clean raw tensor} for _weight_noise_restore, which
+    copies the SAVED bytes back rather than subtracting the noise — subtraction would not
+    round-trip bit-exactly in floating point.
+
+    Mutates .data under no_grad, so the caller MUST call _weight_noise_restore only
+    AFTER loss.backward(): autograd saves references to the leaf tensors, and restoring
+    before backward would silently compute the gradient at the wrong point.
+    """
+    saved = {}
+    with torch.no_grad():
+        for name in _WNOISE_SOFTPLUS_THETAS + _WNOISE_EXP_THETAS:
+            p = getattr(model, name)
+            saved[name] = p.detach().clone()
+            z = torch.randn(p.shape, generator=gen, dtype=p.dtype).to(p.device)
+            if name in _WNOISE_EXP_THETAS:
+                p.add_(sigma * z)
+            else:
+                phys = torch.nn.functional.softplus(p) * torch.exp(sigma * z)
+                p.copy_(_softplus_inverse(phys))
+    return saved
+
+
+def _weight_noise_restore(model, saved):
+    """Bit-exact restore of the raw parameters saved by _weight_noise_perturb."""
+    with torch.no_grad():
+        for name, val in saved.items():
+            getattr(model, name).copy_(val)
+
+
 def _clip_grad_norm_per_member(params, max_norm, B):
     """Clip each BATCH MEMBER's gradient norm independently, in place. Returns the (B,)
     pre-clip norms.
@@ -179,7 +238,8 @@ def _clip_grad_norm_per_member(params, max_norm, B):
 def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
                       frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
                       adam_steps, adam_lr, grad_clip, tau, jac_floor, dev, verbose,
-                      term_kw, kstar_obs_init=None, history=None):
+                      term_kw, kstar_obs_init=None, history=None,
+                      weight_noise_sigma=0.0, wn_gen=None):   # paper-wnoise unit
     """Run all restarts SIMULTANEOUSLY as one batched optimisation (unit b2).
 
     `restart_seeds` is the EXPLICIT list of per-member init seeds, one per restart. It is
@@ -225,27 +285,42 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
 
     for step in range(adam_steps):
         opt.zero_grad()
-        loss_vec, parts, conv = LT.total_loss_batched(
-            bmodel, frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
-            step=step, **loss_kw)
-        newly_dead = alive & ~conv
-        if bool(newly_dead.any()):
-            for b in newly_dead.nonzero().flatten().tolist():
-                died_at[b] = step
-                if history is not None:
-                    history.record_death(b, step)
-                if verbose:
-                    print(f"  member {b} step {step}: steady state diverged; member abandoned")
-            alive = alive & conv
-        if not bool(alive.any()):
-            break
-        # Recorded BEFORE opt.step(), so the parameters in the trace are the ones that
-        # produced the loss in the same row. `alive` is passed so an abandoned lane stays
-        # NaN instead of logging frozen parameters nobody is optimising any more.
-        if history is not None and history.should_record(step):
-            history.record_batched(step, parts, bmodel, alive=alive)
-        total = torch.where(alive, loss_vec, torch.zeros_like(loss_vec)).sum()
-        total.backward()
+        # paper-wnoise unit: evaluate the loss (and hence the gradient) at PERTURBED
+        # parameters, apply the step to the CLEAN ones — the smoothed-objective weight-
+        # noise estimator, resampled each step. Restore must wait until AFTER backward
+        # (autograd saves references to the leaves; see _weight_noise_perturb), and the
+        # try/finally also covers the all-dead break so the loop can never exit with
+        # perturbed parameters in place. NOTE while noise is on, a history row and the
+        # dead-member test both see the perturbed parameters — the parameters that
+        # produced that row's loss — and a member killed by a noise-induced Newton
+        # failure stays dead, same contract as the serial path (D-WNOISE-1).
+        wn_saved = (_weight_noise_perturb(bmodel, weight_noise_sigma, wn_gen)
+                    if wn_gen is not None else None)
+        try:
+            loss_vec, parts, conv = LT.total_loss_batched(
+                bmodel, frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
+                step=step, **loss_kw)
+            newly_dead = alive & ~conv
+            if bool(newly_dead.any()):
+                for b in newly_dead.nonzero().flatten().tolist():
+                    died_at[b] = step
+                    if history is not None:
+                        history.record_death(b, step)
+                    if verbose:
+                        print(f"  member {b} step {step}: steady state diverged; member abandoned")
+                alive = alive & conv
+            if not bool(alive.any()):
+                break
+            # Recorded BEFORE opt.step(), so the parameters in the trace are the ones that
+            # produced the loss in the same row. `alive` is passed so an abandoned lane stays
+            # NaN instead of logging frozen parameters nobody is optimising any more.
+            if history is not None and history.should_record(step):
+                history.record_batched(step, parts, bmodel, alive=alive)
+            total = torch.where(alive, loss_vec, torch.zeros_like(loss_vec)).sum()
+            total.backward()
+        finally:
+            if wn_saved is not None:
+                _weight_noise_restore(bmodel, wn_saved)
         _clip_grad_norm_per_member(params, grad_clip, B)
         opt.step()
         if verbose and step % 300 == 0:
@@ -294,7 +369,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             batched=False,             # unit b2
             dratio_centre=7.5, dratio_spread=1.0,          # unit 5, biological prior
             bio_box_path="configs/bio_box.yaml",           # unit 5
-            history=None):             # plottable training trajectory
+            history=None,              # plottable training trajectory
+            weight_noise_sigma=0.0, weight_noise_seed=None):  # paper-wnoise unit
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
@@ -348,9 +424,36 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         recorded run and an unrecorded one produce the same numbers (verified bit-identical on
         the tracked `m3_registry_20260730_005701` recovery, see
         docs/LGEN_TRANSFER_FIRST_RESULT.md).
+
+    weight_noise_sigma / weight_noise_seed (paper-wnoise unit, docs/DECISIONS.md
+        D-WNOISE-1): per-Adam-step weight noise. When sigma > 0, each Adam step (on BOTH
+        the batched and the serial path) evaluates the loss at parameters whose positive
+        physical values {s, alpha, delta, beta, D} are multiplied elementwise by
+        exp(sigma * z), z ~ N(0,1) resampled every step from a torch.Generator seeded by
+        weight_noise_seed (REQUIRED when sigma > 0; fail loud). The gradient — computed at
+        the perturbed point — is applied to the CLEAN parameters (smoothed-objective
+        estimator). The gate logit theta_g and any m<N latent fields are NOT perturbed,
+        the LBFGS polish (serial path only) runs on clean parameters, and the final
+        scoring evaluation is always at the clean parameters. sigma=0.0 (default) is the
+        identity path: no generator is constructed and results are bit-identical to a call
+        that never mentions the knob. On the serial path all restarts draw from ONE
+        generator in execution order, so a restart's noise sequence depends on how many
+        steps earlier restarts ran — still exactly reproducible from the seed.
     """
     ri = recovery_input
     model_seed = seed if model_seed is None else model_seed
+    # paper-wnoise unit: validate the weight-noise knobs before any work is done.
+    if not (math.isfinite(weight_noise_sigma) and weight_noise_sigma >= 0.0):
+        raise ValueError(
+            f"weight_noise_sigma must be a finite non-negative float, got {weight_noise_sigma!r}")
+    wn_gen = None
+    if weight_noise_sigma > 0.0:
+        if weight_noise_seed is None:
+            raise ValueError(
+                "weight_noise_sigma > 0 requires an explicit weight_noise_seed: a noisy "
+                "run with no recorded seed is not reproducible, and this repo fails loud "
+                "rather than run one (house style; same contract as data.obs_noise_seed).")
+        wn_gen = torch.Generator().manual_seed(int(weight_noise_seed))
     dev = torch.device(device) if device is not None else torch.device("cpu")
     frame = torch.tensor(np.asarray(ri.frame, dtype=float), device=dev)
     L, N, observed_idx = ri.L, ri.N, list(ri.observed_idx)
@@ -453,7 +556,8 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             dispersion_backend, frame, L_model,
             observed_idx, kgrid, kstar_obs, strategy, adam_steps, adam_lr, grad_clip,
             tau, jac_floor, dev, verbose, term_kw,
-            kstar_obs_init=kstar_obs if d_init_from_kstar else None, history=history)
+            kstar_obs_init=kstar_obs if d_init_from_kstar else None, history=history,
+            weight_noise_sigma=weight_noise_sigma, wn_gen=wn_gen)   # paper-wnoise unit
     # the serial loop is skipped entirely when the batched path ran; it stays the REFERENCE
     # implementation and the default, so no pre-existing number changes method.
     for r in range(0 if batched else n_restarts):
@@ -474,24 +578,33 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         for step in range(adam_steps):
             opt.zero_grad()
             latent = latent_module() if latent_module is not None else None
+            # paper-wnoise unit: same contract as the batched loop — loss and gradient at
+            # PERTURBED parameters, step applied to the CLEAN ones, restore only after
+            # backward (or on any exit from the step, via finally).
+            wn_saved = (_weight_noise_perturb(model, weight_noise_sigma, wn_gen)
+                        if wn_gen is not None else None)
             try:
-                loss, parts = LT.total_loss(model, frame, L_model, observed_idx, kgrid, kstar_obs,
-                                            strategy, step=step, latent_fields=latent,
-                                            tau=tau, jac_floor=jac_floor, strict=True,
-                                            **term_kw)
-            except SteadyStateError:
-                # fail-loud honoured: this init cannot form a valid steady state — abandon
-                # the restart rather than optimise against a meaningless x*.
-                if verbose:
-                    print(f"  restart {r} step {step}: steady state diverged; skipping restart")
-                if history is not None:
-                    history.record_death(r, step)
-                failed = True
-                break
-            # BEFORE opt.step(): the recorded parameters are the ones that produced this loss.
-            if history is not None and history.should_record(step):
-                history.record_serial(step, r, parts, model)
-            loss.backward()
+                try:
+                    loss, parts = LT.total_loss(model, frame, L_model, observed_idx, kgrid, kstar_obs,
+                                                strategy, step=step, latent_fields=latent,
+                                                tau=tau, jac_floor=jac_floor, strict=True,
+                                                **term_kw)
+                except SteadyStateError:
+                    # fail-loud honoured: this init cannot form a valid steady state — abandon
+                    # the restart rather than optimise against a meaningless x*.
+                    if verbose:
+                        print(f"  restart {r} step {step}: steady state diverged; skipping restart")
+                    if history is not None:
+                        history.record_death(r, step)
+                    failed = True
+                    break
+                # BEFORE opt.step(): the recorded parameters are the ones that produced this loss.
+                if history is not None and history.should_record(step):
+                    history.record_serial(step, r, parts, model)
+                loss.backward()
+            finally:
+                if wn_saved is not None:
+                    _weight_noise_restore(model, wn_saved)
             torch.nn.utils.clip_grad_norm_(params, grad_clip)
             opt.step()
             if verbose and step % 300 == 0:

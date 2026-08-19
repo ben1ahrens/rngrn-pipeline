@@ -2614,3 +2614,107 @@ levels, which is what was run.
 `src/rngrn/data/gate.py::_apply_obs_noise`, `src/rngrn/train.py::_resolve_recovery_input`.
 Tests: `tests/test_obs_noise.py` (8 tests, TDD). Runs:
 `experiments/claim5_obs_noise/sigma_{0p00,0p01,0p05,0p20}/`.
+
+
+### D-WNOISE-1 — train-time weight noise: per-step lognormal multiplicative noise on the positive physical parameters, smoothed-objective estimator, probe levels UNCALIBRATED
+
+**Date:** 2026-08-19 (paper-experiment wave, Unit A, `feature/paper-weight-noise`).
+**Status:** DECIDED (mechanism) / UNCALIBRATED (probe levels), by design — this is the
+paper's weight-noise claim ("training is more robust when we inject noise into weights
+during training, and consequently the learned GRN patterns more robustly"), whose
+deliverable is a **measured curve** against a sigma_w=0 control, not a pass/fail bar
+(claim-5 precedent, D-CLAIM5-1). An honest negative is a result.
+**Decided by:** the implementing agent under delegated authority, design fixed by the
+wave controller.
+
+**The mechanism.** `train.weight_noise_sigma` / `train.weight_noise_seed`
+(`src/rngrn/config.py::TrainConfig`, appended at the end of the dataclass) thread through
+`train.fit` into `recover()`. When sigma > 0, every Adam step — on BOTH the batched
+(`recover._batched_restarts`) and the serial path — evaluates the loss at perturbed
+parameters and applies the resulting gradient to the CLEAN parameters (the classic
+weight-noise / smoothed-objective estimator: descend `E_eps[L(theta+eps)]` by sampling
+one eps per step, constant within the step). Noise is resampled each step from a single
+CPU `torch.Generator` seeded by `weight_noise_seed`; sigma > 0 with no seed raises
+(house style, same contract as `data.obs_noise_seed`). sigma = 0 is the identity path:
+no generator constructed, bit-identical results (tested).
+
+**The noise model, exactly.** For each positive physical parameter family
+p in {s, alpha, delta, beta, D}, the perturbed value is `p * exp(sigma * z)` with
+z ~ N(0,1) elementwise — lognormal multiplicative on the physical positives, i.e.
+additive N(0, sigma^2) in their log space. This is EXACT, not approximate:
+`theta_D` is a log (`D = exp(theta_D)`) so it takes `sigma*z` additively, and the
+softplus-parameterised families are mapped through the exact numerically-stable softplus
+inverse (`recover._softplus_inverse`). Chosen to match the EVALUATION perturbation model:
+`eval/analysis._draw_JD_cloud` draws lognormal multiplicative factors on the physical
+(J, D). Two stated mismatches with that model, neither hidden: (1) the eval cloud
+perturbs the derived linearisation (J, D) while training noise perturbs the model's own
+kinetic parameters — J's entries therefore receive correlated, nonlinearly-propagated
+noise rather than independent factors; (2) the gate logit `theta_g` is NOT perturbed —
+the gate is a bounded (0,1) split of the binding budget s into KA/KR, not a positive
+scale, so lognormal multiplicative is undefined for it, and leaving it clean preserves
+the perturbation's sign structure exactly as `_draw_JD_cloud` does by construction.
+Since KA = s*g and KR = s*(1-g), noising s multiplies KA and KR of the same edge by the
+SAME lognormal factor (correlated within the pair, independent across edges). The m<N
+latent fields, the serial LBFGS polish, and the final scoring evaluation all run clean.
+
+**Per-step, not per-restart.** The controller fixed per-step resampling (smoothed
+objective) as primary over noise held constant per restart (randomised-prior ensemble)
+— these are different experiments, a decision the prior art flags explicitly
+(`worktrees/fft-submission/experiments/exp13/staged/NOISE_ROBUSTNESS_PIPELINE.md` §5
+Unit 1; D-FFT-14 in `worktrees/fft-submission/docs/DECISIONS.md`). D-FFT-14's placement
+warning — noise must not blow up warm-started forward solves — was checked against THIS
+codebase and does not bind: training here never simulates (CLAUDE.md §7c), and
+`losses/total.total_loss_batched` calls `terms.steady_state_batched` with the default
+`x0 = ones` every step, so the Newton solve is NOT warm-started across steps (source
+checked 2026-08-19). The residual risk is noise-induced Newton failures killing batch
+members; the existing kill-on-first-failure contract is kept (a member whose steady
+state fails at perturbed parameters dies for good, same as the serial path's abandoned
+restart), monitored via the smoke run, with per-restart held noise as the recorded
+fallback if sigma=0.048 shows failure explosion or non-ignition. The exp13 deck's
+surrogate numbers are ILLUSTRATIVE only and are not evidence about this pipeline
+(that document's own §1 and §4 say so).
+
+**The probe levels — UNCALIBRATED.** sigma_w in {0.048, 0.10, 0.20} plus the sigma_w=0
+control, on three_gene_qvar/sample_0001, 8 seeds per level, the exact claim-5 c2_P
+invocation (nc1, batched CUDA, cubic dispersion, 64 restarts, 400 Adam steps,
+param_prior=1.0, turing=8.0, kstar=8.0). 0.048 mirrors Tica's measured 4.8% experimental
+CV (the evaluation cloud's own smallest level), 0.10/0.20 span "moderate" to "large";
+none is calibrated against a control because none exists — they are probe points for a
+curve. weight_noise_seed per level: 5348 (0.048), 5310 (0.10), 5320 (0.20); the control
+runs with NO weight-noise overrides at all, exercising the untouched default path.
+
+**Pre-registered analysis (written before the runs).** Compare each sigma_w level to the
+sigma_w=0 control on: `recovered_turing` count; the distributions (not just medians) of
+`turing_volume_{1,4p8,10,20}pct`; `kstar_fft_rel_err` (the accuracy cost axis); and the
+morphology columns. Expectation stated in advance: at 4.8%/10% the control is at ceiling
+on this target (median 1.000, claim-4 fact), so the 20pct column is where a difference
+can show (population mean 0.746). Seed-level spread reported honestly — claim-5 saw
+non-monotonic seed effects; 8 seeds on one target cannot support a general claim either
+way, and the report will say so.
+
+**What was rejected.** (a) *Additive Gaussian noise on the raw theta directly* — a single
+sigma in raw space delivers wildly uneven effective physical noise across families
+(softplus is ~linear for large theta, ~exp for negative theta; the exp13 deck's
+ROBUSTNESS_MEASUREMENT reference measured a ~14x spread of effective physical noise for
+exactly this reason) and would not match the evaluation perturbation model. (b) *Perturbing
+the gate logit too* — a different (sign-structure-perturbing) noise model, undefined as
+"lognormal multiplicative", and mismatched to `_draw_JD_cloud`. (c) *Per-restart held
+noise as primary* — kept as the documented fallback; it answers a different question
+(randomised prior, not smoothed objective). (d) *A pass/fail bar* — no calibrated
+threshold exists; CLAUDE.md §8. (e) *Restoring clean parameters by subtracting the noise*
+— does not round-trip bit-exactly in floating point; the implementation saves and copies
+back the clean bytes instead (tested bit-exact).
+
+**Not independently validated:** the smoothed-objective estimator's variance/benefit
+trade-off on THIS loss landscape is exactly what the runs measure; nothing about the
+direction of the effect is assumed. With noise on, the training-history trace and the
+dead-member test see the perturbed parameters (the ones that produced that row's loss)
+— documented at the site.
+
+**Where it lives:** `src/rngrn/config.py::TrainConfig.weight_noise_sigma/weight_noise_seed`;
+`src/rngrn/recover.py::_weight_noise_perturb/_weight_noise_restore/_softplus_inverse` and
+the two Adam loops; `src/rngrn/train.py::fit`. Tests: `tests/test_weight_noise.py`
+(14 tests, TDD; suite 596 passed / 1 skipped). Runs:
+`experiments/claim_wnoise/sigma_w_{0p00,0p20,0p048,0p10}/` (run in that order so the
+extremes exist if time runs out), smoke at `experiments/claim_wnoise/smoke/` (plumbing
+only, never a number source).

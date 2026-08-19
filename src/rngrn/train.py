@@ -246,7 +246,10 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        dratio_centre=cfg.loss.dratio_centre,
                        dratio_spread=cfg.loss.dratio_spread,
                        bio_box_path=cfg.loss.bio_box_path,
-                       history=hist)                                     # unit P1
+                       history=hist,                                     # unit P1
+                       # paper-wnoise unit: train-time weight noise (D-WNOISE-1)
+                       weight_noise_sigma=cfg.train.weight_noise_sigma,
+                       weight_noise_seed=cfg.train.weight_noise_seed)
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is

@@ -706,6 +706,39 @@ class PatternSolve(torch.autograd.Function):
         return (None,) + tuple(g_theta)
 
 
+def _build_solver_grids(solver) -> None:
+    """(Re)build a solver's theta-INDEPENDENT grid geometry from its current (n, L).
+
+    Built once on the solver rather than inside the free functions, which otherwise rebuild
+    it on the host and re-transfer it per solve (k2h, k2_full) or per Newton ITERATION (the
+    kx/ky pair). Shared verbatim by `PatternSolver` and `BatchedPatternSolver`: the member
+    axis does not enter grid geometry, so duplicating it would only create somewhere for the
+    two to drift apart. Called from `__init__` and from `retile`.
+    """
+    solver.k2_full = _spectral_k2(solver.n, solver.L)
+    KX, KY = _half_k_grids(solver.n, solver.L)
+    solver._k2h = torch.from_numpy(KX**2 + KY**2).to(solver.device)
+    solver._kxy = (torch.from_numpy(KX).to(solver.device),
+                   torch.from_numpy(KY).to(solver.device))
+    solver._k2_full_dev = torch.from_numpy(solver.k2_full).to(solver.device)
+
+
+def _apply_retile(solver, L: float, n: int | None) -> None:
+    """Validate a new (n, L) and rebuild `solver`'s grids. The warm-start CLEAR is the
+    caller's, because the two solvers store it differently (one field vs one per member)
+    and a wrong guess there is silent."""
+    L = float(L)
+    if not (np.isfinite(L) and L > 0.0):
+        raise ValueError(f"retile needs a positive finite L, got {L!r}")
+    if n is not None:
+        n = int(n)
+        if n < 2:
+            raise ValueError(f"retile needs at least 2 grid points per side, got {n!r}")
+        solver.n = n
+    solver.L = L
+    solver._build_grids()
+
+
 class PatternSolver:
     """Per-restart owner of the forward-solve state: grid geometry, warm start, and the
     D1 solver knobs. The caller (recovery loop) decides WHETHER to solve (ignition,
@@ -782,20 +815,32 @@ class PatternSolver:
             raise ValueError(f"warm_mode must be 'newton' or 'relax', got {warm_mode!r}")
         self.warm_mode = warm_mode
         self.warm_max_chunks = int(warm_max_chunks)   # UNCALIBRATED budget cap
-        self.k2_full = _spectral_k2(self.n, self.L)
-        # Grid geometry: theta-INDEPENDENT, so built once here and threaded through the
-        # free functions, which otherwise rebuild it on the host and re-transfer it per
-        # solve (k2h, k2_full) or per Newton ITERATION (the kx/ky pair).
-        KX, KY = _half_k_grids(self.n, self.L)
-        self._k2h = torch.from_numpy(KX**2 + KY**2).to(self.device)
-        self._kxy = (torch.from_numpy(KX).to(self.device),
-                     torch.from_numpy(KY).to(self.device))
-        self._k2_full_dev = torch.from_numpy(self.k2_full).to(self.device)
+        self._build_grids()
         self._warm: torch.Tensor | None = None
         self.last_residual: float = float("nan")
         self.last_reason: str = "never_solved"
 
     # -- internals -------------------------------------------------------------------
+
+    def _build_grids(self) -> None:
+        """(Re)build the theta-INDEPENDENT grid geometry for the current (n, L)."""
+        _build_solver_grids(self)
+
+    def retile(self, L: float, n: int | None = None) -> None:
+        """Move the solve onto a NEW box: rebuild the k-grid and CLEAR the warm start.
+
+        `docs/REDESIGN_rngrn.md` §4.3's re-tile step, for the adaptive commensurate solve
+        box (`rngrn.solve_box`). The warm start must go: it is a field sampled on the OLD
+        (n, L) grid, so on a new box it is either the wrong SHAPE (n changed) or — worse,
+        because it is silent — a pattern at the wrong wavelength for the new domain, which
+        the Newton polish would happily converge into a solution of the wrong problem.
+
+        Calling this IS the re-tile, so it always rebuilds and always clears, even when the
+        geometry is unchanged; `solve_box.needs_retile` is the hysteresis guard that
+        decides whether to call it at all.
+        """
+        _apply_retile(self, L, n)
+        self._warm = None
 
     def _newton(self, u0: torch.Tensor, F_fn, gamma: float, D_np: np.ndarray):
         modes_of = lambda uu: list(                                        # noqa: E731
@@ -1265,17 +1310,26 @@ class BatchedPatternSolver:
             raise ValueError(f"warm_mode must be 'newton' or 'relax', got {warm_mode!r}")
         self.warm_mode = warm_mode
         self.warm_max_chunks = int(warm_max_chunks)   # UNCALIBRATED budget cap
-        self.k2_full = _spectral_k2(self.n, self.L)
-        KX, KY = _half_k_grids(self.n, self.L)
-        self._k2h = torch.from_numpy(KX**2 + KY**2).to(self.device)
-        self._kxy = (torch.from_numpy(KX).to(self.device),
-                     torch.from_numpy(KY).to(self.device))
-        self._k2_full_dev = torch.from_numpy(self.k2_full).to(self.device)
+        self._build_grids()
         # PER-MEMBER warm state, keyed by GLOBAL member index and persisting across Adam
         # steps. None = no warm start (never solved, or cleared by a failure).
         self._warm: list = [None] * self.B
         self.last_residual = np.full(self.B, np.nan)
         self.last_reason: list = ["never_solved"] * self.B
+
+    # -- geometry ----------------------------------------------------------------------
+
+    def _build_grids(self) -> None:
+        """The serial builder — grid geometry is identical, the member axis does not enter
+        it."""
+        _build_solver_grids(self)
+
+    def retile(self, L: float, n: int | None = None) -> None:
+        """`PatternSolver.retile` with the PER-MEMBER warm store: EVERY member's warm start
+        is cleared, since every one of them lives on the old (n, L) grid. Same reasoning and
+        the same loud refusals — see that method."""
+        _apply_retile(self, L, n)
+        self._warm = [None] * self.B
 
     # -- internals -------------------------------------------------------------------
 

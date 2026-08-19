@@ -3398,13 +3398,15 @@ of 4 periods of its fastest-growing linear mode (L = 142.74286494132343). Reprod
 - **The fix closes it to round-off.** With `digitize`: **1.59e-15** worst bin on the 64²
   pattern (k\* exactly 0.0) and **8.36e-16 / 3.72e-16** worst over the 12 operating-point
   configurations.
-- **The round-off floor itself is measured, not assumed.** On 13 (n, L) geometries where the
+- **The round-off floor itself is measured, not assumed** (scratch-script measurement, not
+  committed under experiments/). On 13 (n, L) geometries where the
   two binnings provably assign every lattice point identically, over 78 field/geometry pairs
   (noise and multi-mode cosine, n = 16…128): worst per-bin **4.80e-14**, worst k\*
   **4.50e-16**. That residue is FFT backend plus summation order (`np.bincount` vs
   `scatter_add_`). `tests/test_raps_torch_parity.py` sets its bars at 1e-12 / 1e-14, ~20×
   above the floor.
-- **Detector exposure, measured before the fix.** One trajectory of the torch integrator,
+- **Detector exposure, measured before the fix** (scratch-script measurement, not committed
+  under experiments/). One trajectory of the torch integrator,
   **both** estimators evaluated on every chunk, the flatness detector then replayed over each
   series (this isolates the estimator; a numpy-vs-torch relax would confound it with FFT
   backend). 16 trajectories = seeds 0–7 × {32², 64²}, `chunk=500`, production
@@ -3476,12 +3478,12 @@ review found missing; the underlying code change itself was not authored by this
 **The decision:** three departures from a scipy-`lsmr`-faithful port of the D-FFT-10 adjoint
 solve stay as landed, undocumented until now:
 
-1. `forward.py:185` (`_LSMR_STOP_CHECK_EVERY = 25`) — the stopping test runs every 25
+1. `forward.py:186` (`_LSMR_STOP_CHECK_EVERY = 25`) — the stopping test runs every 25
    iterations instead of every iteration, so the solve can overshoot scipy's stop point by up
    to 24 iterations; the returned iterate is not the one at the crossing scipy would report.
-2. `forward.py:152` (`_sym_ortho_t`) — `_sym_ortho` (Python floats, scipy-verbatim) is
+2. `forward.py:153` (`_sym_ortho_t`) — `_sym_ortho` (Python floats, scipy-verbatim) is
    deleted and replaced by a branchless 0-d-tensor version with guarded denominators.
-3. `forward.py:188` (`_lsmr_torch`) — the exact-Krylov-breakdown branch changes algorithm:
+3. `forward.py:189` (`_lsmr_torch`) — the exact-Krylov-breakdown branch changes algorithm:
    scipy *skips* the `v` update entirely when `beta == 0`; this code always runs it with
    `u / where(beta==0, 1, beta)`, leaving an unnormalised vector rather than terminating.
 
@@ -3516,8 +3518,8 @@ the review's finding that it "was written against the faithful port" stands unre
 future task re-deriving or re-verifying scipy-vs-torch LSMR agreement under the current code
 should start there.
 
-**Where it lives:** `src/rngrn/forward.py:185` (`_LSMR_STOP_CHECK_EVERY`), `:152`
-(`_sym_ortho_t`), `:188` (`_lsmr_torch`); D-FFT-10 (the decision this modifies the stopping
+**Where it lives:** `src/rngrn/forward.py:186` (`_LSMR_STOP_CHECK_EVERY`), `:153`
+(`_sym_ortho_t`), `:189` (`_lsmr_torch`); D-FFT-10 (the decision this modifies the stopping
 semantics of); `tests/test_forward_solve.py` (unexamined against this version).
 
 ---
@@ -3570,7 +3572,7 @@ measurement and changed no behaviour.
 
 **Where it lives:** `src/rngrn/etdrk4_torch.py:133` (`blew = ...`), its updated docstring;
 `src/rngrn/eval/numerics.py::integrate_etdrk4_rfft` (the differing numpy contract);
-`src/rngrn/forward.py::relax_to_pattern_torch` (docstring, `:626-629` — this task appends
+`src/rngrn/forward.py::relax_to_pattern_torch` (docstring, `:627-631` — this task appends
 the blow-up exception to the "same trajectory up to FFT-backend round-off" claim, which
 was previously unconditional); `tests/test_etdrk4_torch.py` (does not cover the blow-up
 case).

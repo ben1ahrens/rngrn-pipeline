@@ -48,7 +48,8 @@ PATTERN_GRID = 64
 #: FFT backend and summation order (numpy `bincount` vs torch `scatter_add_`) — the worst
 #: per-bin relative difference over 78 field/geometry pairs (noise and multi-mode cosine,
 #: n in 16..128) was **4.80e-14** and the worst k* relative difference **4.50e-16**
-#: (2026-08-19, this worktree's .venv, CPU float64). The bars below sit ~20x above those
+#: (2026-08-19, this worktree's .venv, CPU float64; scratch-script measurement, not
+#: committed under experiments/). The bars below sit ~20x above those
 #: floors. The k* floor is what the port's docstring reported as "3e-16"; the per-bin floor
 #: is two orders looser because a bin's power is an unordered sum of up to n^2 terms and
 #: the two accumulators add them in different orders.

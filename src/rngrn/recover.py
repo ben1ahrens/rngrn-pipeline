@@ -249,6 +249,9 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
 
     for step in range(adam_steps):
         opt.zero_grad()
+        # `alive` is always defined here, so the conditional cannot change the value passed
+        # -- it exists only to keep the non-spectral batched row schema unchanged (review
+        # M9, unresolved by choice).
         loss_vec, parts, conv = LT.total_loss_batched(
             bmodel, frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
             step=step, active=alive if spec_cfg is not None else None, **loss_kw)
@@ -300,6 +303,9 @@ def _batched_restarts(N, form, restart_seeds, init, dispersion_backend,
                   f"mean_total={float(loss_vec[alive].mean()):.3f}")
 
     with torch.no_grad():
+        # `alive` is always defined here, so the conditional cannot change the value passed
+        # -- it exists only to keep the non-spectral batched row schema unchanged (review
+        # M9, unresolved by choice).
         loss_vec, parts, conv = LT.total_loss_batched(
             bmodel, frame, L_model, observed_idx, kgrid, kstar_obs, strategy,
             step=adam_steps, active=alive if spec_cfg is not None else None, **loss_kw)

@@ -9,11 +9,14 @@ physics terms against a meaningless x*. Only an explicit strict=False caller opt
 of the raise (e.g. a diagnostic that wants best-effort terms); no default path does.
 """
 from __future__ import annotations
+import numpy as np
 import torch
 
 from . import terms as T
-from .spectral import is_ignited, spectral_terms, SPECTRAL_TERM_KEYS
+from .spectral import (is_ignited, is_ignited_batched, spectral_terms,
+                       spectral_terms_batched, SPECTRAL_TERM_KEYS)
 from .term_registry import LOSS_TERMS
+from ..model import BatchedRNGRN
 
 
 class SteadyStateError(RuntimeError):
@@ -184,11 +187,81 @@ def total_loss(model, frame, L, observed_idx, kgrid, kstar_obs, strategy,
 # ======================================================================================
 # unit b2 — BATCHED assembler: B independent members, one forward/backward
 # ======================================================================================
+def _apply_spectral_batched(term_vals, parts, spectral, xstar_pre, conv, active) -> None:
+    """Per-member ignite-or-omit for the five spectral terms — `_apply_spectral` with a
+    member axis. `spectral.solver` is a `forward.BatchedPatternSolver`.
+
+    IGNITION IS PER MEMBER. At a given Adam step only some of the B restarts are
+    Turing-unstable beyond the margin, so only those are solved for; the ignited subset is
+    handed to the solver as a list of GLOBAL member indices and comes back as a stack in the
+    same order, with a reason for each member whose solve failed. The decision itself costs
+    NO extra device sync — see `losses.spectral.is_ignited_batched`.
+
+    OMITTED-NOT-ZEROED, per member, with one forced difference from the serial path and it
+    is a difference of REPRESENTATION, not of arithmetic. Serially a skipped step omits the
+    five keys from `term_vals` entirely, so `strategy.combine`'s sum(weight * term) never
+    sees them. Batched, every member shares one `term_vals` dict, so the keys cannot be
+    omitted for SOME members: a skipped member's entry is an exact CONSTANT 0.0, written by
+    `index_copy` into a zero tensor. Its loss contribution is 0 (identical to omission) and
+    its gradient contribution is 0 (the constant carries no graph), so a failed member can
+    neither shift nor poison another member's optimisation. What must NOT become 0 is the
+    RECORD, which is the whole point of the rule — so `parts["L_<key>"]` is NaN for every
+    member that was not computed (applied in `total_loss_batched`, which would otherwise
+    overwrite it with the placeholder zero), `parts["spectral_skipped"][b]` carries the
+    reason, and `parts["spec_computed"][b]` says which members the terms are real for.
+
+    `parts["spectral_skipped"]` is a (B,) object array; an EMPTY string means "not skipped",
+    mirroring the serial path's absence of the key on a successful step.
+    """
+    B = int(xstar_pre.shape[0])
+    ignited = is_ignited_batched(parts, spectral.cfg.ignition_margin)
+    skipped = np.array(["not_ignited"] * B, dtype=object)
+    if active is not None:
+        live = np.asarray(
+            active.detach().cpu().numpy() if hasattr(active, "detach") else active,
+            dtype=bool)
+        # An abandoned lane is recorded as such, not merged into "not_ignited": it may well
+        # have been Turing-unstable when the caller gave up on it, and the record should say
+        # why the solve was skipped rather than imply a stability verdict it did not make.
+        skipped[~live] = "abandoned"
+        ignited = ignited & live
+    parts["spec_ignited"] = ignited.astype(float)
+    computed = np.zeros(B, dtype=bool)
+    zeros = xstar_pre.new_zeros(B)
+    members = np.nonzero(ignited)[0].tolist()
+    u_stack, ok_members, reasons = None, [], {}
+    if members:
+        u_stack, ok_members, reasons = spectral.solver.solve_subset(members, xstar_pre)
+    for m, why in reasons.items():
+        skipped[m] = why
+    if ok_members:
+        for m in ok_members:
+            skipped[m] = ""
+            computed[m] = True
+        vals, spec_parts = spectral_terms_batched(u_stack, spectral.targets, spectral.cfg,
+                                                  members=ok_members)
+        idx = torch.as_tensor(ok_members, dtype=torch.long, device=zeros.device)
+        for name, v in vals.items():
+            term_vals[name] = zeros.index_copy(0, idx, v)
+        for key, v in spec_parts.items():
+            full = np.full(B, float("nan"))
+            full[ok_members] = v
+            parts[key] = full
+    else:
+        # Nothing solved this step: the five keys still have to EXIST with a stable column
+        # set (history.py freezes its columns on the first recorded step), as a constant 0.
+        for name in SPECTRAL_TERM_KEYS:
+            term_vals[name] = zeros
+    parts["spectral_skipped"] = skipped
+    parts["spec_computed"] = computed
+
+
 def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
                           tau=0.12, jac_floor=1.0, split_hinges=True,
                           hinge_k_min_frac=0.1, detach_xstar=False,
                           compute_resid=False, param_prior_kw=None,
-                          spectral=None, obs_scale=None, kstar_idx=None) -> tuple:
+                          spectral=None, obs_scale=None, kstar_idx=None,
+                          active=None) -> tuple:
     """Batched twin of `compute_terms`. Returns (term_vals, parts, converged).
 
     `model` is a model.BatchedRNGRN of B members; every term_vals entry is a (B,) tensor and
@@ -214,21 +287,53 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
     batched residual to compute. Its default weight is 0 (exp06, settled off), so this costs
     the default path nothing -- but it is refused loudly rather than silently skipped.
 
-    `spectral` must be None (unit U4). `forward.PatternSolver` owns per-restart warm-start
-    state and cannot be shared across a batched member axis, and (same reason as the
-    residual) the batched reaction does not broadcast to the per-pixel fields the forward
-    solve needs. Refused loudly rather than silently skipped, mirroring `compute_resid`.
+    `spectral`: a `losses.spectral.SpectralContext` whose `solver` is a
+    `forward.BatchedPatternSolver`, or None (default) to OMIT the M1 spectral terms. THIS
+    USED TO BE UNCONDITIONALLY REFUSED; the refusal was deleted, not weakened: it said the
+    forward solve had no batched form, which was true when it was written and is no longer.
+    The solver now owns per-MEMBER warm state keyed by global member index, and the forward
+    solve gets its own member axis (`forward.batched_reaction_fields` broadcasts the batched
+    parameters to per-pixel fields, which `model.BatchedRNGRN.reaction` deliberately does
+    not). See `_apply_spectral_batched` for the per-member ignite-or-omit contract.
+
+    What the deleted refusal used to provide IMPLICITLY -- because it always fired before
+    `spectral` (or `model`) was ever touched -- is restored EXPLICITLY here instead, at the
+    entry point, before any steady-state solve or Jacobian: `spectral.solver` must expose
+    `solve_subset` (the `forward.BatchedPatternSolver` contract), not `solve` (the serial
+    `forward.PatternSolver` one). Handing the serial solver to this assembler is now a
+    plausible mistake -- both combinations are legal -- and used to surface only as an
+    `AttributeError` mid-step, inside `_apply_spectral_batched`, after the batch had already
+    paid for a steady-state solve and three Jacobians (REVIEW_gpu_optim_delta.md C1/§8).
+
+    `active`: an optional (B,) bool mask of members still being optimised, used ONLY to skip
+    the forward solve for members `recover` has already abandoned. It cannot change any
+    computed value — a dead member's loss is masked out of the optimised sum by the caller
+    either way — it only stops a dead lane paying seconds per step for a solve nobody reads.
+    None (the default) treats every member as active, which is what every non-spectral caller
+    gets, unchanged.
 
     `obs_scale` / `kstar_idx`: the same per-call constants the serial `compute_terms` takes,
     with the same None-means-compute-it-here default.
     """
+    if not isinstance(model, BatchedRNGRN):
+        raise ValueError(
+            f"compute_terms_batched requires a model.BatchedRNGRN (B independent members); "
+            f"got {type(model).__name__}. Use losses.total.compute_terms for a single "
+            "model.RNGRN.")
     if compute_resid:
         # message single-sourced from losses/term_registry.py (Task 8, R2 redesign) so the
-        # registry's `resid` refusal_reason and this raise can never drift apart.
+        # registry's `resid` refusal_reason and this raise can never drift apart. `resid`
+        # is the ONLY surviving single-sourced refusal here: the spectral one is retired
+        # with the refusal itself (INTEGRATION_r3_collisions.md rows 8/28, §2.3).
         raise ValueError(LOSS_TERMS.get("resid").refusal_reason)
-    if spectral is not None:
-        # single-sourced the same way; the five spectral entries share one refusal text.
-        raise ValueError(LOSS_TERMS.get("spec_shape").refusal_reason)
+    if spectral is not None and not hasattr(spectral.solver, "solve_subset"):
+        raise ValueError(
+            f"compute_terms_batched requires spectral.solver to expose solve_subset(members, "
+            f"xstar_batch) -> (u_stack, ok_members, reasons); got "
+            f"{type(spectral.solver).__name__}, which looks like the SERIAL "
+            "forward.PatternSolver (.solve() only, no member axis). Use "
+            "forward.BatchedPatternSolver for the batched path -- see "
+            "losses.spectral.SpectralContext's docstring for the two duck-typed contracts.")
     xstar, conv = T.steady_state_batched(model)
     # ones for the failed members: a poison guard for the SHARED graph, not a scored value.
     x_ok = torch.where(conv.unsqueeze(-1), xstar, torch.ones_like(xstar))
@@ -256,6 +361,8 @@ def compute_terms_batched(model, frame, L, observed_idx, kgrid, kstar_obs,
         L_p, p_p = T.param_prior_batched(model, **param_prior_kw)
         term_vals["param_prior"] = L_p
         parts.update(p_p)
+    if spectral is not None:
+        _apply_spectral_batched(term_vals, parts, spectral, x_ok.detach(), conv, active)
     return term_vals, parts, conv
 
 
@@ -263,7 +370,7 @@ def total_loss_batched(model, frame, L, observed_idx, kgrid, kstar_obs, strategy
                        step=0, tau=0.12, jac_floor=1.0, split_hinges=True,
                        hinge_k_min_frac=0.1, detach_xstar=False,
                        compute_resid=False, param_prior_kw=None, spectral=None,
-                       obs_scale=None, kstar_idx=None) -> tuple:
+                       obs_scale=None, kstar_idx=None, active=None) -> tuple:
     """Batched twin of `total_loss`. Returns (loss_vec (B,), parts, converged (B,)).
 
     The weighting strategy is applied UNCHANGED: `combine` only ever does
@@ -275,18 +382,28 @@ def total_loss_batched(model, frame, L, observed_idx, kgrid, kstar_obs, strategy
 
     The returned loss is a VECTOR, deliberately not pre-summed: only the caller knows which
     members are still alive, and summing a dead member's loss in would give it gradient.
+
+    `active`: passed straight to `compute_terms_batched` — see there; it only skips the
+    forward solve for members the caller has already abandoned.
     """
     term_vals, parts, conv = compute_terms_batched(
         model, frame, L, observed_idx, kgrid, kstar_obs, tau=tau, jac_floor=jac_floor,
         split_hinges=split_hinges, hinge_k_min_frac=hinge_k_min_frac,
         detach_xstar=detach_xstar, compute_resid=compute_resid,
         param_prior_kw=param_prior_kw, spectral=spectral,
-        obs_scale=obs_scale, kstar_idx=kstar_idx)
+        obs_scale=obs_scale, kstar_idx=kstar_idx, active=active)
     loss, weights_used = strategy.combine(term_vals, step, model=model)
     parts["total"] = loss.detach().cpu().numpy()
     parts["weights_used"] = weights_used
+    computed = parts.get("spec_computed")
     for k, v in term_vals.items():
-        parts[f"L_{k}"] = v.detach().cpu().numpy()
+        arr = v.detach().cpu().numpy()
+        if computed is not None and k in SPECTRAL_TERM_KEYS:
+            # A spectral term's placeholder is an exact 0 so the loss sees an omission
+            # (`_apply_spectral_batched`); the RECORD must not inherit that zero, or a
+            # reader could not tell "not computed" from "zero loss". NaN, per CLAUDE.md §4.
+            arr = np.where(computed, arr, float("nan"))
+        parts[f"L_{k}"] = arr
     return loss, parts, conv
 
 
@@ -297,12 +414,23 @@ def parts_member(parts: dict, b: int) -> dict:
     weights_used, resid_skipped) are scalars and pass through. This is what lets recover.py
     hand a batched restart's diagnostics to the same consumers -- run-index rows are flat
     scalars, so `bool`/`float`/`int` conversion happens here, once.
+
+    `spectral_skipped` is the one per-member entry that is NOT numeric: it is a (B,) object
+    array of reason STRINGS (empty for a member that was not skipped), and it is passed
+    through as a str so a row records the same value the serial path's `parts` carries.
     """
     out = {}
     for k, v in parts.items():
         if hasattr(v, "shape") and getattr(v, "ndim", 0) == 1:
             x = v[b]
-            out[k] = bool(x) if x.dtype == bool else float(x)
+            # `kind` exists on a numpy dtype and not on a torch one, so the getattr chain
+            # both selects the string case and leaves any tensor entry on the old path.
+            if getattr(getattr(v, "dtype", None), "kind", None) in ("O", "U", "S"):
+                out[k] = str(x)
+            elif x.dtype == bool:
+                out[k] = bool(x)
+            else:
+                out[k] = float(x)
         else:
             out[k] = v
     return out

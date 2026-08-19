@@ -322,6 +322,41 @@ def test_batched_total_loss_matches_serial():
     assert worst < 1e-10, f"batched total loss differs by {worst:.3e}"
 
 
+def test_active_mask_is_inert_without_a_spectral_context():
+    """`active=` must be a no-op when `spectral is None` — values AND column set.
+
+    `recover._batched_restarts` passes `active=alive` unconditionally, where Phase A wrote
+    `active=alive if spec_cfg is not None else None` (review M9). The guard was dropped
+    because the mask is read only inside `losses.total._apply_spectral_batched`, which runs
+    only when a `SpectralContext` was supplied. That is an argument about the code; this is
+    the measurement. If it were wrong the damage would be silent in exactly the way
+    `history.TrainingHistory._names` punishes — a batched run's frozen scalar column set
+    would depend on whether the caller happened to pass a liveness mask.
+    """
+    _, batched = _pair(b=4, seed0=200)
+    frame = _frame()
+    from rngrn import observables as obs
+    kstar_obs = obs.kstar_of(frame[0].numpy(), L=1.0)
+    kgrid = _kgrid(kstar_obs)
+    alive = torch.tensor([True, False, True, False])
+
+    def _run(active):
+        loss, parts, conv = LT.total_loss_batched(
+            batched, frame, 1.0, [0, 1, 2], kgrid, kstar_obs, FixedWeighting(WEIGHTS),
+            step=0, active=active)
+        return loss.detach().numpy(), parts, conv.numpy()
+
+    loss_n, parts_n, conv_n = _run(None)
+    loss_a, parts_a, conv_a = _run(alive)
+
+    assert set(parts_a) == set(parts_n), (
+        "passing active= changed the parts column set: "
+        f"only-with-mask={set(parts_a) - set(parts_n)}, "
+        f"only-without={set(parts_n) - set(parts_a)}")
+    assert np.array_equal(loss_a, loss_n)
+    assert np.array_equal(conv_a, conv_n)
+
+
 def test_batched_total_loss_refuses_the_residual():
     _, batched = _pair(b=2, seed0=200)
     frame = _frame()

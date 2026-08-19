@@ -68,7 +68,7 @@ box on every row with named evidence.
 
 | # | File | Symbol | gpu-optim's change | redesign line's change | Chosen resolution | Shape | Owner | Verified |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `losses/total.py` | `compute_terms:131-146` | term-assembly block rewritten: hoisted `J = model.jacobian(x_disp, create_graph=True)` plus `J=`/`idx=` threaded into four term calls | **none in the block itself.** R2's whole `total.py` delta is the new import `from .term_registry import LOSS_TERMS` (**`total.py:16`**) plus the two refusal messages (row 8) | Rebuild the block **through the registry**, not by merging two hand-written blocks. The `:16` import is what makes that possible and **must survive the merge** — row 8 removes the only two lines that currently use it, so a careless resolution can drop it as newly-unused (§2.1) | DICT | **T9** | ☐ |
+| 1 | `losses/total.py` | `compute_terms:131-146` | term-assembly block rewritten: hoisted `J = model.jacobian(x_disp, create_graph=True)` plus `J=`/`idx=` threaded into four term calls | **none in the block itself.** R2's whole `total.py` delta is the new import `from .term_registry import LOSS_TERMS` (**`total.py:16`**) plus the two refusal messages (row 8) | ~~Rebuild the block **through the registry**~~ — **AMENDED AT T9** under the controller's ruling on Task 8's return: the registry-driven rebuild is not executable without changing `LossTerm`'s field set (T8 verified three blockers), the registry contract does not change, and the assembly is therefore a **deliberate hand-written union** per §2.1's arithmetic requirement, with the registry remaining the declaration/weights source. The `:16` `LOSS_TERMS` import **did survive** — row 8 retires only the *spectral* raise, and `resid`'s single-sourcing (its one remaining reader) keeps it live (§2.1) | DICT | **T9** | ☐ |
 | 2 | `losses/total.py` | `compute_terms_batched:321-336` | the same rewrite, mirrored | **none** | mirror of row 1, same vehicle | DICT | **T9** | ☐ |
 | 3 | `losses/total.py` | `compute_terms` / `total_loss` signatures | `obs_scale`, `kstar_idx` appended | **none** | append both, at the end, defaulting `None`; keep the None-means-compute-it-here semantics verbatim (§2.2) | **SIG** | **T9** | ☐ |
 | 4 | `losses/total.py` | `compute_terms_batched` / `total_loss_batched` signatures | `obs_scale`, `kstar_idx`, `active` appended | **none** | as row 3 plus `active=None`. **Four signature merges in one file** — the phase-A shape (§2.2) | **SIG** | **T9** | ☐ |
@@ -122,6 +122,16 @@ hazard rather than surviving it.
 If that cannot be done without changing `LossTerm`'s field set, **stop and return it**: it is
 a contract change to a structure T14 already extended once (`kstar_si`), and it is not Task 9's
 to rule on alone.
+
+> **T9 AMENDMENT (2026-08-19).** It could not, it was returned at T8, and the controller ruled:
+> the registry contract does **not** change, and `compute_terms`/`compute_terms_batched` keep a
+> hand-written `term_vals` literal, with `LOSS_TERMS` remaining the declaration and default-weight
+> source. The hazard this section wanted removed is instead *discharged*: the arithmetic
+> requirement below (one Jacobian per step, shared by `kstar_anchor`/`turing_hinges*`/
+> `anticollapse`, and none for `frame_scale_anchor`) is now pinned as a **contract** by
+> `tests/test_term_registry.py::test_dispersion_side_terms_all_accept_the_hoisted_jacobian`
+> (added at T8), which fails if a registered dispersion-side term stops accepting `J=`/`idx=`.
+> Rows 1 and 2 therefore landed as one hand-written union each, and the literal was NOT rebuilt.
 
 The arithmetic that must survive unchanged, whatever the vehicle: **one** Jacobian per step,
 evaluated at the same `x_disp` with `create_graph=True`, shared by `kstar_anchor`,
@@ -242,6 +252,20 @@ active=alive if spec_cfg is not None else None
 
 Not a bare `active=alive`. Passing a live mask on the non-spectral path would change nothing
 computationally but would make the argument's "only skips the forward solve" contract false.
+
+> **T9 AMENDMENT (2026-08-19) — the guard was REMOVED, under the controller's M9 instruction,
+> and this paragraph's stated reason does not survive scrutiny.** `active` is read in exactly
+> one place, `losses.total._apply_spectral_batched`, which `compute_terms_batched` calls only
+> under `if spectral is not None`. On the non-spectral path the mask is therefore never looked
+> at, so it cannot make any contract false — it is not consulted at all. Phase A's own comment
+> at the site ("the conditional cannot change the value passed") was internally contradictory:
+> the conditional demonstrably changes what is passed; what is true is that the *outcome* is
+> unaffected either way. Both call sites in `_batched_restarts` now read `active=alive`
+> unconditionally, and the property the guard was defending — an unchanged `parts` column set on
+> the non-spectral batched path — is **measured**, not argued, by
+> `tests/test_batched.py::test_active_mask_is_inert_without_a_spectral_context` (mutation-probed:
+> injecting one extra `parts` key under `if active is not None` turns it red). Row 24's other
+> halves (`died_at_step`, `LIVENESS_SYNC_EVERY=25`) were landed unchanged by T8.
 
 ### 2.8 Row 26 — `dispersion_backend`: RULED (mechanics yes, default no)
 
@@ -381,6 +405,19 @@ grep -n "_SPECTRAL_REFUSAL" src/rngrn/losses/term_registry.py     # must return 
 grep -n "batched_fn=None" src/rngrn/losses/term_registry.py       # only `resid` and `morphology`
 ```
 
+> **T9 AMENDMENT (2026-08-19).** The first grep is right and returns zero (the constant was
+> deleted). The **second grep is vacuous**: `_register` is called with `batched_fn` and
+> `refusal_reason` **positionally**, so the string `batched_fn=None` never appears in the file
+> — it returned zero *before* the flip too, and would keep returning zero if the flip were
+> reverted. The check that actually discriminates is the runtime enumeration below; run it, or
+> read the file's `_register(...)` lines, not that grep:
+>
+> ```
+> .venv/bin/python -c "from rngrn.losses import term_registry as R; \
+>   print([k for k in R.LOSS_TERMS.keys() if R.LOSS_TERMS.get(k).refusal_reason])"
+> # must print exactly ['morphology', 'resid'] (order per the registry's key sort)
+> ```
+
 And, because a grep is not a test, **add the runtime assertion — it is cheap and real.** Extend
 `test_every_registered_term_is_fully_classified` with: for every term that declares a
 `refusal_reason`, a batched implementation must not exist under the conventional name.
@@ -397,6 +434,14 @@ Task 7 ran this probe against the current tree: it passes for all seven refusing
 `spec_*_batched` all absent), and it flips to a **failure for exactly the five spectral keys**
 the moment `spectral.py` transplants. That is the completeness test the row originally, and
 wrongly, assumed already existed.
+
+> **T9 AMENDMENT (2026-08-19) — landed, and the prediction held exactly.** The assertion is now
+> `tests/test_term_registry.py::test_a_refusing_term_has_no_batched_implementation_sitting_next_to_it`.
+> Written and run BEFORE the flip, with `spectral.py` already transplanted, it failed on a
+> spectral key (`real_moments declares refusal_reason, but
+> rngrn.losses.spectral.real_moments_batched exists`) — the RED this row predicted. After the
+> flip: 7 passed. It is a standing guard, not a one-off check: any future `refusal_reason` whose
+> `<fn>_batched` twin appears in the same module now turns the suite red.
 
 Three further consequences to carry through in the same change:
 

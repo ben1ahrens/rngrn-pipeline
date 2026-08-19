@@ -15,6 +15,33 @@ def test_every_registered_term_is_fully_classified():
         assert t.calibration.startswith(("CALIBRATED(", "UNCALIBRATED")), key
 
 
+def test_a_refusing_term_has_no_batched_implementation_sitting_next_to_it():
+    """Row 28 of docs/INTEGRATION_r3_collisions.md, as a test rather than a grep.
+
+    `refusal_reason` is a CLAIM about the world: "no batched form of this term exists".
+    Nothing in the suite checked it, and `batched_fn` has no runtime readers, so the claim
+    could go false without a single test turning red -- which is exactly what happened when
+    `losses/spectral.py` gained `spec_shape_batched` ... `real_moments_batched` while the
+    registry still declared all five spectral terms un-batchable. This asserts the claim
+    against the module the serial callable actually lives in.
+
+    Naming convention: every batched twin in this package is `<serial name>_batched`
+    (`losses/terms.py` and `losses/spectral.py` both follow it without exception).
+    """
+    import sys
+
+    for key in term_registry.LOSS_TERMS.keys():
+        t = term_registry.LOSS_TERMS.get(key)
+        if t.refusal_reason is None:
+            continue
+        mod = sys.modules[t.fn.__module__]
+        twin = t.fn.__name__ + "_batched"
+        assert not hasattr(mod, twin), (
+            f"{key} declares refusal_reason, but {t.fn.__module__}.{twin} exists. "
+            "Either the refusal is stale (register the batched_fn and drop the reason) "
+            "or the twin is not the term's batched form (then rename it).")
+
+
 def test_default_weights_are_bit_identical_to_the_legacy_dict():
     # A0 protection: the registry refactor may not change a single default.
     assert term_registry.default_weights() == dict(terms.DEFAULT_WEIGHTS)

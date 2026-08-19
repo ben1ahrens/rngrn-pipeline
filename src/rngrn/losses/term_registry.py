@@ -14,14 +14,20 @@ present here with a real serial+batched callable, but not yet wired into
 compute_terms/total_loss (docs/REDESIGN_rngrn.md §4.4) -- so a caller that only reads
 compute_terms's own term_vals dict still sees the original 12.
 
-Two terms refuse a batched form: `resid` (losses/total.py::compute_terms_batched raises
-if compute_resid=True — the batched reaction takes one state vector per member, not
+Exactly two terms refuse a batched form: `resid` (losses/total.py::compute_terms_batched
+raises if compute_resid=True — the batched reaction takes one state vector per member, not
 per-pixel states) and `morphology` (losses/terms.py::morphology_consistency is a
 non-differentiable numpy diagnostic, never wired into compute_terms/compute_terms_batched
-at all — see terms.py's b2-section comment). The five spectral terms also refuse: they are
-not owned by this file's per-term batched_fn slot but by losses/spectral.py; batching is
-refused by losses/total.py::compute_terms_batched for the same reason forward.PatternSolver
-cannot be shared across a batched member axis.
+at all — see terms.py's b2-section comment).
+
+The five spectral terms USED TO refuse as well, and no longer do (R3 Phase B, collision
+ledger row 28). `losses/spectral.py` now carries a `<key>_batched` twin for each, driven by
+`forward.BatchedPatternSolver`'s per-member warm state, so the refusal text this file used
+to hold was retired together with `losses/total.py`'s raise. Their `fn`/`batched_fn` arity
+is `(u_star, targets, cfg[, members])`, not the `(model, xstar, kgrid, ...)` of every other
+entry — a pre-existing asymmetry of the spectral terms, not something the flip introduced.
+`tests/test_term_registry.py::test_a_refusing_term_has_no_batched_implementation_sitting_next_to_it`
+is what keeps a `refusal_reason` here from outliving the fact it asserts.
 
 Calibration tags follow CLAUDE.md §8/§10: `CALIBRATED(<source>)` only where a source
 measured and settled the DEFAULT VALUE itself; `UNCALIBRATED` otherwise, even where a
@@ -68,16 +74,6 @@ _MORPHOLOGY_REFUSAL = (
     "numpy diagnostic)'); loss.weights.morphology is currently INERT (TUNING.md)."
 )
 
-# Quoted VERBATIM from losses/total.py::compute_terms_batched's own raise text — same
-# single-sourcing note as _RESID_REFUSAL above.
-_SPECTRAL_REFUSAL = (
-    "compute_terms_batched cannot compute the spectral terms (unit U4): "
-    "forward.PatternSolver owns per-restart warm-start state, which has no batched "
-    "form, and the batched reaction does not broadcast to per-pixel fields. Use the "
-    "serial path for spectral runs."
-)
-
-
 def _register(name, fn, batched_fn, refusal_reason, default_weight, calibration):
     LOSS_TERMS.register(name)(LossTerm(
         name=name, fn=fn, batched_fn=batched_fn, refusal_reason=refusal_reason,
@@ -101,7 +97,11 @@ _register("morphology", T.morphology_consistency, None, _MORPHOLOGY_REFUSAL,
 _register("param_prior", T.param_prior, T.param_prior_batched, None,
            default_weight=0.0, calibration="UNCALIBRATED")
 for _key in S.SPECTRAL_TERM_KEYS:
-    _register(_key, getattr(S, _key), None, _SPECTRAL_REFUSAL,
+    # Batched since R3 Phase B: every one of the five has a `<key>_batched` twin in
+    # `losses/spectral.py` (uniform naming, verified). Weights stay 0.0 and the tag stays
+    # UNCALIBRATED -- nothing has measured a spectral weight on this data, and the batched
+    # twins change neither the arithmetic nor what would calibrate it.
+    _register(_key, getattr(S, _key), getattr(S, f"{_key}_batched"), None,
               default_weight=0.0, calibration="UNCALIBRATED")
 del _key
 

@@ -3590,6 +3590,326 @@ assertion, which is weaker than a behavioural test and is labelled as such at th
 
 ---
 
+### D-PERF-4 — the batched-spectral refusal stays deleted; explicit entry-point validation replaces what it used to provide implicitly
+
+**Date:** 2026-08-19 (R3 repair task 1, `feature/gpu-optim-repair`, on top of
+`feature/gpu-optim`). **Status:** DECIDED
+**Decided by:** the implementing agent under delegated authority (§10).
+
+**The decision:** `losses/total.py::compute_terms_batched` no longer refuses a non-None
+`spectral` argument unconditionally, and that refusal is NOT restored. In its place, two
+explicit checks run at the top of the function, before any steady-state solve or Jacobian:
+(1) `model` must be a `model.BatchedRNGRN`, else `ValueError` naming the offending type; (2)
+when `spectral is not None`, `spectral.solver` must expose `solve_subset` (the
+`forward.BatchedPatternSolver` contract), else `ValueError` naming the offending type and
+`solve_subset` by name. `total_loss_batched` inherits both checks unchanged, since it only
+ever calls through `compute_terms_batched`.
+
+**Why the refusal's original reason no longer holds:** the deleted text (`10cff1b`) said
+"`forward.PatternSolver` owns per-restart warm-start state and cannot be shared across a
+batched member axis" — true when written, because no batched forward solve existed.
+`feature/gpu-optim`'s `2b11010` added `forward.BatchedPatternSolver`, which owns
+per-MEMBER warm state keyed by global member index and solves only the subset of members
+ignited at a given step (`_apply_spectral_batched`, `losses/total.py:188`). This is exactly
+the batched forward solve `docs/REDESIGN_rngrn.md` §4.1 names as R3's critical path. The
+structural obstruction the refusal existed to enforce is gone; keeping the refusal would make
+that critical-path combination permanently unreachable through this API, which is the
+opposite of what R3 needs.
+
+**Evidence:** `docs/REVIEW_gpu_optim_delta.md` C1 diagnosed the gap: `10cff1b..2b11010`
+deleted the refusal but added no replacement, leaving `compute_terms_batched`/
+`total_loss_batched` red (`AttributeError: 'NoneType' object has no attribute 'B'` on a
+`model=None` placeholder — reproduced here, RED, before this fix: 2 failed) and leaving
+`tests/test_ignition_gating.py::test_recover_raises_on_batched_with_a_spectral_weight`
+**passing vacuously** — it asserts `pytest.raises(ValueError, match="batched")` without
+passing `lbfgs_steps`, so it trips `recover()`'s unrelated LBFGS guard
+(`"batched=True requires lbfgs_steps=0"`), whose message happens to contain "batched". Passing
+`lbfgs_steps=0` explicitly (this task's Step 2, scratch, not committed) makes that same call
+raise **nothing at all** — `recover(batched=True, spectral weight != 0, lbfgs_steps=0)`
+completes cleanly, which is independent confirmation (from `recover.py`'s own code path, not
+just its docstring) that the combination is legal today. `recover.py:396-401`'s own docstring
+already states this in-place ("This combination USED TO RAISE … and the refusal is now
+DELETED because the solve gained a member axis, not relaxed because the reason stopped
+mattering") and `_batched_restarts` (`recover.py:238-248`) wires a real
+`forward.BatchedPatternSolver` into `SpectralContext` whenever `spec_cfg is not None`. The
+two-line entry-point check was verified against a well-formed batched `SpectralContext`
+(`_StubBatchedSpectralSolver` exposing `solve_subset`) producing the per-member
+exact-0-loss/NaN-record split `_apply_spectral_batched` documents
+(`test_compute_terms_batched_accepts_a_batched_spectral_context`), and against a serial-shaped
+solver (`.solve()`, no `.solve_subset()`) refused before any solve is attempted
+(`test_compute_terms_batched_refuses_a_serial_solver`, `n_calls == 0`).
+
+**What was rejected and why:** (a) restoring the deleted refusal verbatim — makes the
+newly-legal, REDESIGN-critical-path combination unreachable through `compute_terms_batched`,
+which is a functional regression relative to `2b11010`, not a repair; (b) leaving no
+validation at all (the state as committed) — a `PatternSolver` (serial) handed to the batched
+assembler by mistake surfaces as `AttributeError: 'PatternSolver' object has no attribute
+'solve_subset'` from inside `_apply_spectral_batched`, **after** the batch has already paid
+for a batched steady-state solve and three batched Jacobians, rather than being refused
+before either runs.
+
+**Not independently validated:** this task (R3 task 1) repairs only the entry-point
+validation and the test gap it exposed (C1). `BatchedPatternSolve.backward`'s adjoint
+gradient — the load-bearing untested item the review calls C2 — is out of scope here and
+remains unverified; the accepts-test above exercises `compute_terms_batched`'s per-member
+wiring with a hand-written stub solver, not the real `forward.BatchedPatternSolver`.
+
+**RULED — controller ruling 2026-08-19, same task:** the legality shape found above is
+CONFIRMED as the current contract: `batched=True` combined with a non-zero spectral weight is
+**legal**, not refused.
+`tests/test_ignition_gating.py::test_recover_raises_on_batched_with_a_spectral_weight` (`:194`)
+is renamed to `test_recover_accepts_batched_with_a_spectral_weight` and rewritten to PIN that
+contract non-vacuously: `R.recover(ri, strategy=_spectral_on_strategy(), batched=True,
+lbfgs_steps=0, adam_steps=0, n_restarts=1)` is asserted to complete WITHOUT raising
+(`lbfgs_steps=0` explicit so the unrelated LBFGS guard cannot be what fires or what doesn't;
+`adam_steps=0` keeps it a fast validation-layer check, ~3.2 s measured). It asserts only that
+the combination is accepted at the validation layer — nothing about the recovered result's
+numerical correctness.
+
+**Still assigned onward — end-to-end equivalence is Task 4's job, not this task's:** an
+end-to-end `batched=True, lbfgs_steps=0` spectral `recover()` run checked NUMERICALLY against
+its serial twin (the batched-vs-serial equivalence `docs/REVIEW_gpu_optim_delta.md` C1/C2
+still want) remains unwritten. `:194`'s docstring names Task 4 explicitly as the completing
+test. `BatchedPatternSolve.backward`'s untested adjoint gradient (C2) is still out of scope for
+this task and remains unverified — see "Not independently validated" above.
+
+**Where it lives:** `src/rngrn/losses/total.py::compute_terms_batched`;
+`tests/test_ignition_gating.py::test_compute_terms_batched_accepts_a_batched_spectral_context`,
+`::test_compute_terms_batched_refuses_a_serial_solver`,
+`::test_compute_terms_batched_refuses_a_non_batched_model`,
+`::test_recover_accepts_batched_with_a_spectral_weight`.
+
+---
+
+### D-OBS-1 — the relax saturation detector's k\* estimator is `observables.kstar_of_torch`, and that function now bins with `raps`'s own `np.digitize`, not `floor`
+
+**Date:** 2026-08-19 (R3 task 3, branch `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` C3). **Status:** DECIDED
+**Decided by:** the controller, on measurements taken by the implementing agent under
+delegated authority.
+
+One entry, two coupled facts: the estimator **swap** that `feature/gpu-optim` made silently
+(semantic change #6), and the **binning fix** that makes the swap legitimate.
+
+**The decision (part 1 — the swap, now recorded).** `forward.relax_to_pattern_torch`'s
+saturation detector evaluates k\* with `observables.kstar_of_torch` instead of pulling the
+channel-0 frame back to the host and calling `observables.kstar_of`; `forward._kstar_of_torch_batched`
+is its batched twin and shares the same cached binning. The motive is transfer, not
+arithmetic: the numpy detector costs up to 400 × 2 MB of device-to-host copy plus a host FFT
+per solve at 512², where the torch one moves two scalars per chunk. This swap was made in
+`feature/gpu-optim` with no register entry; that omission is what this decision closes. The
+serial CPU path (`relax_to_pattern`, chosen by `PatternSolver._relax` when the device is CPU)
+still calls `kstar_of` and is unchanged.
+
+**The decision (part 2 — the binning).** `observables._raps_torch_bins` assigns bins with
+`np.clip(np.digitize(|k|, kbins) - 1, 0, nbins - 1)` — literally `raps`'s expression. It was
+`np.clip(np.floor(|k| / dk), 0, nbins - 1)`. `observables.raps` (the unwindowed RAPS,
+register item 15's **primary** k\* estimator) is untouched, as is every numpy consumer of it
+(`recover`, `eval/rollout`, `eval/lifted`, `relax_to_pattern`, `morphology`).
+
+**Evidence.** All measured 2026-08-19 in this worktree's `.venv`, CPU float64, one thread,
+sandbox disabled; the tracked checkpoint
+`experiments/tune_comp/runs/m3_registry_20260803_190250_seed3/checkpoints/model.pt` on a box
+of 4 periods of its fastest-growing linear mode (L = 142.74286494132343). Reproduced by
+`tests/test_raps_torch_parity.py`.
+
+- **`floor` is not equal to `digitize` here, and not by a little.** Against `raps`, the
+  `floor` binning gave, worst per configuration: saturated 64² pattern **11.9 % on a bin,
+  0.36 % on k\***; the detector's own operating point (x\* + 1e-2 noise, n ∈ {16, 32, 64, 96}
+  × seeds {0,1,2}) **22.5 % on a bin, 30.2 % on k\***.
+- **Mechanism.** A lattice radius that is an exact integer multiple of `dk = 2π/L` sits
+  exactly ON a bin edge, where `|k|/dk` can evaluate 1 ulp low and `floor` drops the point a
+  bin. At this L those radii are the **on-axis** modes — m = 5 (n=16), 5,10 (n=32), 5,10,20
+  (n=64), 5,10,20,40,43 (n=96), i.e. 4/8/12/20 of the n² points. The box is 4 periods, so
+  m = 5 is adjacent to the pattern's dominant mode: the misbinned modes carry the most power,
+  which is why a 1-ulp defect moves a bin by double-digit percent.
+- **No bound on the divergence generalises.** Which radii collide turns on the last bits of
+  the float L: truncating L to 142.7429 makes n = 16 and n = 32 collision-free (the two then
+  agree to 5.08e-16) while giving n = 64 a *different* collision set (m = 29, 35).
+- **The fix closes it to round-off.** With `digitize`: **1.59e-15** worst bin on the 64²
+  pattern (k\* exactly 0.0) and **8.36e-16 / 3.72e-16** worst over the 12 operating-point
+  configurations.
+- **The round-off floor itself is measured, not assumed** (scratch-script measurement, not
+  committed under experiments/). On 13 (n, L) geometries where the
+  two binnings provably assign every lattice point identically, over 78 field/geometry pairs
+  (noise and multi-mode cosine, n = 16…128): worst per-bin **4.80e-14**, worst k\*
+  **4.50e-16**. That residue is FFT backend plus summation order (`np.bincount` vs
+  `scatter_add_`). `tests/test_raps_torch_parity.py` sets its bars at 1e-12 / 1e-14, ~20×
+  above the floor.
+- **Detector exposure, measured before the fix** (scratch-script measurement, not committed
+  under experiments/). One trajectory of the torch integrator,
+  **both** estimators evaluated on every chunk, the flatness detector then replayed over each
+  series (this isolates the estimator; a numpy-vs-torch relax would confound it with FFT
+  backend). 16 trajectories = seeds 0–7 × {32², 64²}, `chunk=500`, production
+  `flat_tol=1e-4`: the stop chunk was **identical in 16/16** and the returned u\* differed by
+  **exactly 0.0**. The detector tests a *relative* spread, and the divergence was close to a
+  constant offset per trajectory, which cancels out of that ratio.
+
+**Consequence for existing numbers — stated plainly in both directions.**
+
+- **No recorded result changes meaning.** The detector's decisions are demonstrably unchanged
+  at the production tolerance (16/16 identical stop chunks, u\* difference exactly 0.0), the
+  primary `raps` is untouched, and the GPU relax path exists only on this unmerged, unvalidated
+  branch — nothing on `main` has ever run it.
+- **ANNOUNCED LOUDLY (§10.4): `observables.raps_torch` / `kstar_of_torch` /
+  `forward._kstar_of_torch_batched` return DIFFERENT VALUES from this commit forward** — by up
+  to 30.2 % on k\* and 22.5 % on a bin at the relax detector's operating point. Any k\* read
+  off the torch path before this commit is not comparable to one read after it. `raps` /
+  `kstar_of` values are unchanged.
+- **The case rests on the estimator contract and a 1.6× margin, not on a demonstrated
+  failure.** No stop-chunk split was observed at `flat_tol=1e-4`. What was observed: the
+  detector's flatness ratio differs between the two estimators by up to **45 %** at the firing
+  window (n=64 seed 7: 7.83e-06 vs 1.42e-05), and sweeping `flat_tol` over 41 values in
+  [1e-6, 1e-2] the two return **different stop chunks for 8/8 seeds at 64²** and 1/8 at 32² —
+  at n=64 seed 1 they split at `flat_tol` = 6.3e-5 and 7.9e-5, within a factor **1.6** of the
+  production value. The observed exposure is bounded; the possible exposure is not.
+
+**What was rejected and why.** Keeping `floor` and recording the divergence as accepted
+(option (b), explicitly considered and measured before being rejected). Register item 15 makes
+the unwindowed `raps` the **primary** estimator and forbids silent swaps, precisely because the
+sub-bin centroid k\* and the one-bin bar are calibrated on it. A detector that reads k\* from a
+port diverging 30.2 % from the primary at its own operating point is a **second estimator**,
+not a port, and formalising it as one would need owner sign-off it does not have. The
+measurements say `floor` is not an alternative convention but a **defective implementation of
+the documented half-open binning** `[m·dk, (m+1)·dk)`; the cost of the fix is zero (the binning
+is built host-side in numpy and cached per (n, L, device, dtype), so `np.digitize` was already
+available — the original "torch has no `digitize`" justification died when the binning moved to
+the host); and under (b) the only honest test is one pinning a 30 % divergence, which is a
+worse artefact than the defect it documents.
+
+**Two prior claims corrected — neither was reproducible.** `raps_torch`'s docstring stated
+"on a saturated 64² pattern `kstar_of_torch` and `kstar_of` agree to 3e-16" and "on a
+pure-noise 16² field one bin differed by 14 % and k\* by 0.24 %", and
+`docs/REVIEW_gpu_optim_delta.md` C3 quotes the latter as the measured divergence. Measured here
+at the fixture geometry: **3.58e-03** (not 3e-16) and up to **22.5 % / 30.2 %** (not
+14 % / 0.24 %). The 3e-16 figure is what a *collision-free* L produces, i.e. it was luck of the
+float. Both figures are removed from the docstring; `tests/test_raps_torch_parity.py` is the
+first measurement of this parity with provenance, and it pins the measured round-off floor
+instead.
+
+**Not independently validated:** every number above is CPU float64 at n ≤ 96 on one
+checkpoint. No CUDA measurement was taken (the torch relax path's reason for existing is GPU
+transfer, and no GPU run was made here), and the detector-exposure sweep covers 8 seeds × 2
+grid sizes on a single model, not the config space.
+
+**Where it lives:** `src/rngrn/observables.py::_raps_torch_bins` (the `digitize` line and its
+docstring), `::raps_torch` (docstring);
+`src/rngrn/forward.py::relax_to_pattern_torch` (docstring), `::_kstar_of_torch_batched`;
+`tests/test_raps_torch_parity.py`.
+
+---
+
+### D-PERF-5 — `_lsmr_torch`'s three departures from scipy `lsmr` stay; this is the missing entry for semantic-change-table #4
+
+**Date:** 2026-08-19 (R3 task 5, `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` I1 / table #4). **Status:** DECIDED
+**Decided by:** the implementing agent under delegated authority (§10), writing the entry the
+review found missing; the underlying code change itself was not authored by this task.
+
+**The decision:** three departures from a scipy-`lsmr`-faithful port of the D-FFT-10 adjoint
+solve stay as landed, undocumented until now:
+
+1. `forward.py:186` (`_LSMR_STOP_CHECK_EVERY = 25`) — the stopping test runs every 25
+   iterations instead of every iteration, so the solve can overshoot scipy's stop point by up
+   to 24 iterations; the returned iterate is not the one at the crossing scipy would report.
+2. `forward.py:153` (`_sym_ortho_t`) — `_sym_ortho` (Python floats, scipy-verbatim) is
+   deleted and replaced by a branchless 0-d-tensor version with guarded denominators.
+3. `forward.py:189` (`_lsmr_torch`) — the exact-Krylov-breakdown branch changes algorithm:
+   scipy *skips* the `v` update entirely when `beta == 0`; this code always runs it with
+   `u / where(beta==0, 1, beta)`, leaving an unnormalised vector rather than terminating.
+
+**Why this is accepted rather than reverted:** the refinement loop that follows LSMR decides
+convergence on the solve's *true residual*, not on LSMR's own internal stopping signal — so a
+cadenced, up-to-24-iterations-late stop changes which iterate refinement starts FROM, not what
+gets accepted as the final answer. All three departures are already documented at length,
+correctly, in `_lsmr_torch`'s own docstring and `_minnorm_solve_t`'s docstring — what was
+missing was this register entry, not the code-level explanation.
+
+**Evidence:** `docs/REVIEW_gpu_optim_delta.md` I1 (§3, table #4) is the source of the above:
+it independently re-derived all three departures from the diff, confirmed the docstrings
+state them honestly, and confirmed the true-residual argument is sound. It also states the
+gap this entry closes: `docs/DECISIONS.md` gained exactly one entry in the `feature/gpu-optim`
+range (D-PERF-3, about the dispersion backend) — none for this change — and that
+`tests/test_forward_solve.py`, named in the docstring as pinning agreement, "was written
+against the *faithful* port and was not re-examined" against the cadenced/branchless version.
+No fresh scipy-vs-torch LSMR comparison was run in this task — it is documentation-only, no
+behaviour change (per this task's own scope).
+
+**What was rejected and why:** (a) reverting to an iteration-for-iteration scipy-faithful stop
+check and restoring `_sym_ortho`'s Python-float branching — this would reintroduce a host sync
+on every LSMR iteration, which is exactly the cost this branch's whole thesis (§7a: batching
+and desyncing the training-time hot path) exists to eliminate; (b) leaving the change
+undocumented — the status quo, which is what produced I1 in the first place and which
+`CLAUDE.md` §10 forbids for a science decision that changes the stopping semantics of a solve
+D-FFT-10 verified.
+
+**Not independently validated:** this task made no new measurement. `tests/test_forward_solve.py`
+was not re-examined against the cadenced/branchless/guarded-breakdown version specifically —
+the review's finding that it "was written against the faithful port" stands unresolved. A
+future task re-deriving or re-verifying scipy-vs-torch LSMR agreement under the current code
+should start there.
+
+**Where it lives:** `src/rngrn/forward.py:186` (`_LSMR_STOP_CHECK_EVERY`), `:153`
+(`_sym_ortho_t`), `:189` (`_lsmr_torch`); D-FFT-10 (the decision this modifies the stopping
+semantics of); `tests/test_forward_solve.py` (unexamined against this version).
+
+---
+
+### D-PERF-6 — the ETDRK4 blow-up check moved from per-step to per-call; the numpy/torch return-array parity break on a blow-up is now recorded
+
+**Date:** 2026-08-19 (R3 task 5, `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` I2 / table #5). **Status:** DECIDED
+**Decided by:** the implementing agent under delegated authority (§10), writing the entry the
+review found missing; the underlying code change itself was not authored by this task.
+
+**The decision:** `etdrk4_torch.py:133` (`integrate_etdrk4_rfft_torch`) evaluates
+`isfinite(v).all()` ONCE per call, after the full step loop, rather than once per step as
+`eval/numerics.integrate_etdrk4_rfft` (the numpy original) does. This stays as landed.
+
+**Why this is accepted:** the boolean-equivalence argument is sound. Every operation in an
+ETDRK4 step is linear or an FFT over the whole field, so a non-finite value cannot be erased
+once it appears — `isfinite(v).all()` after the loop yields the identical flag a per-step
+check would have produced. The reaction closure (`clamp(X,0)**n`, `1 + einsum`, division) was
+checked for a path back to finite and none exists: `inf/inf -> nan`, and `nan` is absorbing.
+On CUDA a per-step `isfinite` check is a blocking device sync whose cost does not shrink as
+the step's own FLOPs shrink, so it dominates at small training geometries — eliminating it is
+squarely within this branch's thesis.
+
+**What the prior docstring omitted, now recorded:** `eval/numerics.integrate_etdrk4_rfft`
+(numpy) returns **the field at the first non-finite step**; the torch port now returns **the
+field after all `nsteps`**. So on a blow-up the two backends return numerically DIFFERENT
+arrays, not merely a different step index — this is a genuine deviation from
+`relax_to_pattern_torch`'s docstring claim that the two backends "relax the same trajectory up
+to FFT-backend round-off" (`forward.py:628`), not just lost diagnostic granularity about which
+step blew up.
+
+**Evidence:** `docs/REVIEW_gpu_optim_delta.md` I2 (§3, table #5). The boolean-equivalence check
+and the reaction-closure absorbing-nan argument are the reviewer's, stated there; this entry
+restates them as the record `CLAUDE.md` §10 requires and adds the parity-break framing
+verbatim from the review. `tests/test_etdrk4_torch.py` pins numpy equivalence at `delta <=
+1e-12` (CPU) / `1e-9` (CUDA) on non-blowing-up trajectories only — it neither catches nor
+covers the blow-up parity break, and per I2 it was not updated when the change landed.
+
+**What was rejected and why:** (a) reverting to a per-step `isfinite` check — reintroduces the
+per-step blocking CUDA sync this change exists to remove; (b) leaving the parity break
+unrecorded — the state as landed, which silently weakens a standing cross-backend claim
+(`relax_to_pattern_torch`'s docstring) without that claim's own text reflecting the exception.
+
+**Not independently validated:** no test currently exercises a blow-up trajectory against both
+the numpy and torch backends to confirm the returned arrays actually diverge as described (the
+argument is analytic — nan absorption plus differing return timing — not measured here). This
+task added the parity note to `integrate_etdrk4_rfft_torch`'s docstring but made no new
+measurement and changed no behaviour.
+
+**Where it lives:** `src/rngrn/etdrk4_torch.py:133` (`blew = ...`), its updated docstring;
+`src/rngrn/eval/numerics.py::integrate_etdrk4_rfft` (the differing numpy contract);
+`src/rngrn/forward.py::relax_to_pattern_torch` (docstring, `:627-631` — this task appends
+the blow-up exception to the "same trajectory up to FFT-backend round-off" claim, which
+was previously unconditional); `tests/test_etdrk4_torch.py` (does not cover the blow-up
+case).
+
+---
+
 ### D-PERF-7 — the liveness-sync cadence (25 steps) stays; its "harmless" claim is corrected, not the cadence
 
 **Date:** 2026-08-19 (R3 task 5, `feature/gpu-optim-repair`, repairing
@@ -3940,3 +4260,96 @@ that number matters to a paper claim, it needs a run, and this entry does not su
 hoist); `src/rngrn/losses/terms.py` (`J=` on every dispersion-side term, pinned by
 `tests/test_term_registry.py::test_dispersion_side_terms_all_accept_the_hoisted_jacobian`).
 Read with **D-PERF-10**, whose backend-choice bit-identity claim this entry scopes.
+
+---
+
+### D-PERF-12 — the five spectral terms are registered as BATCHABLE, and the registry's refusal claim is now guarded by a test rather than by a grep
+
+**Date:** 2026-08-19 (R3 Phase B task 9, `feature/r3-integration`, integrating
+`feature/gpu-optim-repair`@`862e6f2` onto `feature/redesign-model`). **Status:** DECIDED
+
+**Context.** R2's Task 8 built `losses/term_registry.py`, which pairs every loss term with
+its batched twin **or** the reason batching is refused, and asserts exactly one of the two is
+set. At the time it was written, batching the five spectral terms genuinely was refused —
+`forward.PatternSolver` owned per-restart warm state with no member axis — so all five were
+registered `batched_fn=None, refusal_reason=_SPECTRAL_REFUSAL`. gpu-optim then implemented
+`spec_shape_batched` … `real_moments_batched` and `forward.BatchedPatternSolver`. D-PERF-4
+records the deletion of the matching refusal in `losses/total.py`.
+
+**The decision:** the five spectral keys are re-registered with their real
+`getattr(S, f"{key}_batched")` callables and `refusal_reason=None`; `_SPECTRAL_REFUSAL` is
+deleted; `term_registry.py`'s module docstring, which said the spectral five "also refuse", is
+rewritten. Exactly two terms refuse a batched form now: `resid` and `morphology`.
+
+**Why this needed a decision at all, and it is the important part.** *Nothing in the suite
+forced it.* The XOR test passed either way, because the five registrations hardcoded
+`None, _SPECTRAL_REFUSAL` in a loop that transplanting `spectral.py` does not touch;
+`batched_fn` had **zero runtime readers**; and `refusal_reason`'s only spectral reader was the
+`total.py` raise that D-PERF-4 deleted. So the alternative outcome was a **false declaration
+under a fully green suite** — the registry asserting that five terms refuse a batched form
+sitting in the same package. That failure class is invisible to git and to a diff review, which
+is why `docs/INTEGRATION_r3_collisions.md` row 28 is tagged CONTRACT and why the verification
+below is part of the decision rather than incidental to it.
+
+**Evidence.**
+
+- The flip's forcing mechanism was **built**, not assumed:
+  `tests/test_term_registry.py::test_a_refusing_term_has_no_batched_implementation_sitting_next_to_it`
+  asserts that a term declaring a `refusal_reason` has no `<fn>_batched` in its serial
+  callable's own module. Written and run **before** the flip, with `spectral.py` already
+  transplanted, it failed exactly as the ledger predicted (`real_moments declares
+  refusal_reason, but rngrn.losses.spectral.real_moments_batched exists`). After the flip:
+  7 passed. It is a standing guard on every future entry, not a one-off.
+- Runtime enumeration after the flip: the terms declaring a `refusal_reason` are exactly
+  `morphology` and `resid`; `grep -n "_SPECTRAL_REFUSAL" src/` returns zero;
+  `grep -rn "cannot compute the spectral terms" src/` returns zero (the retired refusal text
+  did not resurrect anywhere).
+- Equivalence of the batched twins to their serial forms is **not** established by this entry.
+  It is `tests/test_batched_spectral_terms.py` and `tests/test_batched_forward_solve.py`
+  (Phase A, transplanted with the code) that measure it; this entry only stops the registry
+  lying about whether they exist.
+
+**Calibration — stated plainly.** All five stay `default_weight=0.0` and
+`calibration="UNCALIBRATED"`. Nothing has measured a spectral weight on this data, and having
+a batched twin is not evidence about a weight. The flip changes **availability**, not any
+number: with every spectral weight at 0 the terms are not consulted at all, so no existing
+result becomes non-comparable through this change.
+
+**What was rejected.** (a) **Leaving the five registered as refusing** — rejected: it is a
+false statement about the code, and the ledger's own analysis shows nothing would ever have
+caught it. (b) **Relying on `grep -n "batched_fn=None"` as the verification**, as row 28
+originally specified — rejected as **vacuous** and amended in the ledger: `_register` is called
+positionally, so that string never appears in the file and the grep returned zero before the
+flip too. (c) **Marking the five `CALIBRATED` because the batched path was measured** —
+rejected: what was measured is agreement between two implementations, not a weight.
+
+**Also landed here, and separable from the above — the `active=` guard is removed (review M9).**
+`recover._batched_restarts` passed `active=alive if spec_cfg is not None else None` to
+`total_loss_batched` at both call sites. Both now pass `active=alive` unconditionally. The
+guard was a no-op: `active` is read only inside `losses.total._apply_spectral_batched`, which
+runs only under `if spectral is not None`, so on the non-spectral path the mask is never
+looked at. Phase A's comment at the site ("the conditional cannot change the value passed") was
+internally contradictory — the conditional plainly changes what is passed; what is true is that
+the outcome is unaffected. **Measured, not argued:**
+`tests/test_batched.py::test_active_mask_is_inert_without_a_spectral_context` asserts the
+`parts` column set, the loss vector and the convergence mask are identical with and without a
+mask, and a mutation probe (injecting one extra `parts` key under `if active is not None`)
+turns it red. The property that guard existed to protect — a stable frozen column set for
+`history.TrainingHistory` on the non-spectral batched path — is therefore held up by a test
+instead of by a dead branch.
+
+**Not independently validated:** no batched spectral *recovery* has been run to convergence
+and compared against a serial one. `recover(batched=True)` with a spectral weight is pinned at
+the validation layer only (`tests/test_ignition_gating.py`), and the equivalence work is at the
+assembler level from identical preset warm starts, for the reason
+`tests/test_batched_forward_solve.py`'s module docstring gives (a fresh relax differs by FFT
+backend between the two paths and would confound the comparison). No science claim rests on the
+batched spectral path yet.
+
+**Where it lives:** `src/rngrn/losses/term_registry.py` (module docstring, the
+`SPECTRAL_TERM_KEYS` loop, `_SPECTRAL_REFUSAL` deleted); `src/rngrn/recover.py`
+(`_batched_restarts`, both `total_loss_batched` call sites);
+`tests/test_term_registry.py::test_a_refusing_term_has_no_batched_implementation_sitting_next_to_it`;
+`tests/test_batched.py::test_active_mask_is_inert_without_a_spectral_context`;
+`docs/INTEGRATION_r3_collisions.md` rows 28 and 24 (both carry a T9 amendment). Read with
+**D-PERF-4**, which records the deletion of the corresponding `total.py`/`recover.py` refusals.

@@ -3671,3 +3671,68 @@ so a future change could close or widen it silently again.
 **Where it lives:** `src/rngrn/recover.py:699` (`lbfgs_error` assignment), `:728-731`
 (`restart_log.append(..., lbfgs_error=lbfgs_error)`); `src/rngrn/recover.py::_batched_restarts`
 `:320-325` (the row missing the field, with the new inline comment).
+
+---
+
+### D-PERF-9 — `bdf1_newton_krylov` stub now raises instead of silently falling back to ETDRK4; independently duplicated on two branches (integration collision point 27)
+
+**Date:** 2026-08-19 (R3 task 5, `feature/gpu-optim-repair`, repairing
+`docs/REVIEW_gpu_optim_delta.md` I3 / table #9). **Status:** DECIDED
+**Decided by:** the controller, on evidence gathered by the implementing agent under
+delegated authority (§10).
+
+**The decision:** `src/rngrn/eval/numerics.py:194-209`
+(`integrate_bdf1_newton_krylov`) raises `NotImplementedError` naming the reason, rather
+than silently running ETDRK4 under the `bdf1_newton_krylov` label as it previously did.
+This stays as landed.
+
+**Integration collision point 27** (absent from `docs/REVIEW_gpu_optim_delta.md` §10's
+list of 26): the SAME change was made independently, on two branches neither aware of the
+other:
+
+- `feature/gpu-optim`'s `numerics.py:194-209` (this branch, inherited unmodified via
+  `feature/gpu-optim-repair`);
+- R1's Task 1 stub on `feature/lift-ladder`'s own `src/rngrn/eval/numerics.py::
+  integrate_bdf1_newton_krylov`, whose docstring instead cites
+  `docs/REDESIGN_rngrn.md` §5.2 ("removed the silent ETDRK4 fallback... implemented at the
+  gate milestone (R4 plan) as the 128^2 cross-check integrator") and points forward to R4,
+  not to any DECISIONS entry. Checked directly for this entry:
+  `git -C worktrees/lift-ladder show feature/lift-ladder:docs/DECISIONS.md` (3528 lines at
+  `2f50fff`) has no `bdf1` entry — grepped case-insensitively, zero matches.
+
+Both raises share the identical reasoning, independently arrived at: "a run that actually
+executed ETDRK4 under that label would be provenance that claims an integrator which never
+ran" (`numerics.py:200-203`, and R1's docstring makes the same point in its own words).
+Whichever branch merges first, the other's line-identical hunk is this 27th
+line-granularity collision point for Phase B's merge ledger to watch, alongside the 26 in
+`docs/REVIEW_gpu_optim_delta.md` §10 — cite this entry there.
+
+**No relabelling occurred — stated explicitly, this is the finding.**
+`docs/REVIEW_gpu_optim_delta.md` I3 raised the possibility that the raise "silently
+re-labels prior runs: every existing run recorded with `integrator='bdf1_newton_krylov'`
+used ETDRK4," and flagged under §10.4 that a changed number's meaning must be announced.
+This task checked rather than repeated that claim: `grep -rln "bdf1_newton_krylov"
+configs/ experiments/ notebooks/ scripts/` in this worktree returns exactly one file,
+`configs/base.yaml:52`, and that line is the enum-documenting comment
+(`# 'etdrk4' | 'imex_split' | 'bdf1_newton_krylov'`), not a selection — no tracked config,
+no `frozen_config.yaml`, no notebook, and no experiment anywhere in this repository ever
+set `integrator: bdf1_newton_krylov`. **Therefore no run was ever recorded under that
+label, no number's meaning has changed, and no loud announcement is owed** — the absence
+itself, not a relabelling, is what this entry records.
+
+**What was rejected and why:** leaving the silent-ETDRK4-fallback stub in place — a run
+could otherwise complete, log `integrator='bdf1_newton_krylov'`, and report results that
+were never produced by that integrator, which is exactly the false-provenance failure mode
+CLAUDE.md §8 exists to prevent. Both branches independently rejected the silent fallback
+for this same reason, without coordinating.
+
+**Not independently validated:** no BDF1 Newton-Krylov integrator has been implemented on
+either branch; the stub raises in both and is not scheduled before R4 per R1's own
+docstring. This entry records only that the raise is correct and currently unreachable
+from any tracked config, not that a working BDF1 path exists anywhere.
+
+**Where it lives:** `src/rngrn/eval/numerics.py:194-209`
+(`integrate_bdf1_newton_krylov`), `:212-217` (`INTEGRATORS`); `configs/base.yaml:52` (the
+enum comment, confirmed unused as a live selection); R1's `feature/lift-ladder`
+`src/rngrn/eval/numerics.py::integrate_bdf1_newton_krylov` (the independent duplicate) and
+`docs/REDESIGN_rngrn.md` §5.2 (cited there as the reason).

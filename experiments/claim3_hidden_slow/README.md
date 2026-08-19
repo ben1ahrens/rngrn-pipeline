@@ -106,3 +106,5 @@ slow channel/hub (c) is weaker than the matched full-observation control (b) on 
 matches morphology on all 7 seeds where a rollout comparison was possible. Nothing here
 supports a NOT-SUPPORTABLE verdict for claim 3 — but the `resid=0.3` / hub confound means the
 *size* of the partial-observation cost is not cleanly attributable to observation alone.
+
+Suite at `f9d1514`: 574 passed / 1 skipped (unsandboxed, worktree .venv; re-verified 2026-08-19 by the controller audit).

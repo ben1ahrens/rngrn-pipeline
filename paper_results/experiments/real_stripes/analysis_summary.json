@@ -1,0 +1,219 @@
+{
+  "runs_root": "experiments/real_stripes",
+  "n_runs": 5,
+  "dataset_id": "stripes_colony_2ch",
+  "kstar_anchor_note": "k*_fft_anchor is an FFT measurement of the observed frame, NOT ground truth \u2014 real data has no answer key",
+  "adjacency_convention": "[i][j] = regulation of target i by regulator j; dominant of KA/KR above 0.02*max binding strength (eval/topology.py plot_topology convention)",
+  "node_labels": {
+    "0": "C1 (observed)",
+    "1": "C2 (observed)",
+    "2": "H (latent)"
+  },
+  "per_run": [
+    {
+      "sample_key": "sample_0001",
+      "run_dir": "experiments/real_stripes/runs/stripes_partial_20260819_183655_seed0",
+      "turing": true,
+      "stable_uniform": true,
+      "kstar_model": 16.61272522034293,
+      "sigma_max": 0.43871315361342483,
+      "kstar_fft_anchor": 16.59363117401151,
+      "mu_crit": Infinity,
+      "mu_crit_status": "turing_at_hi",
+      "mu_sim": 0.00072,
+      "lifted_patterned": true,
+      "lifted_kstar": 15.71053954466811,
+      "lifted_stopped": "horizon",
+      "xstar_converged": true,
+      "param_medians": {
+        "alpha": 1.6990835745427384,
+        "beta": 0.1594946777625274,
+        "delta": 2.572396412116698,
+        "D": 0.07813807792612484,
+        "KA": 0.007996713523732369,
+        "KR": 0.03642932878524081
+      },
+      "signed_adjacency": [
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          -1,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "sample_key": "sample_0002",
+      "run_dir": "experiments/real_stripes/runs/stripes_partial_20260819_173450_seed0",
+      "turing": true,
+      "stable_uniform": true,
+      "kstar_model": 19.300614759121558,
+      "sigma_max": 0.3528914130500699,
+      "kstar_fft_anchor": 19.931944566781883,
+      "mu_crit": Infinity,
+      "mu_crit_status": "turing_at_hi",
+      "mu_sim": 0.00072,
+      "lifted_patterned": true,
+      "lifted_kstar": 21.206674464788534,
+      "lifted_stopped": "horizon",
+      "xstar_converged": true,
+      "param_medians": {
+        "alpha": 1.9613186449235045,
+        "beta": 0.04775068336680533,
+        "delta": 1.4062077874137688,
+        "D": 0.02196399919961098,
+        "KA": 0.05011012448458178,
+        "KR": 0.07630861433514129
+      },
+      "signed_adjacency": [
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          1,
+          -1,
+          -1
+        ],
+        [
+          -1,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "sample_key": "sample_0006",
+      "run_dir": "experiments/real_stripes/runs/stripes_partial_20260819_192225_seed0",
+      "turing": true,
+      "stable_uniform": true,
+      "kstar_model": 16.121848276121842,
+      "sigma_max": 0.4424972119740695,
+      "kstar_fft_anchor": 16.165284224462106,
+      "mu_crit": Infinity,
+      "mu_crit_status": "turing_at_hi",
+      "mu_sim": 0.00072,
+      "lifted_patterned": true,
+      "lifted_kstar": 15.87572495805689,
+      "lifted_stopped": "horizon",
+      "xstar_converged": true,
+      "param_medians": {
+        "alpha": 1.8197287755783902,
+        "beta": 0.15264596114406193,
+        "delta": 2.2761541317274525,
+        "D": 0.08645862828955357,
+        "KA": 0.009444848045404667,
+        "KR": 0.03812495935330562
+      },
+      "signed_adjacency": [
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          -1,
+          -1,
+          0
+        ],
+        [
+          -1,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "sample_key": "sample_0007",
+      "run_dir": "experiments/real_stripes/runs/stripes_partial_20260819_194834_seed0",
+      "turing": true,
+      "stable_uniform": true,
+      "kstar_model": 11.248696632894587,
+      "sigma_max": 0.4683424773545133,
+      "kstar_fft_anchor": 11.444464175408092,
+      "mu_crit": Infinity,
+      "mu_crit_status": "turing_at_hi",
+      "mu_sim": 0.00072,
+      "lifted_patterned": true,
+      "lifted_kstar": 10.03741114326251,
+      "lifted_stopped": "horizon",
+      "xstar_converged": true,
+      "param_medians": {
+        "alpha": 1.6225850250745397,
+        "beta": 0.13443280649607903,
+        "delta": 2.1987619351158876,
+        "D": 0.14974541325327462,
+        "KA": 0.012980481063727168,
+        "KR": 0.047550862680977087
+      },
+      "signed_adjacency": [
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          -1,
+          -1,
+          0
+        ],
+        [
+          -1,
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "sample_key": "sample_0008",
+      "run_dir": "experiments/real_stripes/runs/stripes_partial_20260819_195202_seed0",
+      "turing": true,
+      "stable_uniform": true,
+      "kstar_model": 16.121848276121842,
+      "sigma_max": 0.36921925861021543,
+      "kstar_fft_anchor": 16.478140949495824,
+      "mu_crit": Infinity,
+      "mu_crit_status": "turing_at_hi",
+      "mu_sim": 0.00072,
+      "lifted_patterned": true,
+      "lifted_kstar": 15.125411918133901,
+      "lifted_stopped": "horizon",
+      "xstar_converged": true,
+      "param_medians": {
+        "alpha": 1.6347781049099814,
+        "beta": 0.19921335385093084,
+        "delta": 2.081137913828475,
+        "D": 0.11407657937940449,
+        "KA": 0.008096356197866347,
+        "KR": 0.03592264410429893
+      },
+      "signed_adjacency": [
+        [
+          0,
+          -1,
+          1
+        ],
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          -1,
+          0,
+          1
+        ]
+      ]
+    }
+  ]
+}

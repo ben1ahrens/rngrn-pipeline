@@ -1,0 +1,34 @@
+{
+  "dataset_id": "stripes_colony_2ch",
+  "n_samples": 8,
+  "sample_keys": [
+    "sample_0001",
+    "sample_0002",
+    "sample_0003",
+    "sample_0004",
+    "sample_0005",
+    "sample_0006",
+    "sample_0007",
+    "sample_0008"
+  ],
+  "frame_shape": [
+    2,
+    96,
+    96
+  ],
+  "splits": {
+    "real": 8
+  },
+  "observable_key": "final_frame",
+  "answer_key_keys": [
+    "jacobian",
+    "x_star",
+    "D",
+    "interaction_matrix",
+    "kstar"
+  ],
+  "checksum": "6e6bece78e01115a",
+  "provenance": {
+    "source": "manually placed; indexed by scan"
+  }
+}

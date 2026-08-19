@@ -1,16 +1,19 @@
 # paper_results/ — all collected evidence from the 2026-08-19 paper sprint
 
 Everything the paper sprint produced — run data, figures, initial conditions, and the
-scripts that drove or plotted them — copied from six source branches into one directory on
-one branch (`feature/paper-results`), so the evidence can be read, re-plotted, and extended
-without checking out six worktrees. First collected 2026-08-19 (claims 1/2/3/4/5/6, the
-`PAPER_RESULTS_PACK.md` set); extended the same day with two supplementary claims run on
-separate branches after the pack was written: form-robustness (`PAPER_CLAIM_FORMCOMP.md`)
-and weight-noise (`PAPER_CLAIM_WNOISE.md`, a negative result). Nothing here is new
-measurement; every file is a verbatim copy of tracked content at the commits below, except
-the four `figures_paper/` scripts, whose *path constants only* were patched (see "What was
-modified"), and `experiments/claim_wnoise/figures/wnoise_curves.png`, which was untracked
-(gitignored) on its source branch and is included here as the regenerated raw output.
+scripts that drove or plotted them — copied from seven source branches into one directory
+on one branch (`feature/paper-results`), so the evidence can be read, re-plotted, and
+extended without checking out seven worktrees. First collected 2026-08-19 (claims
+1/2/3/4/5/6, the `PAPER_RESULTS_PACK.md` set); extended the same day with three
+supplementary claims run on separate branches after the pack was written: form-robustness
+(`PAPER_CLAIM_FORMCOMP.md`), weight-noise (`PAPER_CLAIM_WNOISE.md`, a negative result), and
+real-stripes (`experiments/real_stripes/README.md`, real biological data — see the caveat
+below). Nothing here is new measurement; every file is a verbatim copy of tracked content
+at the commits below, except the four `figures_paper/` scripts, whose *path constants
+only* were patched (see "What was modified"); `experiments/claim_wnoise/figures/wnoise_curves.png`,
+untracked (gitignored) on its source branch, included here as the regenerated raw output;
+and `raw_data/real_stripes_images/`, which is not tracked by ANY git repository and is
+backed up here for the first time (see the provenance note below).
 
 ## Experiments run — the key
 
@@ -24,11 +27,24 @@ modified"), and `experiments/claim_wnoise/figures/wnoise_curves.png`, which was 
 | 6 — GRN topology / non-identifiability | `PAPER_RESULTS_PACK.md` §Claim 6 | `experiments/figures_paper/topology/data/` | `experiments/figures_paper/topology/figures/` (7 PNGs) |
 | Supplementary — form robustness (nc1 vs competitive) | `PAPER_CLAIM_FORMCOMP.md`, `docs/DECISIONS_excerpts.md::D-FORMCOMP-1` | `experiments/form_compare/` (2 targets × 8 seeds), plus a second copy of `experiments/claim5_obs_noise/` (identical, not re-copied) | `experiments/form_compare/figures/1_form_robustness_comparison.png` |
 | Supplementary — weight noise (NEGATIVE result) | `PAPER_CLAIM_WNOISE.md`, `docs/DECISIONS_excerpts.md::D-WNOISE-1` | `experiments/claim_wnoise/` (4 sigma_w levels × 8 seeds + smoke) | `experiments/claim_wnoise/figures/wnoise_curves.png` (untracked source, included here) |
+| Supplementary — real colony stripe images (indicative, partial obs) | `experiments/real_stripes/README.md`, `docs/DECISIONS_excerpts.md::D-REAL-1` | `experiments/real_stripes/` (5 analysed frames + smoke), `data/datasets/stripes_colony_2ch/` (payload + manifest), `raw_data/real_stripes_images/` (16 raw PNGs, backed up here — see note below) | `experiments/figures_report/real_stripes/` (19 PNGs) |
 | Suite state / NOT-SUPPORTABLE list | `PAPER_RESULTS_PACK.md` §Suite state, §NOT-SUPPORTABLE | — | — |
 
 Each claim's own `README.md` (inside its `experiments/<name>/` directory) has the exact
 CLI commands, per-seed wall times, and caveats; each decision entry in
 `docs/DECISIONS_excerpts.md` has the full design rationale and what was rejected.
+
+**Real-stripes is a different kind of evidence from the other seven rows — read
+`D-REAL-1` before quoting it.** It is the only claim run on actual biological data (real
+colony images) rather than simulated data. Real data has no generating model, so there is
+no independent answer key: the ingestion script writes the image's own FFT peak into
+`k_star`, which means **every `kstar_rel_err`-style score on this dataset is circular by
+construction** and not comparable to any generated-data claim's k\* accuracy number. What
+it does support: cross-frame consistency of the learned topology/parameters/dispersion,
+and a lifted-rollout comparison against the observed image (5/5 analysed frames pattern
+under the lift; `morphology_match` true for 1 of 5). Only 5 of 8 frames were analysable
+(3 runs lost to a run-directory collision, documented in `experiments/real_stripes/README.md`).
+`resid=0.1` is UNCALIBRATED (required by partial observation, not a chosen value).
 
 ## Provenance — where every file came from
 
@@ -44,14 +60,28 @@ CLI commands, per-seed wall times, and caveats; each decision entry in
 | `experiments/claim5_obs_noise/` | `feature/paper-claim5-noise` @ 4515ea1 | same path |
 | `experiments/form_compare/` | `feature/paper-form-robustness` @ bfb9474 | same path |
 | `experiments/claim_wnoise/` | `feature/paper-weight-noise` @ 58445df | same path (incl. untracked `figures/wnoise_curves.png`) |
+| `experiments/real_stripes/` | `feature/real-stripes` @ 01b9bbf | same path |
+| `experiments/figures_report/real_stripes/` | `feature/real-stripes` @ 01b9bbf | same path |
+| `data/datasets/stripes_colony_2ch/` (manifest + payload) | `feature/real-stripes` @ 01b9bbf | same path |
+| `raw_data/real_stripes_images/` | NOT in git anywhere — copied from `~/projects/personal/rngrn/3N-stripes-images/preview_png/` (sibling of the repo, unversioned) | n/a — see note below |
+| `configs/nc1_stripes_partial.yaml` | `feature/real-stripes` @ 01b9bbf | `configs/nc1_stripes_partial.yaml` |
 | `PAPER_RESULTS_PACK.md` | `docs/paper-results-pack` @ f91ee73 | `docs/PAPER_RESULTS_PACK.md` |
 | `docs/PAPER_CLAIM_FORMCOMP.md` | `feature/paper-form-robustness` @ bfb9474 | same path |
 | `docs/PAPER_CLAIM_WNOISE.md` | `feature/paper-weight-noise` @ 58445df | same path |
 | `docs/DIAGNOSTICS_lift.md` | `feature/lift-ladder` @ 2f50fff | `docs/DIAGNOSTICS_lift.md` |
 | `docs/ROBUSTNESS_MEASUREMENT.md` | `main` @ 48441e4 | `docs/ROBUSTNESS_MEASUREMENT.md` |
-| `docs/DECISIONS_excerpts.md` | extracted from the five branches above | entries only; see its header |
+| `docs/DECISIONS_excerpts.md` | extracted from the six branches above | entries only; see its header |
 | `scripts/lift_paper_demo.py`, `scripts/lift_ladder.py` | `feature/lift-ladder` @ 2f50fff | `scripts/` |
 | `scripts/exp11_robustness_baseline.py` | `main` @ 48441e4 | `scripts/` |
+| `scripts/ingest_stripes.py` | `feature/real-stripes` @ 01b9bbf | `scripts/ingest_stripes.py` |
+
+**Note on `raw_data/real_stripes_images/`:** these 16 raw PNGs (300×300 grayscale colony
+images, 1.2M) are the actual source data behind `experiments/real_stripes/` and
+`data/datasets/stripes_colony_2ch/payload.h5`. As of 2026-08-19 they exist ONLY in
+`~/projects/personal/rngrn/3N-stripes-images/preview_png/`, outside every git repository
+(confirmed not version-controlled anywhere). This copy is their first backup. If that
+source directory is ever lost, this is the only remaining copy — do not delete it here
+without confirming a durable copy exists elsewhere first.
 
 The pack doc's own provenance map (`LL/`, `MAIN/`, `C3/`, `C5/` prefixes) maps onto this
 directory as: **all four prefixes → `paper_results/experiments/`** — the source
@@ -99,6 +129,11 @@ regenerates the committed outputs in place.
 - `experiments/claim_wnoise/{run_cells.sh,driver_top.sh,analyze.py}` — needs
   `feature/paper-weight-noise`'s `src/` (`TrainConfig.weight_noise_sigma/weight_noise_seed`
   at `recover.py::_weight_noise_perturb`, not on `main` yet).
+- `scripts/ingest_stripes.py`, `experiments/real_stripes/{run_frames.sh,analyze.py}` — need
+  `feature/real-stripes`'s `src/`; `ingest_stripes.py` additionally needs the raw PNGs at
+  `raw_data/real_stripes_images/` (or the original `3N-stripes-images/preview_png/`) to
+  rebuild `data/datasets/stripes_colony_2ch/payload.h5` from scratch — the payload copied
+  here already is the faster path for re-analysis.
 - `scripts/exp11_robustness_baseline.py` — runs on `main`'s code; regenerates
   `experiments/exp11_robustness_baseline.csv` (~127 systems × 400 draws, slow).
 - All training/experiment launches go through `bash scripts/guarded_run.sh …` (CLAUDE.md §7a).
@@ -150,7 +185,7 @@ None of the source branches are merged anywhere; the owner validates first. This
 only *copies* their tracked artifacts — merging the source branches later will not
 conflict with this directory (all paths here are new under `paper_results/`).
 
-`feature/paper-form-robustness` and `feature/paper-weight-noise` are two further branches
-cut the same day, after `docs/paper-results-pack` was written — they are additional claims
-under investigation, not part of the original six-claim pack. Both also carry the
-`eval/lifted.py` firewall-classification fix.
+`feature/paper-form-robustness`, `feature/paper-weight-noise`, and `feature/real-stripes`
+are three further branches cut the same day, after `docs/paper-results-pack` was written —
+they are additional claims under investigation, not part of the original six-claim pack.
+All three also carry the `eval/lifted.py` firewall-classification fix.

@@ -16,6 +16,7 @@ SOURCES = [
     ("feature/paper-claim5-noise", "4515ea1", ["D-CLAIM5-1"]),
     ("feature/paper-form-robustness", "bfb9474", ["D-FORMCOMP-1"]),
     ("feature/paper-weight-noise", "58445df", ["D-WNOISE-1"]),
+    ("feature/real-stripes", "01b9bbf", ["D-REAL-1"]),
 ]
 
 

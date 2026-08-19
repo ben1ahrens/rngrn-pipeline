@@ -3509,3 +3509,92 @@ are untested; so is any claim about what the redesign arm would do with them.
 
 **Where it lives:** `experiments/redesign_r2/phase1/`, `experiments/redesign_r2/phase1_ablation/`;
 `docs/HANDOFF_redesign_r2.md` §4c; `docs/REDESIGN_rngrn.md` §3.2, §3.3, §4.4, §4.5.
+
+### D-R2-4 — fix A run: `turing` live from step 1 slows the coupling collapse as predicted, but ignition stays at 0/64 (underpowered to resolve)
+
+**Date:** 2026-08-19. **Authorization:** owner-authorized live, same session, to run the fix-A
+confirming ablation registered but not run in `docs/DIAGNOSTICS_r2_ignition.md` §6/§7 (D-R2-1
+diagnosis). **Status:** the coupling-trajectory prediction is CONFIRMED; the ignition question is
+a NULL result that the diagnosis's own power caveat already flagged as uninformative at B=64. No
+objective code was changed — this is an ablation over CLI staging flags only. Fixes B/C/D remain
+owner-pick, untouched.
+
+**Registered prediction, before this run (§6/§7 of the diagnosis):** `--staging-off-frac 0
+--staging-ramp-frac 0.00067` makes `turing` live from step 1 instead of step 376 (zero code
+change — `ramp_frac=0` is rejected by `losses/weighting.py`'s `0 < ramp_frac <= 1` validation).
+Predicted: coupling at step 400 ≥ 10× the staged arm's 0.0015, final coupling > 0.0027. Explicitly
+flagged as **untested for ignition**: "the a0 control ignites only 3/64, so B=64 has little power
+to resolve a small non-zero rate, and a null result there would be uninformative about fix A
+rather than evidence against it" — P(0/64 | p=0.047) ≈ (1−0.047)^64 ≈ **0.046**.
+
+**The run.** `bash scripts/guarded_run.sh .venv/bin/python -u scripts/r2_ignition_run.py --out
+experiments/redesign_r2/fixa_confirm/unstaged --arms r2 --B 64 --steps 1500 --device cpu --backend
+cubic --history-every 100 --staging-off-frac 0.0 --staging-ramp-frac 0.00067`, run verbatim per the
+registered command with only `--out` adapted. Lock acquired immediately (no queue contention),
+wall 1791.9 s (~29.9 min), rc=0.
+`experiments/redesign_r2/fixa_confirm/unstaged/phase1_r2_B64/results/run.json`. Matched invariants
+against the committed `phase1_r2_B64` control (`experiments/redesign_r2/phase1/phase1_r2_B64/config/frozen_config.yaml`):
+same `dataset_id` (`turing_labyrinth`), `sample_key` (`sample_0000`), `model_seed` (0), `B` (64),
+`steps` (1500), `lr` (0.05), `grad_clip` (10.0), `backend` (cubic), `weights` (all 1.0), pin and box
+— seeds are nested-by-construction (`recover._restart_seed(0, r)`), so member identity matches
+too. **Not matched: device.** The registered command specifies `--device cpu`; the committed
+controls (both `r2` and `a0`) ran on CUDA. This is a genuine, unresolved gap (the diagnosis's own
+§7 already named "the CPU/CUDA question is untested") — the comparison below is therefore
+cross-device, not bit-identical-device.
+
+**Result — ignition unchanged.** `n_turing=0, turing_frac=0.0` (`phase1_summary.json`), 3 distinct
+sign structures, **0** non-zero off-diagonal signs — identical in shape to the staged baseline.
+
+| arm | run path | Turing | rate |
+|---|---|---|---|
+| r2 B64, staged (`off_frac=0.25, ramp_frac=0.25`) — **control 1** | `experiments/redesign_r2/phase1/phase1_r2_B64` | 0/64 | 0.0 % |
+| r2 B64, fix A (`off_frac=0, ramp_frac=0.00067`) — **this run** | `experiments/redesign_r2/fixa_confirm/unstaged/phase1_r2_B64` | 0/64 | 0.0 % |
+| a0 B64 (legacy objective) — **control 2** | `experiments/redesign_r2/phase1/phase1_a0_B64` | 3/64 | 4.7 % |
+
+**Result — the coupling trajectory moved exactly as predicted, on magnitude, but never
+reverses.** Reconstructed with the diagnosis's own method (`model._reaction_raw` +
+`torch.func.jacrev` on `hist_params`, validated against the stored final `J`: max rel. err.
+1.03e-07). Written to
+`experiments/redesign_r2/fixa_confirm/unstaged/results/coupling_trajectory.json`.
+
+| step | staged (baseline, §3 of diagnosis) | fix A (this run) | ratio |
+|---|---|---|---|
+| 0 | 0.3897 | 0.3931 | 1.01× (same init, as expected) |
+| 400 | **0.0015** | **0.0200** | **13.3×** (prediction: ≥10×) |
+| 1500 (final) | **0.002680** | **0.003958** | **1.48×** (prediction: >0.0027 — met) |
+
+Both magnitude predictions hold. But the mechanism is only a **slowdown, not a reversal**: in the
+staged run `turing` switching on at step 376 reverses the trajectory (0.0015→0.0058, a 3.94×
+bounce between steps 400–500, §3 point 3 of the diagnosis). In this run, with `turing` live from
+step 1, coupling **decays monotonically for the entire 1500 steps** — 0.393 → 0.112 (step 100) →
+0.052 (step 200) → … → 0.00396 (step 1500), never turning upward. So `turing` being live earlier
+did make the descent shallower (it settles ~1.5× higher than the staged floor), consistent with it
+being an active counterweight throughout — but the decoupled optimum is still where the population
+ends up. This is exactly what D-R2-3 already established analytically: the trivial network is a
+true, unpenalised optimum of this objective, and A only reshapes the path toward it, it does not
+remove it.
+
+**Verdict — do not read this as "fix A fails."** It is an underpowered null. At B=64, a true
+ignition rate anywhere up to a0's 4.7 % is statistically indistinguishable from 0 (P(0/64 | p=0.047)
+≈ 0.046, i.e. roughly a coin flip's worth of ambiguity). The coupling evidence is directionally
+favourable and quantitatively on-target; the ignition evidence at this B cannot confirm or refute
+whether A moves the rate at all. **No claim of sufficiency or insufficiency for fix A is made
+here** — resolving it needs a larger B (the diagnosis's own recommendation: "Anyone running this
+for *ignition rate* rather than coupling should use the largest B affordable"), which was not run
+here (owner did not request it; B=64 was the registered/authorized scale for this confirming run).
+
+**What this does and does not establish.**
+- Does establish: the staging-window mechanism identified in D-R2-3/the diagnosis is real and
+  directionally correctable by a zero-code-change CLI flag — coupling collapse is measurably
+  slower and the floor measurably higher when `turing` is not staged off.
+- Does not establish: that fix A alone is sufficient to ignite the r2 objective at any practical
+  rate. D-R2-3's finding stands unchanged — the decoupled network remains a true optimum, so A
+  changes the optimiser's path, not the landscape (fix B is still the only candidate that changes
+  the landscape).
+- Does not resolve: the CPU/CUDA device gap (this run is CPU; both controls are CUDA), or fixes
+  B/C/D, all of which remain owner-pick and untested.
+- No objective code was changed; no threshold was introduced, weakened, or calibrated.
+
+**Where it lives:** `experiments/redesign_r2/fixa_confirm/unstaged/` (run + summary + coupling
+trajectory, tracked per `.gitignore`'s D-PLOT-1 policy); `docs/DIAGNOSTICS_r2_ignition.md` §6/§7
+(the registered prediction and power caveat this run resolves/leaves open).

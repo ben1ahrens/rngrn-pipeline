@@ -34,16 +34,25 @@ WHAT THIS DOES NOT MEASURE: whether the unrolled gradient is the RIGHT gradient 
 the steady state the adjoint path differentiates. Task 14's A/B against the adjoint is where
 those two are compared.
 
-Run (CPU, ~5 min at the defaults; the guard is not needed — this is not a trainer):
+Run — this is the EXACT invocation that regenerated the tracked JSON, and every default below
+is the value it was produced with. CPU, ~14 min; no guard needed (this is not a trainer):
 
     .venv/bin/python scripts/r3_unrolled_segment.py \
         --out experiments/redesign_r3/unrolled_segment/results/curve.json
+
+The ladder MUST reach 2048, because the reference point every `cosine_to_reference` and
+`rel_norm_gap` is measured against is the longest length in the ladder. A shorter default
+would silently redefine every convergence number against a different reference — which is
+exactly what the committed default did before this was fixed. So: the default ladder ends at
+2048, and the JSON records both the resolved `argv` and an explicit `reference_segment_steps`
+per arm, so a reader never has to infer the reference from the invocation.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import pathlib
+import sys
 import time
 
 import numpy as np
@@ -233,7 +242,10 @@ def main() -> None:
     ap.add_argument("--ndir", type=int, default=6)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--ladder", type=int, nargs="+",
-                    default=[1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024])
+                    default=[1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048],
+                    help="segment lengths to measure. The LONGEST is the reference every "
+                         "convergence number is quoted against, so shortening this ladder "
+                         "changes what those numbers mean; see the module docstring.")
     ap.add_argument("--growth-frac", type=float, default=0.2,
                     help="the growth-phase warm state is the first 5-step chunk whose "
                          "channel-0 amplitude exceeds this fraction of the saturated one")
@@ -306,6 +318,13 @@ def main() -> None:
             "dt_is_held_fixed_across_fd": True,
             "eps_sweep": list(EPS_SWEEP), "fd_tol_D1": FD_TOL,
             "ndir": a.ndir, "seed": a.seed, "ladder": a.ladder,
+            # self-describing provenance: the exact argv this file was produced by, and the
+            # reference segment length every cosine_to_reference / rel_norm_gap is quoted
+            # against. Without the latter a reader has to infer it from the ladder, and a
+            # ladder default that disagreed with the committed run is exactly how that goes
+            # wrong.
+            "argv": list(sys.argv),
+            "reference_segment_steps": max(a.ladder),
             "checkpoint_every_analytic": 1,
             "losses": {"amp": "mean(u_0^2)",
                        "log_band_power": "log sum_{|k|/khat in [%.2f, %.2f]} |FFT(u_0)|^2"

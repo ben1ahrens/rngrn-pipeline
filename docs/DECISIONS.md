@@ -4404,6 +4404,16 @@ the eps sweep {1e-3, 1e-4, 1e-5, 1e-6} and best-eps per direction. Run:
 `experiments/redesign_r3/unrolled_segment/results/curve.json` (method block records
 `dt_is_held_fixed_across_fd: true`).
 
+**A DEVIATION FROM THE SPEC'S PROTOCOL, flagged rather than buried.** `REDESIGN_rngrn.md`
+§4.2's A/B discipline specifies the FD check at **10 directions** x the active loss terms; this
+curve ran at **6**. That is acceptable *for a calibration curve* — its job is the shape of
+error-vs-segment-length across 12 lengths x 2 arms x 2 functionals, where direction count trades
+against ladder coverage, and the measured spread is five orders of magnitude below tolerance so
+four more directions would not move the recommendation. It is **not** acceptable as the gate:
+`docs/PLAN_redesign_R3.md` Task 14's FD-faithfulness A/B against the adjoint runs at the
+spec's full **10 directions**, at the operating point, on both paths at the same theta. Do not
+cite this curve as having discharged that gate.
+
 **Calibration.** Nothing is calibrated by this entry; it fixes a measurement protocol. The
 1e-4 tolerance is D1's, inherited unchanged, not re-derived here.
 

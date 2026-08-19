@@ -26,8 +26,10 @@ TRUNCATED, and this is the whole design:
 * those steps run under **gradient checkpointing** (`checkpoint_every`), so retained
   activation memory is set by the number of block boundaries rather than by the step count.
   MEASURED at n=32, N=3, float64 (`tests/test_unrolled_grad.py`): 24,576 B/step retained at
-  `checkpoint_every=1` — exactly one field — against 753 kB/step un-checkpointed, a 30x
-  reduction, and 0 B/step for the warm-up at any length.
+  `checkpoint_every=1` — exactly one field — against 773,184 B/step un-checkpointed, a
+  **31.5x** reduction, and 0 B/step for the warm-up at any length. Those are MARGINAL bytes
+  per differentiated step, taken between two segment lengths; the raw TOTALS differ by only
+  1.35x at 6 steps, because the constant in the next paragraph dominates them both.
 
 A COST THIS PATH CARRIES, stated plainly: making the ETDRK4 coefficients differentiable in D
 retains the contour-integral graph (M=32 complex128 tensors of shape (N, n, n/2+1)), which

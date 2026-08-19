@@ -218,6 +218,40 @@ def test_activation_memory_grows_linearly_in_segment_length(setup):
         f"retained bytes are not linear in segment length: increments {d1}, {d2} from {b}")
 
 
+def test_checkpointing_actually_saves_activation_memory(setup):
+    """A tripwire on the MECHANISM: if `checkpoint_every` silently stopped checkpointing, the
+    three tests above would all still pass — retained bytes would remain warm-up-independent
+    and linear in the segment, just ~31x larger per step.
+
+    Asserted on MARGINAL bytes per differentiated step, taken from two segment lengths, NOT on
+    the totals. The segment-INDEPENDENT coefficient graph (12.59 MB at n=32, the contour
+    integral retained by making the ETDRK4 coefficients differentiable in D) dominates both
+    totals, so at S=6 they differ by only 1.35x — a floor asserted on totals would either be
+    unmeetable or would pass with checkpointing switched off.
+
+    MEASURED at n=32, N=3, float64: 773,184 B/step un-checkpointed against 24,576 B/step at
+    `checkpoint_every=1` — exactly one (1, 3, 32, 32) float64 field — a **31.5x** saving.
+    Asserted at >5x, well below the measured value, because the exact ratio is an artefact of
+    ETDRK4's four reaction evaluations per step and would move if the scheme did; the property
+    being guarded is that checkpointing is ON, not that it saves precisely 31.5x.
+    """
+    model, X0, n, L, dt = setup
+
+    def marginal(every):
+        b2 = _retained_bytes(model, X0, n, L, dt, segment_steps=2, checkpoint_every=every)
+        b6 = _retained_bytes(model, X0, n, L, dt, segment_steps=6, checkpoint_every=every)
+        return (b6 - b2) / 4.0
+
+    ckpt, plain = marginal(1), marginal(None)
+    assert ckpt > 0 and plain > 0, f"degenerate marginals: ckpt {ckpt}, plain {plain}"
+    saving = plain / ckpt
+    assert saving > 5.0, (
+        f"gradient checkpointing saved only {saving:.2f}x per differentiated step "
+        f"({plain:.0f} B/step plain vs {ckpt:.0f} B/step at checkpoint_every=1; 31.5x "
+        f"measured) — checkpointing looks disabled, and the segment length is then a "
+        f"memory knob ~31x coarser than §4.2 assumes")
+
+
 # --------------------------------------------------------------------------------------
 # fail loud
 # --------------------------------------------------------------------------------------

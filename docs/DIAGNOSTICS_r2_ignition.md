@@ -9,11 +9,20 @@ objective is register-item class and goes to the owner via the controller.
 > ignition objective, which is R3/R4 business.
 
 **Everything below is re-derivable by `.venv/bin/python scripts/r2_ignition_diag.py`**, which
-trains nothing: it reads the tracked `arrays/plot_arrays.npz` of runs that already exist and
-evaluates gradient probes at the r2 arm's own initialisation, rebuilt from the tracked
-`config/frozen_config.yaml`. Its output is
-`experiments/redesign_r2/ignition_diag/results/diagnosis.json`, and every number in this file
-comes from there.
+trains nothing: it reads the tracked `arrays/plot_arrays.npz` and `results/run.json` of runs
+that already exist, and evaluates gradient probes at the r2 arm's own initialisation, rebuilt
+from the tracked `config/frozen_config.yaml`. Its output is
+`experiments/redesign_r2/ignition_diag/results/diagnosis.json`.
+
+Which block emits what: **§1 → `step1_reproduction`, §3 → `step3_coupling_trajectory`,
+§4 → `step4_term_gradients`**, and the supporting numbers quoted elsewhere — the §3a
+β/binding-budget table, σ_max, the `w_turing` column, `L_kstar_si`, ‖J‖_F, `kstar_fft_rel_err`
+(which lives in `results/run.json`, not the npz) and the a0 coincidence check —
+**→ `step5_supporting`**. The staging schedule there is derived by calling
+`rngrn.losses.weighting.staging_factor`, not asserted. *(An earlier revision of this paragraph
+and of the script's docstring claimed the script covered every number when it covered only
+Steps 1/3/4; `step5_supporting` was added so the claim is true rather than nearly true. A
+docstring must not claim more than its code does.)*
 
 ---
 
@@ -22,14 +31,17 @@ comes from there.
 The population does **not** start decoupled — it starts at coupling median **0.390**, which is
 in the same range as the a0 control's final **0.582**. It is *driven* there, and **93.4 % of the
 collapse happens before the `turing` term is ever switched on.** The `DataFirstStaging`
-schedule inherited from D5 holds `turing` at weight 0 for steps 0–374. Inside that window the
+schedule inherited from D5 holds `turing` at weight **0 for steps 0–375** (first non-zero at
+step 376, full at 750). Inside that window the
 only term with any appreciable gradient on cross-regulation is **`beta_hinge`, which pushes the
 off-diagonal binding budget DOWN for 100 % of 512 members**, and the only term opposing it,
-`kstar_si`, is **315× too weak** to resist. By the time `turing` ramps in, coupling has fallen
+`kstar_si`, is **314.9× too weak** to resist. By the time `turing` ramps in, coupling has fallen
 **264×** and the population sits on the analytically-derivable decoupled optimum (β = δ·x\*,
-matched to 0.15 %). `turing` then does push coupling back up — by 3.94× — but from that
-basin it never recovers: σ_max ends at **−0.031**, never crossing zero, and every one of the
-512 members ends with **literally zero non-zero off-diagonal signs**.
+matched to **0.17 %**). `turing` then does push coupling back up — by 3.94× — but from that
+basin it never recovers: the **population-median** σ_max ends at **−0.031** and stays below zero
+at every recorded step, and every one of the 512 members ends with **literally zero non-zero
+off-diagonal signs**. (Two of the 512 members do end marginally positive, max **+0.0087**,
+without meeting the ignition criterion — see §5.)
 
 **So this is an objective-gradient story, not a parameterization story** — and the specific
 defect is an *interaction* between the staging schedule and `beta_hinge` that T16 did not have
@@ -147,8 +159,9 @@ recorded in the same file:
 | 1500 | 1.000 | **0.0027** | 0.0018 | 0.0145 |
 
 **Read this against the staging schedule, which is the whole point.** `off_frac=0.25,
-ramp_frac=0.25` over 1500 steps means `turing` has weight **exactly 0 for steps 0–374** and
-ramps to full only at step 750.
+ramp_frac=0.25` over 1500 steps means `turing` has weight **exactly 0 for steps 0–375**, first
+becomes non-zero at **step 376**, and reaches full weight at **step 750**. (Fenceposts taken
+from `weighting.staging_factor` itself, via `step5_supporting.staging_schedule`.)
 
 1. **It is GO, not START.** Members begin at 0.390 — the same order as the a0 control's final
    0.582. They are not born decoupled.
@@ -199,6 +212,12 @@ term **shrinks** coupling.
 | `param_prior` | 5.274e+01 | **0.000e+00** | 0.000e+00 (none) | 0.0 % |
 | `beta_hinge` | 8.893e+00 | 3.832e+00 | **−3.102e-02** (DOWN) | **100.0 %** |
 
+> **Read the last column carefully — it is `frac_members_pushed_down`, the fraction whose
+> coupling the term SHRINKS.** So `kstar_si`'s 18.8 % means it pushes coupling *up* for the
+> other **81.25 %**. An earlier revision of §4 point 3 and of fix D's rationale inverted this;
+> both are corrected below. `param_prior`'s 0.0 % means **neither direction** — its gradient on
+> these parameters is identically zero, not "up for 100 %".
+
 **Five things follow, and together they are the diagnosis.**
 
 1. **`beta_hinge` is the decoupling driver.** It pushes the off-diagonal binding budget down for
@@ -213,7 +232,10 @@ term **shrinks** coupling.
 3. **`kstar_si` is the only counterweight active during staging, and it is negligible** — **77.2×**
    below `turing` in total gradient norm and **194.0×** below it on the off-diagonal coupling
    specifically, while its coupling push is **314.9× weaker** than `beta_hinge`'s
-   pull (9.85e-05 vs 3.10e-02). It also pushes *up* for only 18.8 % of members. The brief's
+   pull (9.85e-05 vs 3.10e-02). Its *direction* is nonetheless favourable: it pushes coupling
+   **UP for 81.25 % of members** (down for 18.75 % — the `frac_members_pushed_down` column of
+   the table above, which an earlier revision of this sentence read backwards). So `kstar_si`
+   fails here purely on **magnitude**, not on sign. The brief's
    Step-4 hypothesis ("if `kstar_si` is orders down, that is the answer") is **confirmed on the
    magnitude**, with the refinement that the term it loses to is `beta_hinge`, not `param_prior`.
    Corroborated by the run itself: `L_kstar_si` moves **0.08085 → 0.07911 across all 1500
@@ -244,15 +266,18 @@ did not test one. See fix D below.
 ## 5. The mechanism, end to end
 
 1. `DataFirstStaging(off_frac=0.25, ramp_frac=0.25)` holds `turing` at weight **0 for steps
-   0–374** — a schedule inherited unexamined from D5's frozen config.
+   0–375** (first non-zero at 376, full at 750) — a schedule inherited unexamined from D5's
+   frozen config.
 2. In that window `beta_hinge` carries **99.32 %** of the gradient on off-diagonal coupling and
    pushes it **down for 100 % of members**; `param_prior` contributes exactly nothing to it; and
    `kstar_si`, the only opposing term, is **315× too weak**.
 3. Coupling falls **0.3897 → 0.0015 (264×)** and the binding budget **9.4×**, monotonically. β
    lands on the analytic decoupled optimum `δ·x*` to **0.17 %**, which satisfies the pinned fixed
    point exactly and clears the β hinge at zero cost.
-4. `turing` ramps in from step 375 and reverses the direction — coupling recovers ~**4×** — but
-   from a 264× hole. σ_max rises to **−0.031** and never crosses zero.
+4. `turing` ramps in from step 376 and reverses the direction — coupling recovers **3.94×** — but
+   from a 264× hole. The population-median σ_max rises only to **−0.031**, staying below zero at
+   every recorded step; 2 of 512 members end marginally positive (max **+0.0087**) without
+   meeting the ignition criterion (σ(0) < 0 **and** `sig_max_pos` > 1e-3).
 5. Result: **0/512 Turing, zero non-zero off-diagonal signs, 3 "distinct" (diagonal-only)
    structures**, against a matched a0 control at 4.7–8.6 %.
 
@@ -273,8 +298,15 @@ pushes coupling up, and it is disabled exactly when needed. There is also a *des
 independent of the measurement: `DataFirstStaging` means "fit the data before demanding
 instability", but the r2 objective's **only** data-facing term is `kstar_si`, which moves 2.1 %
 across the entire run. The staging window is therefore not "data-first" in any meaningful
-sense — it is `beta_hinge` and `param_prior` running unopposed for 375 steps. Needs **no code
-change**: `--staging-off-frac 0 --staging-ramp-frac 0` already exists.
+sense — it is `beta_hinge` and `param_prior` running unopposed for 376 steps. Needs **no code
+change**, but **not** via `--staging-ramp-frac 0`: `losses/weighting.py:150-151` validates
+`0 < ramp_frac <= 1` and `r2_ignition_run.py:257-258` builds `DataFirstStaging`
+unconditionally, so `ramp_frac=0` raises `ValueError` at construction. *(An earlier revision
+registered exactly that command; it would have crashed. Corrected here and in §7.)* The
+zero-code-change form is **`--staging-off-frac 0 --staging-ramp-frac 0.00067`**, which gives
+`turing` weight 0.0 at step 0, 0.995 at step 1 and 1.0 from step 2 — i.e. live from step 1
+rather than step 376. (No `ramp_frac` can make it live *at* step 0: with `off_frac=0` the factor
+is `(step−off)/(ramp·total)`, which is 0 at `step=0` for any ramp.)
 *Caveat:* this predicts improvement; the prediction was **registered but NOT TESTED** — see §7.
 
 **B. Add a term that requires coupling (most robust; a genuinely new objective term).**
@@ -295,11 +327,22 @@ interacts with T12/T13's pinned-model design.
 
 **D. Calibrate `kstar_si`'s `temp` / `eps` (owed regardless).** Spec §4.4 assigned this sweep to
 R2 and it did not happen; the knobs are UNCALIBRATED today. The measurements make it a live
-candidate — the term is 77–315× too weak (§4). **But rank it below A–C for this defect**: even at
-parity with `turing` it pushes coupling up for only 18.8 % of members, so it is a weak lever on
-coupling specifically. It should be calibrated because it is owed and because DP2 of T16 notes
-it must be calibrated *jointly with* `param_prior`, not because it is likely to be the ignition
-fix on its own.
+candidate — the term is 77–315× too weak (§4).
+
+> **Ranking rationale corrected.** An earlier revision ranked D below A–C on the grounds that
+> `kstar_si` "pushes coupling up for only 18.8 % of members". **That read the sign backwards** —
+> it pushes coupling **UP for 81.25 %**, i.e. its direction is *favourable*, the same direction
+> `turing` pushes. The honest ranking argument is therefore **magnitude alone**: `kstar_si` is
+> 314.9× below `beta_hinge`'s coupling pull and 194.0× below `turing`'s push on the same
+> parameters, so closing that gap by tuning `temp`/`eps` would require roughly two to three
+> orders of magnitude of gradient, and **nothing measured here establishes that any admissible
+> `temp`/`eps` delivers it.** D stays below A–C on that basis and no other. Note this makes D
+> *more* attractive than the original text implied — a directionally-correct term that is merely
+> too weak is a better repair candidate than one pushing the wrong way — which is precisely why
+> the erroneous reason had to be replaced rather than quietly dropped.
+
+It should also be calibrated because it is owed, and because DP2 of T16 notes it must be
+calibrated *jointly with* `param_prior`.
 
 **E. Fix the box re-centring of the `default` init (separate defect, still open).** α 7.578×,
 δ 3.885×. **Not** the ignition cause (`r2_nobox` is also 0/64), but no boxed number is
@@ -324,12 +367,23 @@ comparable to a legacy one until it is resolved. This is D-R2-1 as T16 originall
   bash scripts/guarded_run.sh .venv/bin/python -u scripts/r2_ignition_run.py \
     --out experiments/redesign_r2/ignition_diag/staged --arms r2 --B 64 --steps 1500 \
     --device cpu --backend cubic --history-every 100
-  # the mechanism test: `turing` live from step 0 (needs NO code change)
+  # the mechanism test: `turing` live from step 1 (needs NO code change)
   bash scripts/guarded_run.sh .venv/bin/python -u scripts/r2_ignition_run.py \
     --out experiments/redesign_r2/ignition_diag/unstaged --arms r2 --B 64 --steps 1500 \
     --device cpu --backend cubic --history-every 100 \
-    --staging-off-frac 0.0 --staging-ramp-frac 0.0
+    --staging-off-frac 0.0 --staging-ramp-frac 0.00067
   ```
+
+  **Correction, recorded rather than silently patched.** This command was first registered with
+  `--staging-ramp-frac 0.0`, which **crashes**: `losses/weighting.py:150-151` requires
+  `0 < ramp_frac <= 1` and `r2_ignition_run.py:257-258` constructs `DataFirstStaging`
+  unconditionally, so it raises `ValueError` before a single step runs. `0.00067` is the
+  smallest clean value preserving the **zero-code-change** property: `turing` weight is 0.0 at
+  step 0, 0.995 at step 1, 1.0 from step 2 (verified against `staging_factor` itself and
+  recorded in `step5_supporting.staging_schedule.turing_live_alternative`). Making `turing` live
+  *at* step 0 is impossible through the flags — with `off_frac=0` the factor is
+  `(step−off)/(ramp·total)`, which is 0 at step 0 for any ramp — and would require relaxing the
+  staging validation, i.e. a code change.
 
   **Registered prediction, written before any result exists:** the unstaged arm's coupling
   median at step 400 will be at least 10× above the staged arm's 0.0015, and its final coupling
@@ -340,6 +394,15 @@ comparable to a legacy one until it is resolved. This is D-R2-1 as T16 originall
 - **No claim that fix A alone is sufficient.** The decoupled network remains a true optimum of
   the objective (T16's D-R2-3). A changes the optimiser's path, not the landscape. B is the only
   candidate that changes the landscape.
+- **The 99.32 % gradient share is a STEP-0 probe, not a per-step measurement.** §4's gradient
+  decomposition is evaluated once, at the r2 initialisation. Its generalisation to the whole
+  staging window rests on the monotone coupling trajectory of §3, not on re-measuring the share
+  at each step — which was not done. The share almost certainly drifts as the parameters move;
+  the claim it supports is the *direction and dominance at the start of the window*, which is
+  where the collapse demonstrably begins.
+- **`launch.log` records only the staged arm's launch line.** The unstaged arm never reached its
+  own log line because the pair was killed while the first `guarded_run` was still queued, so the
+  file shows one `### STAGED` header and the kill note — not two headers.
 - **The `a0` control has no trajectory.** T16 recorded no parameter trace for either a0 cell, so
   the coupling *trajectory* comparisons in §3 have **no matched control** — only the a0
   endpoint (0.582) is available. Re-running a0 with telemetry is expensive for the known reason
@@ -355,7 +418,8 @@ comparable to a legacy one until it is resolved. This is D-R2-1 as T16 originall
   arm including D5, as T16 §DP2(b) established. Only `r2_noprior`'s 0.0332 is a real k\*.
 - **Nothing here is a statement about the legacy line.** "Turing-unstable" and "patterns" remain
   different claims, and this document establishes neither for the r2 arm — it establishes that
-  the arm does not even reach Turing-instability (σ_max ends at −0.031).
+  the arm does not even reach Turing-instability (population-median σ_max ends at −0.031, with
+  2 of 512 members marginally positive but failing the ignition criterion).
 - **No threshold was introduced, weakened, or calibrated by this task.** The coupling metric is
   T16's, reused unchanged so the numbers stay comparable; no pass condition is attached to it.
 

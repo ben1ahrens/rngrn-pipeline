@@ -13,7 +13,9 @@ is therefore not a payload-reading script and needs no entry in
 run constants; that module is on FORBIDDEN, but importing it opens nothing -- the payload read
 lives inside its `main()`.)
 
-THREE MEASUREMENTS, matching the task brief's Steps 1, 3 and 4:
+FOUR MEASUREMENT BLOCKS. The first three match the task brief's Steps 1, 3 and 4; the fourth
+exists so that EVERY number in `docs/DIAGNOSTICS_r2_ignition.md` is emitted by this script,
+which an earlier revision's docstring claimed but did not deliver:
 
   step1  Reproduce the headline outcomes from each run's own arrays: ignition counts, distinct
          sign structures, the final coupling median, and the box's re-centring of the default
@@ -28,6 +30,14 @@ THREE MEASUREMENTS, matching the task brief's Steps 1, 3 and 4:
   step4  Per-term gradient magnitudes and SIGNS at the r2 init, decomposed onto the parameters
          that actually carry cross-regulation (`theta_s`, `theta_g`) and further onto the
          off-diagonal of the binding budget. This is what identifies the term responsible.
+         NOTE the sign convention: `frac_members_pushed_down` counts members whose coupling the
+         term SHRINKS. `kstar_si`'s 0.1875 therefore means it pushes coupling UP for 81.25 % of
+         members -- a reviewer caught the doc reading this column backwards.
+
+  step5  The supporting numbers the doc quotes outside steps 1/3/4: the staging schedule (read
+         from `weighting.staging_factor`, not asserted), the beta/binding-budget table, sigma_max,
+         `w_turing`, `L_kstar_si`, ||J||_F, `kstar_fft_rel_err` (which lives in `results/run.json`,
+         not the npz), and the a0 median coincidence check.
 
 Usage:  .venv/bin/python scripts/r2_ignition_diag.py [--out DIR]
 """
@@ -246,6 +256,140 @@ def step4(box, seeds):
     return out
 
 
+# ---------------------------------------------------------------------------------------
+# step 5 -- the SUPPORTING numbers the doc quotes outside steps 1/3/4
+# ---------------------------------------------------------------------------------------
+def step5_supporting():
+    """Everything the doc cites that steps 1/3/4 do not already emit.
+
+    Added after a review found this file's docstring claimed more than the code did: the doc
+    quoted the beta/binding-budget table, sigma_max, w_turing, L_kstar_si, ||J||_F and
+    kstar_fft_rel_err, none of which reached `diagnosis.json`. All are read here from the same
+    tracked runs, so the provenance claim at the top of this file is now true rather than
+    nearly true.
+    """
+    from rngrn.losses.weighting import staging_factor
+
+    out = {}
+
+    # -- the staging schedule, taken from the SOURCE rather than from arithmetic in the doc
+    off_f, ramp_f, tot = 0.25, 0.25, STEPS
+    facs = [staging_factor(s, tot, off_f, ramp_f) for s in range(tot + 1)]
+    out["staging_schedule"] = dict(
+        off_frac=off_f, ramp_frac=ramp_f, total_steps=tot,
+        source="rngrn.losses.weighting.staging_factor",
+        last_zero_weight_step=max(s for s, f in enumerate(facs) if f == 0.0),
+        first_nonzero_weight_step=min(s for s, f in enumerate(facs) if f > 0.0),
+        first_full_weight_step=min(s for s, f in enumerate(facs) if f >= 1.0),
+    )
+    # `ramp_frac=0` is REFUSED by the same function. Recorded because the doc registers a
+    # follow-up command that must therefore not use it (validation is `0 < ramp_frac <= 1`).
+    try:
+        staging_factor(0, tot, 0.0, 0.0)
+        out["staging_schedule"]["ramp_frac_zero_rejected"] = False
+    except ValueError as e:
+        out["staging_schedule"]["ramp_frac_zero_rejected"] = True
+        out["staging_schedule"]["ramp_frac_zero_error"] = str(e)
+    rf = 0.00067
+    out["staging_schedule"]["turing_live_alternative"] = dict(
+        ramp_frac=rf, off_frac=0.0,
+        factor_by_step={str(s): staging_factor(s, tot, 0.0, rf) for s in range(4)},
+        note="step 0 is 0.0 for ANY ramp_frac when off_frac=0, since the factor is "
+             "(step-off)/(ramp*total); this is turing-live-from-step-1, not step-0")
+
+    # -- the r2 arm's scalar trajectories (w_turing, L_kstar_si, sig_max, d_ratio)
+    z = _load(ARMS["r2_B512"])
+    names, S, HS = list(z["hist_scalar_names"]), z["hist_scalars"], z["hist_step"]
+
+    def col(i, k):
+        return S[i, :, names.index(k)]
+
+    out["r2_B512_scalars"] = dict(
+        run_path=ARMS["r2_B512"],
+        by_step=[dict(step=int(s),
+                      w_turing=float(np.nanmedian(col(i, "w_turing"))),
+                      L_kstar_si=float(np.nanmedian(col(i, "L_kstar_si"))),
+                      L_turing=float(np.nanmedian(col(i, "L_turing"))),
+                      d_ratio=float(np.nanmedian(col(i, "d_ratio"))),
+                      sig_max_median=float(np.nanmedian(col(i, "sig_max"))),
+                      sig_max_max_member=float(np.nanmax(col(i, "sig_max"))))
+                 for i, s in enumerate(HS)],
+        L_kstar_si_first=float(np.nanmedian(col(0, "L_kstar_si"))),
+        L_kstar_si_last=float(np.nanmedian(col(len(HS) - 1, "L_kstar_si"))),
+    )
+
+    # sigma_max is a POPULATION MEDIAN in the doc. A few members end marginally positive
+    # without meeting the ignition criterion (sig0 < 0 AND sig_max_pos > 1e-3), so the
+    # per-member maximum and the positive count are recorded alongside the median.
+    sm = col(len(HS) - 1, "sig_max")
+    out["r2_B512_scalars"]["sig_max_final"] = dict(
+        median=float(np.nanmedian(sm)), max_member=float(np.nanmax(sm)),
+        n_members_positive=int((sm > 0).sum()), B=int(sm.shape[0]),
+        median_below_zero_at_every_recorded_step=bool(
+            all(np.nanmedian(col(i, "sig_max")) < 0 for i in range(len(HS)))),
+        note="ignition needs sig0 < 0 AND sig_max_pos > 1e-3 (r2_ignition_run._ignited); a "
+             "positive sig_max alone is NOT ignition, and the final Turing verdict is "
+             "eval.analysis.turing_ok on its own k-grid, not this column",
+    )
+
+    # -- the beta / binding-budget table (doc section 3a)
+    P, pn = z["hist_params"], list(z["hist_param_names"])
+
+    def pc(i, k):
+        return P[i, :, pn.index(k)].astype(np.float64)
+
+    xp = np.array(XPIN)
+    rows = []
+    for i, s in enumerate(HS):
+        soff = float(np.median([np.median(np.abs(pc(i, f"KA[{r},{c}]") + pc(i, f"KR[{r},{c}]")))
+                                for r in range(N) for c in range(N) if r != c]))
+        sdia = float(np.median([np.median(np.abs(pc(i, f"KA[{r},{r}]") + pc(i, f"KR[{r},{r}]")))
+                                for r in range(N)]))
+        row = dict(step=int(s), s_offdiag_median=soff, s_diag_median=sdia)
+        for sp in range(N):
+            b, dx = pc(i, f"beta[{sp}]"), pc(i, f"delta[{sp}]") * xp[sp]
+            row[f"beta_rel_dev_from_delta_xstar[{sp}]"] = float(
+                np.median(np.abs(b - dx) / np.abs(dx)))
+        rows.append(row)
+    out["r2_B512_beta_and_binding_budget"] = dict(run_path=ARMS["r2_B512"], by_step=rows)
+
+    # -- ||J||_F, for the doc's `anticollapse` argument (its floor is 1.0, so it is inactive)
+    Jf = np.linalg.norm(z["J"].reshape(-1, N * N), axis=1)
+    out["r2_B512_jacobian_frobenius"] = dict(
+        run_path=ARMS["r2_B512"], median=float(np.median(Jf)), anticollapse_jac_floor=1.0,
+        note="floor 1.0 vs the measured median -> the anticollapse hinge is inactive; what "
+             "collapses is the OFF-DIAGONAL, not the norm")
+
+    # -- kstar_fft_rel_err, which lives in results/run.json, NOT in the npz
+    kf = {}
+    for tag, path in ARMS.items():
+        rj = os.path.join(path, "results", "run.json")
+        if not os.path.isfile(rj):
+            continue
+        with open(rj) as fh:
+            d = json.load(fh)
+        kf[tag] = dict(run_path=rj, median=d.get("kstar_fft_rel_err_median"),
+                       mean=d.get("kstar_fft_rel_err_mean"), kstar_fft=d.get("kstar_fft"))
+    out["kstar_fft_rel_err"] = dict(
+        by_arm=kf,
+        note="0.9769 is the k-GRID FLOOR constant |k_min - k*_fft|/k*_fft, appearing in every "
+             "arm including D5 (T16 DP2b). NOT a wavenumber measurement. Only r2_noprior's "
+             "0.0332 is a real k*.")
+
+    # -- the a0 six-digit coincidence, checked because it looks like a copy error
+    a, b = _load(ARMS["a0_B64"]), _load(ARMS["a0_B128"])
+    n64 = len(a["seeds"])
+    out["a0_median_coincidence"] = dict(
+        seeds_nested=bool((a["seeds"] == b["seeds"][:n64]).all()),
+        first64_J_max_abs_diff=float(np.abs(a["J"] - b["J"][:n64]).max()),
+        coupling_median_B64=float(np.median(_coupling(torch.tensor(a["J"])))),
+        coupling_median_B128=float(np.median(_coupling(torch.tensor(b["J"])))),
+        note="identical to 6 dp is a real coincidence, not a copy error: the rungs are nested, "
+             "the shared members' final Jacobians are bit-identical, and the 128-member median "
+             "straddles the same middle pair as the 64-member one")
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", default=f"{ROOT}/ignition_diag")
@@ -261,11 +405,14 @@ def main(argv=None):
             frozen_config_source=f"{ROOT}/phase1/phase1_r2_B512/config/frozen_config.yaml",
             kstar_obs=KSTAR_OBS, pin_xstar=XPIN, model_seed=MODEL_SEED,
             probe_B=args.B, lr=LR, steps=STEPS, device="cpu",
-            staging="off_frac=0.25, ramp_frac=0.25 -> `turing` weight is 0 for steps 0-374",
+            staging="off_frac=0.25, ramp_frac=0.25 -> `turing` weight is 0 for steps 0-375, "
+                    "first non-zero at step 376, full at step 750 (see step5.staging_schedule, "
+                    "which derives these from weighting.staging_factor rather than asserting)",
         ),
         step1_reproduction=step1(box, seeds),
         step3_coupling_trajectory=step3(),
         step4_term_gradients=step4(box, seeds),
+        step5_supporting=step5_supporting(),
     )
 
     dest = os.path.join(args.out, "results")

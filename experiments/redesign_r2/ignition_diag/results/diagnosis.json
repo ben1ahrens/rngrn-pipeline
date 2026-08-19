@@ -11,7 +11,7 @@
       0.3504568664953922
     ],
     "probe_B": 512,
-    "staging": "off_frac=0.25, ramp_frac=0.25 -> `turing` weight is 0 for steps 0-374",
+    "staging": "off_frac=0.25, ramp_frac=0.25 -> `turing` weight is 0 for steps 0-375, first non-zero at step 376, full at step 750 (see step5.staging_schedule, which derives these from weighting.staging_factor rather than asserting)",
     "steps": 1500,
     "what": "D-R2-1 diagnosis; read-only re-analysis of tracked runs plus gradient probes"
   },
@@ -529,6 +529,405 @@
       "grad_norm_total": 20.733810045933733,
       "mean_descent_on_s_offdiag": 0.04707095649320757,
       "term_value_mean": 1.118751090624867
+    }
+  },
+  "step5_supporting": {
+    "a0_median_coincidence": {
+      "coupling_median_B128": 0.5822090145613004,
+      "coupling_median_B64": 0.5822090145613004,
+      "first64_J_max_abs_diff": 0.0,
+      "note": "identical to 6 dp is a real coincidence, not a copy error: the rungs are nested, the shared members' final Jacobians are bit-identical, and the 128-member median straddles the same middle pair as the 64-member one",
+      "seeds_nested": true
+    },
+    "kstar_fft_rel_err": {
+      "by_arm": {
+        "a0_B128": {
+          "kstar_fft": 0.28867729226361033,
+          "mean": 0.8960829178340728,
+          "median": 0.976868414336446,
+          "run_path": "experiments/redesign_r2/phase1/phase1_a0_B128/results/run.json"
+        },
+        "a0_B64": {
+          "kstar_fft": 0.28867729226361033,
+          "mean": 0.9320217128560412,
+          "median": 0.976868414336446,
+          "run_path": "experiments/redesign_r2/phase1/phase1_a0_B64/results/run.json"
+        },
+        "r2_B128": {
+          "kstar_fft": 0.28867729226361033,
+          "mean": 0.9768684143364458,
+          "median": 0.976868414336446,
+          "run_path": "experiments/redesign_r2/phase1/phase1_r2_B128/results/run.json"
+        },
+        "r2_B256": {
+          "kstar_fft": 0.28867729226361033,
+          "mean": 0.9768684143364458,
+          "median": 0.976868414336446,
+          "run_path": "experiments/redesign_r2/phase1/phase1_r2_B256/results/run.json"
+        },
+        "r2_B512": {
+          "kstar_fft": 0.28867729226361033,
+          "mean": 0.9768684143364458,
+          "median": 0.976868414336446,
+          "run_path": "experiments/redesign_r2/phase1/phase1_r2_B512/results/run.json"
+        },
+        "r2_B64": {
+          "kstar_fft": 0.28867729226361033,
+          "mean": 0.9768684143364459,
+          "median": 0.976868414336446,
+          "run_path": "experiments/redesign_r2/phase1/phase1_r2_B64/results/run.json"
+        },
+        "r2_nobox_B64": {
+          "kstar_fft": 0.28867729226361033,
+          "mean": 0.9768684143364459,
+          "median": 0.976868414336446,
+          "run_path": "experiments/redesign_r2/phase1_ablation/phase1_r2_nobox_B64/results/run.json"
+        },
+        "r2_noprior_B64": {
+          "kstar_fft": 0.28867729226361033,
+          "mean": 0.4547081911653701,
+          "median": 0.03324466811861473,
+          "run_path": "experiments/redesign_r2/phase1_ablation/phase1_r2_noprior_B64/results/run.json"
+        }
+      },
+      "note": "0.9769 is the k-GRID FLOOR constant |k_min - k*_fft|/k*_fft, appearing in every arm including D5 (T16 DP2b). NOT a wavenumber measurement. Only r2_noprior's 0.0332 is a real k*."
+    },
+    "r2_B512_beta_and_binding_budget": {
+      "by_step": [
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.5008499637075178,
+          "beta_rel_dev_from_delta_xstar[1]": 0.27948361381220277,
+          "beta_rel_dev_from_delta_xstar[2]": 0.6158993438438433,
+          "s_diag_median": 0.30932939052581787,
+          "s_offdiag_median": 0.3182395454496145,
+          "step": 0
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.009473979384921064,
+          "beta_rel_dev_from_delta_xstar[1]": 0.007553957367486529,
+          "beta_rel_dev_from_delta_xstar[2]": 0.01038337220539164,
+          "s_diag_median": 0.07237601419910789,
+          "s_offdiag_median": 0.06751086050644517,
+          "step": 100
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.004107944897310949,
+          "beta_rel_dev_from_delta_xstar[1]": 0.003229880015997466,
+          "beta_rel_dev_from_delta_xstar[2]": 0.004491733186580968,
+          "s_diag_median": 0.0552925793454051,
+          "s_offdiag_median": 0.04811153269838542,
+          "step": 200
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.002414809278091812,
+          "beta_rel_dev_from_delta_xstar[1]": 0.001858126231146783,
+          "beta_rel_dev_from_delta_xstar[2]": 0.0026137395447319123,
+          "s_diag_median": 0.04497889638878405,
+          "s_offdiag_median": 0.03898416706942953,
+          "step": 300
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.0016771654597480057,
+          "beta_rel_dev_from_delta_xstar[1]": 0.0013980818664282232,
+          "beta_rel_dev_from_delta_xstar[2]": 0.0017780308940797927,
+          "s_diag_median": 0.03855620988178998,
+          "s_offdiag_median": 0.03356149452156387,
+          "step": 400
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.0013615314761694945,
+          "beta_rel_dev_from_delta_xstar[1]": 0.6137157614486983,
+          "beta_rel_dev_from_delta_xstar[2]": 0.0014155188701402157,
+          "s_diag_median": 0.03596767853014171,
+          "s_offdiag_median": 0.028702030365820974,
+          "step": 500
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.0010657988352277133,
+          "beta_rel_dev_from_delta_xstar[1]": 0.6438014670041723,
+          "beta_rel_dev_from_delta_xstar[2]": 0.0011058143464024387,
+          "s_diag_median": 0.031560052040731534,
+          "s_offdiag_median": 0.025098625279497355,
+          "step": 600
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.0008655617567051843,
+          "beta_rel_dev_from_delta_xstar[1]": 0.6460992860702452,
+          "beta_rel_dev_from_delta_xstar[2]": 0.000896438166049282,
+          "s_diag_median": 0.02837111911503598,
+          "s_offdiag_median": 0.022630076651694253,
+          "step": 700
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.0007163222242351237,
+          "beta_rel_dev_from_delta_xstar[1]": 0.6465087981659665,
+          "beta_rel_dev_from_delta_xstar[2]": 0.000742443110034676,
+          "s_diag_median": 0.025951267802156508,
+          "s_offdiag_median": 0.02041430165991187,
+          "step": 800
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.0006036764721190618,
+          "beta_rel_dev_from_delta_xstar[1]": 0.6462611484204284,
+          "beta_rel_dev_from_delta_xstar[2]": 0.000620695098691797,
+          "s_diag_median": 0.024050918931607157,
+          "s_offdiag_median": 0.01869920025637839,
+          "step": 900
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.0005168075731041958,
+          "beta_rel_dev_from_delta_xstar[1]": 0.6460851606668787,
+          "beta_rel_dev_from_delta_xstar[2]": 0.0005267681651964173,
+          "s_diag_median": 0.022384364943718538,
+          "s_offdiag_median": 0.017268487659748644,
+          "step": 1000
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.0004467253107509543,
+          "beta_rel_dev_from_delta_xstar[1]": 0.6459797209433437,
+          "beta_rel_dev_from_delta_xstar[2]": 0.0004549023406536032,
+          "s_diag_median": 0.020823476021178067,
+          "s_offdiag_median": 0.01611779043014394,
+          "step": 1100
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.00038795522934640216,
+          "beta_rel_dev_from_delta_xstar[1]": 0.6458916842209167,
+          "beta_rel_dev_from_delta_xstar[2]": 0.00039641738802869065,
+          "s_diag_median": 0.019395175724639557,
+          "s_offdiag_median": 0.015095297727384605,
+          "step": 1200
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.00034039808971893004,
+          "beta_rel_dev_from_delta_xstar[1]": 0.6458100808388666,
+          "beta_rel_dev_from_delta_xstar[2]": 0.000348790125094821,
+          "s_diag_median": 0.01808475868892856,
+          "s_offdiag_median": 0.014150516552035697,
+          "step": 1300
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.0003023723159101783,
+          "beta_rel_dev_from_delta_xstar[1]": 0.6457801543010959,
+          "beta_rel_dev_from_delta_xstar[2]": 0.00030801912573785674,
+          "s_diag_median": 0.017020685132592916,
+          "s_offdiag_median": 0.013274350902065635,
+          "step": 1400
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.0002697120417220416,
+          "beta_rel_dev_from_delta_xstar[1]": 0.6457357888860882,
+          "beta_rel_dev_from_delta_xstar[2]": 0.00027379447711850286,
+          "s_diag_median": 0.01623554613615852,
+          "s_offdiag_median": 0.012507950217695907,
+          "step": 1499
+        },
+        {
+          "beta_rel_dev_from_delta_xstar[0]": 0.00026941016138552147,
+          "beta_rel_dev_from_delta_xstar[1]": 0.645739572092183,
+          "beta_rel_dev_from_delta_xstar[2]": 0.0002734340011117141,
+          "s_diag_median": 0.01622804421640467,
+          "s_offdiag_median": 0.0125015805097064,
+          "step": 1500
+        }
+      ],
+      "run_path": "experiments/redesign_r2/phase1/phase1_r2_B512"
+    },
+    "r2_B512_jacobian_frobenius": {
+      "anticollapse_jac_floor": 1.0,
+      "median": 6.664513273110047,
+      "note": "floor 1.0 vs the measured median -> the anticollapse hinge is inactive; what collapses is the OFF-DIAGONAL, not the norm",
+      "run_path": "experiments/redesign_r2/phase1/phase1_r2_B512"
+    },
+    "r2_B512_scalars": {
+      "L_kstar_si_first": 0.08085218816995621,
+      "L_kstar_si_last": 0.07911010086536407,
+      "by_step": [
+        {
+          "L_kstar_si": 0.08085218816995621,
+          "L_turing": 1.150496482849121,
+          "d_ratio": 1.410609483718872,
+          "sig_max_max_member": 0.1991439163684845,
+          "sig_max_median": -1.0909440517425537,
+          "step": 0,
+          "w_turing": 0.0
+        },
+        {
+          "L_kstar_si": 0.07980141043663025,
+          "L_turing": 4.534756660461426,
+          "d_ratio": 7.504087924957275,
+          "sig_max_max_member": -3.7717573642730713,
+          "sig_max_median": -4.50726318359375,
+          "step": 100,
+          "w_turing": 0.0
+        },
+        {
+          "L_kstar_si": 0.07922340929508209,
+          "L_turing": 4.626064300537109,
+          "d_ratio": 7.500467300415039,
+          "sig_max_max_member": -3.9873502254486084,
+          "sig_max_median": -4.597518444061279,
+          "step": 200,
+          "w_turing": 0.0
+        },
+        {
+          "L_kstar_si": 0.07915782928466797,
+          "L_turing": 4.638988494873047,
+          "d_ratio": 7.500144958496094,
+          "sig_max_max_member": -3.6608307361602783,
+          "sig_max_median": -4.609982490539551,
+          "step": 300,
+          "w_turing": 0.0
+        },
+        {
+          "L_kstar_si": 0.07911708950996399,
+          "L_turing": 4.533271789550781,
+          "d_ratio": 7.500042915344238,
+          "sig_max_max_member": -1.4249347448349,
+          "sig_max_median": -4.5061516761779785,
+          "step": 400,
+          "w_turing": 0.06666667014360428
+        },
+        {
+          "L_kstar_si": 0.07911013066768646,
+          "L_turing": 0.17063847184181213,
+          "d_ratio": 7.500000953674316,
+          "sig_max_max_member": 0.01030078623443842,
+          "sig_max_median": -0.07950206100940704,
+          "step": 500,
+          "w_turing": 0.3333333432674408
+        },
+        {
+          "L_kstar_si": 0.07911013066768646,
+          "L_turing": 0.1535046100616455,
+          "d_ratio": 7.500000476837158,
+          "sig_max_max_member": -0.00796697847545147,
+          "sig_max_median": -0.04501789063215256,
+          "step": 600,
+          "w_turing": 0.6000000238418579
+        },
+        {
+          "L_kstar_si": 0.07911011576652527,
+          "L_turing": 0.1481160819530487,
+          "d_ratio": 7.500000476837158,
+          "sig_max_max_member": 0.029011406004428864,
+          "sig_max_median": -0.03065631352365017,
+          "step": 700,
+          "w_turing": 0.8666666746139526
+        },
+        {
+          "L_kstar_si": 0.07911010831594467,
+          "L_turing": 0.1457737237215042,
+          "d_ratio": 7.500000476837158,
+          "sig_max_max_member": 0.00022372252715285867,
+          "sig_max_median": -0.026763886213302612,
+          "step": 800,
+          "w_turing": 1.0
+        },
+        {
+          "L_kstar_si": 0.07911010086536407,
+          "L_turing": 0.1447853147983551,
+          "d_ratio": 7.500000476837158,
+          "sig_max_max_member": 0.010523160919547081,
+          "sig_max_median": -0.0283230971544981,
+          "step": 900,
+          "w_turing": 1.0
+        },
+        {
+          "L_kstar_si": 0.07911010086536407,
+          "L_turing": 0.14415988326072693,
+          "d_ratio": 7.500000476837158,
+          "sig_max_max_member": 0.00901769194751978,
+          "sig_max_median": -0.02914467453956604,
+          "step": 1000,
+          "w_turing": 1.0
+        },
+        {
+          "L_kstar_si": 0.07911010086536407,
+          "L_turing": 0.14372485876083374,
+          "d_ratio": 7.500000476837158,
+          "sig_max_max_member": 0.00821126252412796,
+          "sig_max_median": -0.02962975949048996,
+          "step": 1100,
+          "w_turing": 1.0
+        },
+        {
+          "L_kstar_si": 0.07911010086536407,
+          "L_turing": 0.14346791803836823,
+          "d_ratio": 7.500000476837158,
+          "sig_max_max_member": 0.010965024121105671,
+          "sig_max_median": -0.030094560235738754,
+          "step": 1200,
+          "w_turing": 1.0
+        },
+        {
+          "L_kstar_si": 0.07911010086536407,
+          "L_turing": 0.14326328039169312,
+          "d_ratio": 7.500000476837158,
+          "sig_max_max_member": 0.015057206153869629,
+          "sig_max_median": -0.030237533152103424,
+          "step": 1300,
+          "w_turing": 1.0
+        },
+        {
+          "L_kstar_si": 0.07911010086536407,
+          "L_turing": 0.1430613398551941,
+          "d_ratio": 7.500000476837158,
+          "sig_max_max_member": 0.007700230926275253,
+          "sig_max_median": -0.030452843755483627,
+          "step": 1400,
+          "w_turing": 1.0
+        },
+        {
+          "L_kstar_si": 0.07911010086536407,
+          "L_turing": 0.14296841621398926,
+          "d_ratio": 7.500000476837158,
+          "sig_max_max_member": 0.0039570932276546955,
+          "sig_max_median": -0.03077499195933342,
+          "step": 1499,
+          "w_turing": 1.0
+        },
+        {
+          "L_kstar_si": 0.07911010086536407,
+          "L_turing": 0.14295542240142822,
+          "d_ratio": 7.500000476837158,
+          "sig_max_max_member": 0.008675402030348778,
+          "sig_max_median": -0.030727919191122055,
+          "step": 1500,
+          "w_turing": 1.0
+        }
+      ],
+      "run_path": "experiments/redesign_r2/phase1/phase1_r2_B512",
+      "sig_max_final": {
+        "B": 512,
+        "max_member": 0.008675402030348778,
+        "median": -0.030727919191122055,
+        "median_below_zero_at_every_recorded_step": true,
+        "n_members_positive": 2,
+        "note": "ignition needs sig0 < 0 AND sig_max_pos > 1e-3 (r2_ignition_run._ignited); a positive sig_max alone is NOT ignition, and the final Turing verdict is eval.analysis.turing_ok on its own k-grid, not this column"
+      }
+    },
+    "staging_schedule": {
+      "first_full_weight_step": 750,
+      "first_nonzero_weight_step": 376,
+      "last_zero_weight_step": 375,
+      "off_frac": 0.25,
+      "ramp_frac": 0.25,
+      "ramp_frac_zero_error": "staging_factor: ramp_frac must be in (0,1], got 0.0",
+      "ramp_frac_zero_rejected": true,
+      "source": "rngrn.losses.weighting.staging_factor",
+      "total_steps": 1500,
+      "turing_live_alternative": {
+        "factor_by_step": {
+          "0": 0.0,
+          "1": 0.9950248756218905,
+          "2": 1.0,
+          "3": 1.0
+        },
+        "note": "step 0 is 0.0 for ANY ramp_frac when off_frac=0, since the factor is (step-off)/(ramp*total); this is turing-live-from-step-1, not step-0",
+        "off_frac": 0.0,
+        "ramp_frac": 0.00067
+      }
     }
   }
 }

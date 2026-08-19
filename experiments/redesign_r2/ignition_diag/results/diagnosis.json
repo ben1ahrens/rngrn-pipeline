@@ -1,0 +1,534 @@
+{
+  "provenance": {
+    "device": "cpu",
+    "frozen_config_source": "experiments/redesign_r2/phase1/phase1_r2_B512/config/frozen_config.yaml",
+    "kstar_obs": 0.28387817575592444,
+    "lr": 0.05,
+    "model_seed": 0,
+    "pin_xstar": [
+      0.4193849837438677,
+      0.754671536968317,
+      0.3504568664953922
+    ],
+    "probe_B": 512,
+    "staging": "off_frac=0.25, ramp_frac=0.25 -> `turing` weight is 0 for steps 0-374",
+    "steps": 1500,
+    "what": "D-R2-1 diagnosis; read-only re-analysis of tracked runs plus gradient probes"
+  },
+  "step1_reproduction": {
+    "arms": {
+      "a0_B128": {
+        "B": 128,
+        "alive": 128,
+        "coupling_median_final": 0.5822090145613004,
+        "distinct_sign_structures": 62,
+        "ignition_rate": 0.0859375,
+        "nonzero_offdiag_signs": 328,
+        "run_path": "experiments/redesign_r2/phase1/phase1_a0_B128",
+        "turing": 11
+      },
+      "a0_B64": {
+        "B": 64,
+        "alive": 64,
+        "coupling_median_final": 0.5822090145613004,
+        "distinct_sign_structures": 44,
+        "ignition_rate": 0.046875,
+        "nonzero_offdiag_signs": 164,
+        "run_path": "experiments/redesign_r2/phase1/phase1_a0_B64",
+        "turing": 3
+      },
+      "r2_B128": {
+        "B": 128,
+        "alive": 128,
+        "coupling_median_final": 0.0025963253125727863,
+        "distinct_sign_structures": 3,
+        "ignition_rate": 0.0,
+        "nonzero_offdiag_signs": 0,
+        "run_path": "experiments/redesign_r2/phase1/phase1_r2_B128",
+        "turing": 0
+      },
+      "r2_B256": {
+        "B": 256,
+        "alive": 256,
+        "coupling_median_final": 0.0026575076341975312,
+        "distinct_sign_structures": 3,
+        "ignition_rate": 0.0,
+        "nonzero_offdiag_signs": 0,
+        "run_path": "experiments/redesign_r2/phase1/phase1_r2_B256",
+        "turing": 0
+      },
+      "r2_B512": {
+        "B": 512,
+        "alive": 512,
+        "coupling_median_final": 0.002661944611250221,
+        "distinct_sign_structures": 3,
+        "ignition_rate": 0.0,
+        "nonzero_offdiag_signs": 0,
+        "run_path": "experiments/redesign_r2/phase1/phase1_r2_B512",
+        "turing": 0
+      },
+      "r2_B64": {
+        "B": 64,
+        "alive": 64,
+        "coupling_median_final": 0.0026795623242694203,
+        "distinct_sign_structures": 3,
+        "ignition_rate": 0.0,
+        "nonzero_offdiag_signs": 0,
+        "run_path": "experiments/redesign_r2/phase1/phase1_r2_B64",
+        "turing": 0
+      },
+      "r2_nobox_B64": {
+        "B": 64,
+        "alive": 64,
+        "coupling_median_final": 0.0018151724324322878,
+        "distinct_sign_structures": 3,
+        "ignition_rate": 0.0,
+        "nonzero_offdiag_signs": 0,
+        "run_path": "experiments/redesign_r2/phase1_ablation/phase1_r2_nobox_B64",
+        "turing": 0
+      },
+      "r2_noprior_B64": {
+        "B": 64,
+        "alive": 64,
+        "coupling_median_final": 0.014521209003011726,
+        "distinct_sign_structures": 5,
+        "ignition_rate": 0.0,
+        "nonzero_offdiag_signs": 12,
+        "run_path": "experiments/redesign_r2/phase1_ablation/phase1_r2_noprior_B64",
+        "turing": 0
+      }
+    },
+    "box": {
+      "alpha": [
+        0.5,
+        10.0
+      ],
+      "delta": [
+        0.4,
+        5.0
+      ]
+    },
+    "box_recentring": {
+      "alpha": {
+        "boxed_median": 5.245742916112009,
+        "ratio": 7.577800877795822,
+        "softplus_median": 0.6922513537513082
+      },
+      "delta": {
+        "boxed_median": 2.710299504748126,
+        "ratio": 3.884980548749662,
+        "softplus_median": 0.6976352830441857
+      }
+    }
+  },
+  "step3_coupling_trajectory": {
+    "a0_B128": {
+      "note": "no parameter trace recorded for this cell (telemetry off)",
+      "run_path": "experiments/redesign_r2/phase1/phase1_a0_B128",
+      "trajectory": null
+    },
+    "a0_B64": {
+      "note": "no parameter trace recorded for this cell (telemetry off)",
+      "run_path": "experiments/redesign_r2/phase1/phase1_a0_B64",
+      "trajectory": null
+    },
+    "r2_B128": {
+      "note": "no parameter trace recorded for this cell (telemetry off)",
+      "run_path": "experiments/redesign_r2/phase1/phase1_r2_B128",
+      "trajectory": null
+    },
+    "r2_B256": {
+      "note": "no parameter trace recorded for this cell (telemetry off)",
+      "run_path": "experiments/redesign_r2/phase1/phase1_r2_B256",
+      "trajectory": null
+    },
+    "r2_B512": {
+      "B": 512,
+      "recon_vs_stored_J_max_rel_err": 1.1761815320097432e-07,
+      "run_path": "experiments/redesign_r2/phase1/phase1_r2_B512",
+      "trajectory": [
+        {
+          "coupling_median": 0.3896506986041671,
+          "coupling_p5": 0.23235979728345588,
+          "coupling_p95": 0.6414056459291423,
+          "step": 0
+        },
+        {
+          "coupling_median": 0.00879486023384227,
+          "coupling_p5": 0.00481196413547138,
+          "coupling_p95": 0.017843719072863935,
+          "step": 100
+        },
+        {
+          "coupling_median": 0.0036780422338849907,
+          "coupling_p5": 0.002063532611954949,
+          "coupling_p95": 0.0076652880724988525,
+          "step": 200
+        },
+        {
+          "coupling_median": 0.0021282929236625236,
+          "coupling_p5": 0.0012161573055604192,
+          "coupling_p95": 0.004293128518019432,
+          "step": 300
+        },
+        {
+          "coupling_median": 0.0014753313875991508,
+          "coupling_p5": 0.0008184307264274436,
+          "coupling_p95": 0.0028975725803043425,
+          "step": 400
+        },
+        {
+          "coupling_median": 0.005809051217880333,
+          "coupling_p5": 0.002073430356984529,
+          "coupling_p95": 0.012260989800553084,
+          "step": 500
+        },
+        {
+          "coupling_median": 0.006042395109807822,
+          "coupling_p5": 0.0033021039440489608,
+          "coupling_p95": 0.011340768092414896,
+          "step": 600
+        },
+        {
+          "coupling_median": 0.005184279048759746,
+          "coupling_p5": 0.0028044873877849257,
+          "coupling_p95": 0.009898130195832083,
+          "step": 700
+        },
+        {
+          "coupling_median": 0.00456100861133444,
+          "coupling_p5": 0.0024500706329271863,
+          "coupling_p95": 0.008798134689059899,
+          "step": 800
+        },
+        {
+          "coupling_median": 0.004085967072781855,
+          "coupling_p5": 0.002228491657015791,
+          "coupling_p95": 0.007840121713475654,
+          "step": 900
+        },
+        {
+          "coupling_median": 0.0037762756507894466,
+          "coupling_p5": 0.0020520205673739953,
+          "coupling_p95": 0.007220490299927224,
+          "step": 1000
+        },
+        {
+          "coupling_median": 0.0034850647398975707,
+          "coupling_p5": 0.0019110411595298664,
+          "coupling_p95": 0.0066424958036161025,
+          "step": 1100
+        },
+        {
+          "coupling_median": 0.0032379534370322333,
+          "coupling_p5": 0.001782430146673308,
+          "coupling_p95": 0.006220206409556809,
+          "step": 1200
+        },
+        {
+          "coupling_median": 0.003049246914599007,
+          "coupling_p5": 0.0016625441403199073,
+          "coupling_p95": 0.005856875873271481,
+          "step": 1300
+        },
+        {
+          "coupling_median": 0.0028365230137991724,
+          "coupling_p5": 0.0015607229584612807,
+          "coupling_p95": 0.0055337801489188715,
+          "step": 1400
+        },
+        {
+          "coupling_median": 0.0026657751803564477,
+          "coupling_p5": 0.0014605808448638646,
+          "coupling_p95": 0.00521820963180537,
+          "step": 1499
+        },
+        {
+          "coupling_median": 0.0026619446667634043,
+          "coupling_p5": 0.0014596766997173976,
+          "coupling_p95": 0.0052157899617146335,
+          "step": 1500
+        }
+      ]
+    },
+    "r2_B64": {
+      "note": "no parameter trace recorded for this cell (telemetry off)",
+      "run_path": "experiments/redesign_r2/phase1/phase1_r2_B64",
+      "trajectory": null
+    },
+    "r2_nobox_B64": {
+      "B": 64,
+      "recon_vs_stored_J_max_rel_err": 1.1684180875546015e-07,
+      "run_path": "experiments/redesign_r2/phase1_ablation/phase1_r2_nobox_B64",
+      "trajectory": [
+        {
+          "coupling_median": 0.21112108650671363,
+          "coupling_p5": 0.10972805537800438,
+          "coupling_p95": 0.3731300154156746,
+          "step": 0
+        },
+        {
+          "coupling_median": 0.001976303151938537,
+          "coupling_p5": 0.001253870222356812,
+          "coupling_p95": 0.0032951522899195168,
+          "step": 100
+        },
+        {
+          "coupling_median": 0.00106256038932158,
+          "coupling_p5": 0.0006845875664167793,
+          "coupling_p95": 0.001801740957226203,
+          "step": 200
+        },
+        {
+          "coupling_median": 0.0007570264267062193,
+          "coupling_p5": 0.0004128675063001202,
+          "coupling_p95": 0.0012179165181704368,
+          "step": 300
+        },
+        {
+          "coupling_median": 0.000522619075025234,
+          "coupling_p5": 0.0002665753692943908,
+          "coupling_p95": 0.0009024029095792765,
+          "step": 400
+        },
+        {
+          "coupling_median": 0.00197211862998287,
+          "coupling_p5": 0.0006846680132435497,
+          "coupling_p95": 0.0042260102529614475,
+          "step": 500
+        },
+        {
+          "coupling_median": 0.0037409039727794554,
+          "coupling_p5": 0.0017095759142374566,
+          "coupling_p95": 0.006343110676068882,
+          "step": 600
+        },
+        {
+          "coupling_median": 0.0034700402950388633,
+          "coupling_p5": 0.0015711370183004209,
+          "coupling_p95": 0.0061646691818224705,
+          "step": 700
+        },
+        {
+          "coupling_median": 0.0030899035245848736,
+          "coupling_p5": 0.001498207171199245,
+          "coupling_p95": 0.005465939758281775,
+          "step": 800
+        },
+        {
+          "coupling_median": 0.0027952653266387264,
+          "coupling_p5": 0.0013559304694373139,
+          "coupling_p95": 0.004943061780048467,
+          "step": 900
+        },
+        {
+          "coupling_median": 0.0025438895115122706,
+          "coupling_p5": 0.0012442441001540294,
+          "coupling_p95": 0.004533844956552528,
+          "step": 1000
+        },
+        {
+          "coupling_median": 0.002345151727723151,
+          "coupling_p5": 0.0011557148887177378,
+          "coupling_p95": 0.00419642205910695,
+          "step": 1100
+        },
+        {
+          "coupling_median": 0.0021786195604351867,
+          "coupling_p5": 0.001081898567821237,
+          "coupling_p95": 0.003873857493935681,
+          "step": 1200
+        },
+        {
+          "coupling_median": 0.002037914973873067,
+          "coupling_p5": 0.0010097514594901431,
+          "coupling_p95": 0.0036005212300845007,
+          "step": 1300
+        },
+        {
+          "coupling_median": 0.0019167581482594433,
+          "coupling_p5": 0.0009456500728648035,
+          "coupling_p95": 0.003364967026778069,
+          "step": 1400
+        },
+        {
+          "coupling_median": 0.0018162750761436578,
+          "coupling_p5": 0.0008899375305320361,
+          "coupling_p95": 0.0031624759747355493,
+          "step": 1499
+        },
+        {
+          "coupling_median": 0.001815172326133366,
+          "coupling_p5": 0.0008893740124508205,
+          "coupling_p95": 0.0031593953562568996,
+          "step": 1500
+        }
+      ]
+    },
+    "r2_noprior_B64": {
+      "B": 64,
+      "recon_vs_stored_J_max_rel_err": 5.379178831040396e-08,
+      "run_path": "experiments/redesign_r2/phase1_ablation/phase1_r2_noprior_B64",
+      "trajectory": [
+        {
+          "coupling_median": 0.3931406669091366,
+          "coupling_p5": 0.25116469678764003,
+          "coupling_p95": 0.6346564507453589,
+          "step": 0
+        },
+        {
+          "coupling_median": 0.009995583862874403,
+          "coupling_p5": 0.006264724708805327,
+          "coupling_p95": 0.016265602098246363,
+          "step": 100
+        },
+        {
+          "coupling_median": 0.004606362151242995,
+          "coupling_p5": 0.0028033445930983865,
+          "coupling_p95": 0.007347503990869037,
+          "step": 200
+        },
+        {
+          "coupling_median": 0.0028006705441972995,
+          "coupling_p5": 0.0016426240812626117,
+          "coupling_p95": 0.004667797520920599,
+          "step": 300
+        },
+        {
+          "coupling_median": 0.0018807339963711471,
+          "coupling_p5": 0.0011064639781210982,
+          "coupling_p95": 0.0033204275867674627,
+          "step": 400
+        },
+        {
+          "coupling_median": 0.010544213538397112,
+          "coupling_p5": 0.005076321582388724,
+          "coupling_p95": 0.019481164645297623,
+          "step": 500
+        },
+        {
+          "coupling_median": 0.008429162294138046,
+          "coupling_p5": 0.003784976106433441,
+          "coupling_p95": 0.01535299980154759,
+          "step": 600
+        },
+        {
+          "coupling_median": 0.007459504019642016,
+          "coupling_p5": 0.0032275757716087768,
+          "coupling_p95": 0.013268507438988483,
+          "step": 700
+        },
+        {
+          "coupling_median": 0.006861853792284136,
+          "coupling_p5": 0.0028815621016357335,
+          "coupling_p95": 0.012212260241818493,
+          "step": 800
+        },
+        {
+          "coupling_median": 0.0065254237332233855,
+          "coupling_p5": 0.0026304831181506202,
+          "coupling_p95": 0.013175920950822406,
+          "step": 900
+        },
+        {
+          "coupling_median": 0.006210444460499101,
+          "coupling_p5": 0.0024477640599794236,
+          "coupling_p95": 0.02225138224660501,
+          "step": 1000
+        },
+        {
+          "coupling_median": 0.006688420424258094,
+          "coupling_p5": 0.0022999723227922642,
+          "coupling_p95": 0.0435273705697625,
+          "step": 1100
+        },
+        {
+          "coupling_median": 0.006831640210825449,
+          "coupling_p5": 0.0021799333722230304,
+          "coupling_p95": 0.050310549727075396,
+          "step": 1200
+        },
+        {
+          "coupling_median": 0.008117763689101415,
+          "coupling_p5": 0.0020805895372858515,
+          "coupling_p95": 0.06611477436280302,
+          "step": 1300
+        },
+        {
+          "coupling_median": 0.008632746289430903,
+          "coupling_p5": 0.0019973583443652055,
+          "coupling_p95": 0.07633954953525181,
+          "step": 1400
+        },
+        {
+          "coupling_median": 0.014453846545071234,
+          "coupling_p5": 0.002281452564111286,
+          "coupling_p95": 0.08983890454433749,
+          "step": 1499
+        },
+        {
+          "coupling_median": 0.014521208541621828,
+          "coupling_p5": 0.0022806763923981033,
+          "coupling_p95": 0.09023097588034436,
+          "step": 1500
+        }
+      ]
+    }
+  },
+  "step4_term_gradients": {
+    "_staging_window_active_sum": {
+      "frac_members_pushed_down": 1.0,
+      "mean_descent_on_s_offdiag": -0.03092351919147264,
+      "share_of_offdiag_gradient": {
+        "beta_hinge": 0.9931780574606152,
+        "kstar_si": 0.006821942539384874,
+        "param_prior": 0.0
+      },
+      "terms": [
+        "kstar_si",
+        "param_prior",
+        "beta_hinge"
+      ]
+    },
+    "beta_hinge": {
+      "frac_members_pushed_down": 1.0,
+      "grad_norm_s_diag": 1.665321189402569,
+      "grad_norm_s_offdiag": 3.832370657600826,
+      "grad_norm_theta_g": 3.0755083655926247,
+      "grad_norm_theta_s": 4.178559503119823,
+      "grad_norm_total": 8.893411065375721,
+      "mean_descent_on_s_offdiag": -0.031022020439843034,
+      "term_value_mean": 1.2214666854892475
+    },
+    "kstar_si": {
+      "frac_members_pushed_down": 0.1875,
+      "grad_norm_s_diag": 0.03592164455221171,
+      "grad_norm_s_offdiag": 0.026323791810930353,
+      "grad_norm_theta_g": 0.035752381524623136,
+      "grad_norm_theta_s": 0.04453433015821217,
+      "grad_norm_total": 0.2684212142501978,
+      "mean_descent_on_s_offdiag": 9.850124837040183e-05,
+      "term_value_mean": 0.08216187325976945
+    },
+    "param_prior": {
+      "frac_members_pushed_down": 0.0,
+      "grad_norm_s_diag": 0.0,
+      "grad_norm_s_offdiag": 0.0,
+      "grad_norm_theta_g": 0.0,
+      "grad_norm_theta_s": 0.0,
+      "grad_norm_total": 52.74379874789227,
+      "mean_descent_on_s_offdiag": -0.0,
+      "term_value_mean": 1.3583536751477914
+    },
+    "turing": {
+      "frac_members_pushed_down": 0.0,
+      "grad_norm_s_diag": 5.535470302190898,
+      "grad_norm_s_offdiag": 5.1078941264878965,
+      "grad_norm_theta_g": 7.170566148741163,
+      "grad_norm_theta_s": 7.532065710935276,
+      "grad_norm_total": 20.733810045933733,
+      "mean_descent_on_s_offdiag": 0.04707095649320757,
+      "term_value_mean": 1.118751090624867
+    }
+  }
+}

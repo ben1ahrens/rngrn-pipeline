@@ -2540,7 +2540,7 @@ what a calibrated k\* tolerance for Milestone 1 would actually be. Both remain o
 
 ---
 
-### D-PAPER-1 — claim-3 hidden-slow-channel experiment: `resid=0.3` UNCALIBRATED, 32 vs 64
+### D-PAPER-2 — claim-3 hidden-slow-channel experiment: `resid=0.3` UNCALIBRATED, 32 vs 64
 restarts, and the slow-channel/hub confound
 
 **Date:** 2026-08-19. **Status:** DECIDED (design), MEASURED (outcome), one input

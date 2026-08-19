@@ -3,7 +3,7 @@
 **Purpose.** Test paper claim 3, "recovery of a 3N GRN from partial observations that
 patterns robustly," on `three_gene_qvar` / `sample_0001`, seeds 0-7. Design fixed by the
 controller: hide species 0, the slow channel (see below). Full detail and the measured
-results table are in `docs/DECISIONS.md` § D-PAPER-1 — this file is the pointer plus the
+results table are in `docs/DECISIONS.md` § D-PAPER-2 — this file is the pointer plus the
 exact commands.
 
 **Branch:** `feature/paper-claim3-hidden-channel`, off `main@48441e4`.
@@ -93,7 +93,7 @@ Both criteria independently identify species 0, so the choice is unambiguous.
 inhibited by both other species; species 1 and 2 each carry only a self-term. Species 0 is
 the *only* species with any cross-species coupling. This design cannot separate "hidden slow
 channel" from "hidden hub" — any recovery degradation in (c) vs (b) could be either effect,
-or both. See `docs/DECISIONS.md` § D-PAPER-1 for the full discussion, the `resid=0.3`
+or both. See `docs/DECISIONS.md` § D-PAPER-2 for the full discussion, the `resid=0.3`
 UNCALIBRATED disclosure (exp06 measured this residual as harmful to Turing recovery at other
 sweep points — `recover.py:387-389`), and the measured comparison table.
 

@@ -2614,3 +2614,88 @@ levels, which is what was run.
 `src/rngrn/data/gate.py::_apply_obs_noise`, `src/rngrn/train.py::_resolve_recovery_input`.
 Tests: `tests/test_obs_noise.py` (8 tests, TDD). Runs:
 `experiments/claim5_obs_noise/sigma_{0p00,0p01,0p05,0p20}/`.
+
+---
+
+### D-FORMCOMP-1 — comparing `nc1` vs `competitive` robustness, and the disclosed hyperparameter confound
+
+**Date:** 2026-08-19 (paper form-robustness unit, branch `feature/paper-form-robustness`).
+**Status:** DECIDED (design) / the resulting numbers are read as a **disclosed-confound
+comparison**, not a clean one — no threshold here claims to isolate the form from the
+hyperparameters.
+
+**The decision.** Measure `model.form=competitive` on `three_gene_qvar` `sample_0001` and
+`sample_0004`, K = 8 seeds (0…7), using the **exact hyperparameter recipe of the nc1 winning
+cell** `c2_P_t8k8_consol` (`docs/C2_NC1_TUNING.md` §2: `loss.weights.turing=8.0`,
+`loss.weights.kstar=8.0`, `loss.weights.param_prior=1.0`, 400 Adam steps, 64 restarts,
+batched/CUDA/cubic dispersion) — copied verbatim from
+`experiments/claim5_obs_noise/run_cells.sh`, changing only `--form nc1` → `--form competitive`
+and dropping the noise overrides. Runs land at `experiments/form_compare/comp_{0001,0004}/`
+in this worktree.
+
+**Config file used, and why.** The spec asked me to diff `configs/nc1_m3_registry.yaml`
+against `configs/m3_registry.yaml` and fall back to `nc1_...yaml -o model.form=competitive`
+if they differ by more than the form line. They do differ by more than that line (header
+comments, `tracking.run_name`) — but the difference is moot for `target-report`:
+`src/rngrn/optim/target_report.py::run_target_report` (lines 471-489) explicitly overrides
+`model.form`, `data.dataset_id` and `data.sample_key` onto the loaded config from the CLI
+`--form`/`--dataset-id`/`--sample-key` arguments regardless of what the config file itself
+says, and both files' bodies are otherwise identical (`_base_`, `data.source`, `model.N/m`,
+`train.adam_steps/n_restarts`). So `configs/m3_registry.yaml --form competitive` and
+`configs/nc1_m3_registry.yaml -o model.form=competitive` produce byte-identical effective
+configs for this command. I used `configs/m3_registry.yaml --form competitive` (its default
+`model.form` already matches, so no override is needed) and record this rather than silently
+picking one.
+
+**No committed competitive cell was reusable.** `docs/C1_COMPETITIVE_TUNING.md`'s own winning
+cell (`turing8`, §9) sweeps `loss.weights.turing=8.0` **alone** — `kstar` stays at its
+library default of 1.0, because C1 never swept a `kstar` axis at all (its axis list, §4, has
+no `kstar` row) — and it was only ever run on `sample_0000` and `sample_0003` (§9, §10), never
+on `sample_0001` or `sample_0004`. There is therefore no committed competitive-form run at
+matching hyperparameters *or* matching targets to pair against `c2_P_t8k8_consol`, and new
+cells are run rather than comparing across mismatched targets.
+
+**The disclosed confound, named before any number is read.** `kstar=8.0` was chosen for
+`nc1` specifically to suppress a mechanism measured on `nc1`: the near-immobile-third-node
+route by which `turing=8` alone buys its Turing rate at the cost of an exploding k\* error
+(`docs/C2_NC1_TUNING.md` §2, §6 — `kstar=8` took `kfft` from 4.765 to 0.115 on `sample_0000`,
+*"at no measured cost in rate"* on `nc1`). Whether `competitive`'s analogous failure mode (if
+any) is the same mechanism, and whether `kstar=8` is the right weight to police it on
+`competitive`, was never measured — C1 measured only the `turing`-alone axis. So this unit's
+`competitive` cells run at a hyperparameter point **chosen for the other form**, not one
+`competitive`'s own tuning arrived at. **If `competitive` underperforms `nc1` here, that must
+be reported as "underperforms at nc1-tuned hyperparameters", never as "underperforms" bare** —
+the honest alternative reading is that `competitive` needs its own `kstar` sweep, which this
+unit does not have time to run before the paper deadline. Context, not a gate: Stage-0 measured
+the biological-box strictly-Turing acceptance rate at 2.5e-5 (`nc1`) vs 4.5e-4 (`competitive`)
+over 80,000 box-constrained draws (`docs/C2_NC1_TUNING.md` header) — an ~18× prior difficulty
+gap in the *opposite* direction, i.e. if anything `competitive` starts from an easier box.
+
+**Analysis plan, fixed before the runs.** Per target and pooled across `sample_0001` +
+`sample_0004`: `recovered_frac`, `turing_frac`; median/mean/min and full per-seed values of
+`turing_volume_{1,4p8,10,20}pct`; `kstar_fft_rel_err` and `kstar_rel_err`
+(median/mean, beside `trivial_kstar_fft_err`); `morphology_match_frac`,
+`morphology_distance`; `plausibility_score_mean`. Each form's distribution is read against
+the population baseline (`experiments/exp11_robustness_baseline.csv`, 127 systems × 400
+draws) at all four perturbation levels, noting the 4.8%/10% ceiling effect already seen on
+`nc1` (median 1.000) and that 20% is the only level with headroom to discriminate. The
+pre-registered §3.2 bars (median `turing_volume_10pct` ≥ 0.90, `turing_volume_4p8pct` ≥
+0.95) are reported for each form as-is, since they are pre-registered reference points, not
+invented here — no new threshold is introduced. The "2 independent targets, not 3" caveat
+(`sample_0001` is the same underlying system as `turing_labyrinth/sample_0000` at a
+different grid resolution; only `sample_0004` is a genuinely independent second target — see
+`worktrees/paper-pack/docs/PAPER_RESULTS_PACK.md` "three facts", fact 1) is carried into the
+comparison verbatim, since it binds this unit's targets identically to `c2_P_t8k8_consol`'s.
+
+**What was rejected and why.** (a) *Reusing `turing8`/`sample_0000`+`sample_0003` as "the
+competitive comparison"* — rejected: different targets than `c2_P_t8k8_consol`, so any
+delta would confound form with target, not isolate form. (b) *Re-tuning `competitive`'s own
+`kstar` weight before comparing* — rejected: out of scope for the paper deadline, and even if
+run it would no longer be a same-hyperparameter comparison, which is the point of this unit.
+(c) *Treating a competitive shortfall as a pass/fail verdict against §3.2* — rejected;
+§3.2 is pre-registered for the whole pipeline, not per-form, and `PREREGISTRATION.md` may not
+be reinterpreted locally (CLAUDE.md §10). This unit reports measured numbers beside the bars,
+nothing more.
+
+**Where it lives:** `experiments/form_compare/comp_{0001,0004}/`;
+`experiments/form_compare/README.md`; `docs/PAPER_CLAIM_FORMCOMP.md`.

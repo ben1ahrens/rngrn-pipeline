@@ -169,9 +169,21 @@ def test_frozen_config_records_the_resolved_backend_not_the_request(tmp_path):
     # ORDER, and the order is the whole fix (resolving after the write would freeze 'auto').
     # Running `fit` needs a dataset, so pin the ordering in its source instead -- weaker than
     # a behavioural test, and named as such.
+    #
+    # COMMENT LINES ARE STRIPPED FIRST, and that is load-bearing, not tidiness. The first
+    # version of this assertion indexed the raw source, where the earliest occurrence of BOTH
+    # tokens is inside the explanatory comment block above the code (train.py:206 and :210) --
+    # so the comparison was decided by prose at offsets 533 < 867 and was satisfied before
+    # either statement was reached. Moving the resolve call BELOW the freeze would still have
+    # passed. Verified by mutation: with the two statements reordered, the stripped form below
+    # FAILS and the raw form still PASSED.
     import inspect
 
     from rngrn import train
-    src = inspect.getsource(train.fit)
-    assert src.index("resolve_dispersion_backend") < src.index("frozen_config.yaml"), (
-        "train.fit must resolve dispersion_backend BEFORE writing frozen_config.yaml")
+    code = "\n".join(ln for ln in inspect.getsource(train.fit).splitlines()
+                     if not ln.strip().startswith("#"))
+    i_resolve = code.index("= M.resolve_dispersion_backend(")   # the statement, not the prose
+    i_freeze = code.index("cfg.to_yaml(")
+    assert i_resolve < i_freeze, (
+        "train.fit must resolve dispersion_backend BEFORE writing frozen_config.yaml; "
+        f"found resolve at {i_resolve}, to_yaml at {i_freeze} in the comment-stripped source")

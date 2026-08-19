@@ -3795,7 +3795,14 @@ opt-in value, accepted by `RNGRN.__init__`'s three-way `assert` and resolved at 
 `model.resolve_dispersion_backend` to `'cubic'` at N == 3 and `'eig'` otherwise. The string
 `'auto'` never survives construction, and `.dispersion_backend` always reads a concrete backend.
 Explicit `'cubic'` at N ≠ 3 still raises. **Nothing about which backend an existing N = 3 run
-uses changes**, so A0 bit-identity holds by construction rather than by argument.
+uses changes**, so the BACKEND-CHOICE half of A0 bit-identity holds by construction rather
+than by argument.
+
+**Scope of that claim — read D-PERF-11 before relying on it.** It is about the backend and
+nothing else. The same integration's one-Jacobian-per-step hoist leaves the OBJECTIVE
+bit-identical but perturbs the GRADIENT at the last bit, so an A0 *trajectory* re-run after
+this task is not guaranteed to reproduce a pre-integration A0 run bit-for-bit. D-PERF-11
+announces that separately; it is not covered by the sentence above.
 
 **Evidence — the four facts the decision point returned.**
 
@@ -3863,3 +3870,73 @@ four defaults plus the resolved effect at N = 3, so a flip cannot land without e
 test), `::test_auto_resolves_at_construction_and_never_survives_it` (the mechanics) and
 `::test_frozen_config_records_the_resolved_backend_not_the_request` (the provenance fix).
 Read with **D-PERF-3** (amended in place) and **D-PERF-8** (the M4 asymmetry).
+
+---
+
+### D-PERF-11 — ANNOUNCED LOUDLY: the one-Jacobian hoist leaves the objective bit-identical but the gradient 1-ulp different; A0 TRAJECTORY reproduction against pre-integration runs is NOT guaranteed
+
+**Date:** 2026-08-19 (R3 Phase B Task 8, `feature/r3-integration`; raised as Important finding
+I2 by the Task 8 review, which independently reproduced the measurement). **Status:** DECIDED
+**Decided by:** the controller, on the review's finding; recorded by the implementing agent.
+
+**Why this entry is separate and loudly titled:** CLAUDE.md §8 and §10.4 require a change in
+what an existing number *means* to be announced, not buried. This one is easy to bury, because
+every test is green and the objective is exactly unchanged — the affected quantity is
+reproducibility of a *trajectory*, which nothing in the suite pins.
+
+**The decision:** the hoist stays. `losses/total.py::compute_terms` and
+`::compute_terms_batched` evaluate **one** autograd Jacobian per step at `x_disp` with
+`create_graph=True` and share it across `kstar_anchor`, the Turing hinges and `anticollapse`,
+replacing three identical Jacobian builds of which two were pure waste. The consequence below
+is accepted and announced rather than avoided.
+
+**Evidence — measured on the integrated tree, twice, independently.**
+
+- **The objective is bit-identical.** Hoisted vs. per-term Jacobians, N = 3, full forward:
+  **|ΔLoss| = 0.0 exactly** on every seed tried (6 seeds, implementer; 8 seeds, reviewer).
+- **The gradient is identical only to ~1 ulp.** **max |Δgrad| ≤ 2.2e-16** over the same
+  models, **non-zero on 8 of 8 seeds** in the reviewer's independent reproduction. The cause
+  is arithmetic-order, not semantics: one Jacobian feeding three consumers accumulates its
+  backward contributions in a different order than three separate Jacobians do. Float
+  addition is not associative, so the sum differs in the last bit.
+- **Therefore:** `docs/REVIEW_gpu_optim_delta.md` semantic-table #1's wording, *"Neutral —
+  same tensor, three consumers; autograd accumulates the identical sum"*, **overstates it.**
+  The sum is identical to float64 round-off, not exactly identical. Recorded here because a
+  reader diffing gradients across this merge needs the bar to be 1e-16, not exact equality.
+
+**What this means for A0 — the announcement.** A 1-ulp gradient difference at step 0 is
+amplified by the optimiser over thousands of steps. So:
+
+> **An A0 re-run after this task is NOT guaranteed to reproduce a pre-integration A0 run
+> bit-for-bit. A future A0 rerun that fails bit-reproduction against an old run is EXPECTED,
+> not a bug, and must not be diagnosed as merge damage.**
+
+What *is* preserved, and what a comparison should be read against: the objective function
+itself is unchanged to the last bit, so the two runs optimise **the same function** and their
+converged results are comparable as science. It is the step-by-step path, and therefore the
+exact final parameters of a fixed-seed run, that may differ. This is the **same argument class
+D-PERF-10 used to reject the backend flip** — with the crucial difference that the backend
+flip changed *which function is optimised* (cubic vs eig dispersion) for no measurable gain,
+whereas this changes only summation order and buys the removal of two redundant autodiff
+Jacobians per step on the hot path. That asymmetry is the whole reason one was rejected and
+this one accepted.
+
+**What was rejected and why.** (a) **Reverting the hoist to protect bit-reproduction of old
+A0 trajectories** — rejected: it would keep two provably redundant Jacobian builds per step on
+the hot path forever, to protect a property (identical float summation order) that no
+pre-registered condition asks for and that any future optimisation would break again. (b)
+**Leaving it unannounced because the suite is green** — rejected outright: the suite cannot
+see this, which is exactly why §10.4 exists; an unannounced non-comparability is worse than a
+missing number. (c) **Claiming, per semantic-table #1, that the gradient is "the identical
+sum"** — rejected as false against measurement; corrected above.
+
+**Not independently validated:** no A0 trajectory was actually re-run and diffed against a
+pre-integration A0 run — the 1-ulp figure is a single-step forward/backward measurement, and
+the amplification-over-training claim is the standard chaotic-optimiser argument, **not
+measured here**. Nobody has quantified how far a fixed-seed A0 run drifts by step 1500. If
+that number matters to a paper claim, it needs a run, and this entry does not supply one.
+
+**Where it lives:** `src/rngrn/losses/total.py:126-140` (serial hoist), `:239-253` (batched
+hoist); `src/rngrn/losses/terms.py` (`J=` on every dispersion-side term, pinned by
+`tests/test_term_registry.py::test_dispersion_side_terms_all_accept_the_hoisted_jacobian`).
+Read with **D-PERF-10**, whose backend-choice bit-identity claim this entry scopes.

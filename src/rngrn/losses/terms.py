@@ -136,12 +136,20 @@ def steady_state(model, x0=None, tol=1e-10, max_iter=100, relax_steps=2000, rela
     code therefore reported "no steady state" for a model whose steady state exists and is
     benign, and recover.py's fail-loud then threw the whole restart away.
 
-    So: attempt 1 is the LEGACY path verbatim (Newton from x0, then the relaxation fallback
+    So: attempt 1 is the LEGACY path (Newton from x0, then the relaxation fallback
     from x0). Only if that fails do we re-run Newton from the bracket seeds of
     `steady_state_bracket` (lo, hi and their geometric mean). Consequence, and the reason
     this is safe to have on by default: ANY call that converged before converges to the
-    BIT-IDENTICAL xstar now, because the first attempt is byte-for-byte the old algorithm
-    and short-circuits on success (pinned by tests/test_science.py). What changes is only
+    BIT-IDENTICAL xstar now, and short-circuits on success (pinned by tests/test_science.py).
+    **That claim no longer rests on the code being "byte-for-byte the old algorithm", and
+    this sentence used to say it did** — the R3 integration of the gpu-optim desync
+    vectorised `_damped_newton`'s line search (see its docstring), so the text differs.
+    It now rests on measurement: the vectorised form is bit-identical to a faithful
+    reimplementation of the pre-desync loop over 180 solves, including 20 of R2's
+    pinned+boxed models (max |dx*| = 0.0, 0 convergence-flag disagreements). Note the
+    honest limit `_damped_newton` states for itself: a candidate damping sitting EXACTLY on
+    the acceptance boundary could in principle be decided the other way, so this is a
+    measured equality over the cases tried, not a proof. What changes is only
     the previously-unconverged cases, which used to raise SteadyStateError and lose the
     restart. `multistart=False` restores the exact legacy behaviour for reproducing
     pre-B3 numbers.
@@ -614,9 +622,25 @@ def steady_state_batched(model, x0=None, tol=1e-10, max_iter=100,
     def _attempt(x_init, relax=True):
         """Damped Newton from x_init, then optionally the relaxation fallback.
 
-        Returns (x (B,N), converged (B,)). With relax=True this is verbatim the
-        pre-multistart body, which is what makes attempt 1 bit-identical to the legacy
-        solver. relax=False is Newton only — used for the bracket attempts, see below."""
+        Returns (x (B,N), converged (B,)). With relax=True this is the pre-multistart
+        body, so attempt 1 reproduces the legacy solver. **It is no longer VERBATIM that
+        body** — the R3 integration of the gpu-optim desync rewrote the loop below (the
+        singular-J fold is now unconditional and the line-search early exit runs on a
+        5-halving cadence rather than every halving), so the old docstring's reason for
+        the bit-identity claim — that the text was unchanged — no longer holds and has
+        been removed rather than left to look authoritative.
+
+        The claim itself survives on a different footing: VALUE PRESERVATION, argued at
+        each changed site in the inline comments below (an accepted member's `lam` is
+        frozen by the `torch.where`, so extra halvings before the next cadence check
+        cannot move it; an inactive member's `x_new` is masked out; the relocated
+        `active.any()` costs at most one extra Jacobian and solve whose result is masked
+        away), and MEASURED rather than asserted: the serial `_damped_newton` twin of this
+        rewrite is bit-identical to a faithful reimplementation of the pre-desync loop over
+        180 solves including 20 pinned+boxed models (max |dx*| = 0.0, 0 convergence-flag
+        disagreements), and the batched path over 192 members (same result, measured
+        independently at R3 Task 8 review). relax=False is Newton only — used for the
+        bracket attempts, see below."""
         x = x_init.clone()
         active = torch.ones(B, dtype=torch.bool, device=dev)
         broke = torch.zeros(B, dtype=torch.bool, device=dev)

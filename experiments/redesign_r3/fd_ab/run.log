@@ -1,0 +1,117 @@
+guarded_run: START MemAvailable=14470MB oom_score_adj=500 -- .venv/bin/python -u scripts/r3_fd_ab.py --out experiments/redesign_r3/fd_ab
+operating point: k-hat=0.17607 box={'L_solve': 285.48572988264687, 'n': 96, 'p': 8} dt=0.184998 theta dim=36
+targets built from the surrogate frame (3, 96, 96)
+saturated in 5.1s, amplitude 0.1701
+relax residual 1.569e-11; Newton ladder in 21.4s -> 3.447e-13 in 1 iters (bar 1e-09)
+solver equivalence: max|u_direct - u_solve_subset| / max|u| = 0.000e+00
+
+=== CONVERGED arm (base theta, Newton to the 1e-9 bar) ===
+    [adjoint] dir 0: spec_shape=2.760209018571513e-07, spec_aniso=1.630685502076182e-07, spec_amp_mean=4.671036102992797e-08, spec_amp_fluct=1.389829630879272e-11, real_moments=1.752802018630484e-08
+    [adjoint] dir 1: spec_shape=4.479938580956545e-07, spec_aniso=3.056544241087527e-07, spec_amp_mean=4.877870423637775e-10, spec_amp_fluct=2.9086548526721745e-09, real_moments=1.1697832425616901e-08
+    [adjoint] dir 2: spec_shape=1.7005906669783399e-06, spec_aniso=3.5935684267831186e-07, spec_amp_mean=3.509206106016442e-11, spec_amp_fluct=4.117581162981376e-11, real_moments=2.8336209549510665e-10
+    [adjoint] dir 3: spec_shape=5.113687588437353e-07, spec_aniso=3.039473552049275e-07, spec_amp_mean=5.601507313256416e-11, spec_amp_fluct=6.595593298446211e-10, real_moments=3.149470982443658e-09
+    [adjoint] dir 4: spec_shape=3.13872377178771e-07, spec_aniso=1.1893204482834229e-07, spec_amp_mean=5.6978863108801516e-09, spec_amp_fluct=4.967338126688143e-09, real_moments=2.5054632861571523e-10
+    [adjoint] dir 5: spec_shape=1.2776591888283292e-06, spec_aniso=4.529156563209415e-07, spec_amp_mean=2.3650968533371923e-10, spec_amp_fluct=5.946787214704005e-09, real_moments=8.009421615755957e-09
+    [adjoint] dir 6: spec_shape=2.002264842170568e-07, spec_aniso=1.246132423494956e-07, spec_amp_mean=1.1334447334754508e-09, spec_amp_fluct=5.865301899014495e-10, real_moments=1.0668592516239777e-08
+    [adjoint] dir 7: spec_shape=5.47937348958762e-07, spec_aniso=3.357967449835174e-07, spec_amp_mean=4.306655309329161e-10, spec_amp_fluct=1.3280746933104012e-09, real_moments=5.865436816827989e-10
+    [adjoint] dir 8: spec_shape=2.9823905175354423e-07, spec_aniso=2.7084145715047863e-07, spec_amp_mean=7.707695030149086e-10, spec_amp_fluct=8.436606367764615e-10, real_moments=1.1656126429141738e-08
+    [adjoint] dir 9: spec_shape=7.607914965591989e-07, spec_aniso=2.2693426600926855e-07, spec_amp_mean=6.061712602905915e-10, spec_amp_fluct=7.163681928100569e-10, real_moments=1.2070867699588997e-08
+    [unrolled] dir 0: spec_shape=6.4675213509792876e-09, spec_aniso=1.2546275014129565e-09, spec_amp_mean=8.617114475214842e-09, spec_amp_fluct=8.682837795972152e-10, real_moments=3.876220631450312e-10
+    [unrolled] dir 1: spec_shape=2.424229617243462e-09, spec_aniso=1.4158147138496222e-09, spec_amp_mean=2.7840873767409384e-10, spec_amp_fluct=2.062284747201366e-09, real_moments=3.7481148563263825e-10
+    [unrolled] dir 2: spec_shape=7.842762394593591e-11, spec_aniso=4.120616250222573e-09, spec_amp_mean=1.7377255715077391e-10, spec_amp_fluct=8.580812808598932e-10, real_moments=3.8191680191194255e-10
+    [unrolled] dir 3: spec_shape=2.2767993886394502e-09, spec_aniso=3.683633958456389e-10, spec_amp_mean=3.394189823807951e-10, spec_amp_fluct=3.216999819064102e-09, real_moments=9.352585959530773e-10
+    [unrolled] dir 4: spec_shape=1.1095318411517446e-10, spec_aniso=3.4241583806115612e-09, spec_amp_mean=7.780195312049314e-10, spec_amp_fluct=1.5649277928488974e-10, real_moments=8.27191485839017e-11
+    [unrolled] dir 5: spec_shape=2.177495101472234e-09, spec_aniso=1.2965864833016124e-09, spec_amp_mean=7.953668956690123e-11, spec_amp_fluct=3.111774572034465e-09, real_moments=5.792240645107016e-10
+    [unrolled] dir 6: spec_shape=2.3199795805043075e-09, spec_aniso=1.653224683238777e-09, spec_amp_mean=3.985658871818325e-10, spec_amp_fluct=1.4098819492296644e-09, real_moments=6.633680323398801e-11
+    [unrolled] dir 7: spec_shape=1.0482759478616241e-09, spec_aniso=1.7362660940538374e-09, spec_amp_mean=2.8261841732708904e-10, spec_amp_fluct=3.688733407684913e-09, real_moments=6.603255877841048e-10
+    [unrolled] dir 8: spec_shape=2.1751262472674955e-09, spec_aniso=1.4862073793826065e-09, spec_amp_mean=1.2437714381899264e-10, spec_amp_fluct=7.056305934232503e-10, real_moments=1.6094085136338554e-11
+    [unrolled] dir 9: spec_shape=1.408975946772013e-08, spec_aniso=1.9183233194328124e-08, spec_amp_mean=2.2123723622888794e-10, spec_amp_fluct=5.777871291191481e-10, real_moments=6.192916936365469e-10
+
+=== STALLED arm ===
+  stall hunt scale=0.1 trial=0: residual 3.563e-13 converged
+  stall hunt scale=0.5 trial=0: residual 3.601e-13 converged
+  stall hunt scale=2.0 trial=0: skipped (model is not Turing-unstable — there is no pattern to solve)
+  forced-stall probe: eta=0.0003162 warm_res=6.239e-01 -> residual 1.870e-07 (amp 1.0000 x saturated)
+  forced-stall probe: eta=0.005623 warm_res=1.109e+01 -> residual 5.937e-05 (amp 1.0003 x saturated)
+  forced-stall probe: eta=0.02371 warm_res=4.677e+01 -> residual 1.786e-03 (amp 1.0072 x saturated)
+  forced stall: eta=0.0237 cap=1 -> residual 1.786e-03 (band 0.0001-0.01, inside)
+stalled arm: mechanism=forced_displaced_warm_state newton_iter=1 residual=1.786e-03 (bar 1e-09)
+    [adjoint] dir 0: spec_shape=0.7130675857184575, spec_aniso=0.3225815524161348, spec_amp_mean=0.39790688651021106, spec_amp_fluct=0.015024399922794434, real_moments=0.1336301746791643
+    [adjoint] dir 1: spec_shape=0.6493916614041072, spec_aniso=0.08258849824406514, spec_amp_mean=0.0037079387293466708, spec_amp_fluct=0.22632836164135473, real_moments=0.1683903468451783
+    [adjoint] dir 2: spec_shape=0.7749924762428021, spec_aniso=0.18232769162997478, spec_amp_mean=0.0007952730556075512, spec_amp_fluct=0.011160946812840366, real_moments=0.4326157595842094
+    [adjoint] dir 3: spec_shape=0.6639750688628985, spec_aniso=0.0710664514543265, spec_amp_mean=0.0018278913012764392, spec_amp_fluct=0.03670604347555882, real_moments=0.1897478466287134
+    [adjoint] dir 4: spec_shape=0.5525113795904792, spec_aniso=0.3211388186652716, spec_amp_mean=0.05702868952463357, spec_amp_fluct=0.028588388681874372, real_moments=0.18218192347414022
+    [adjoint] dir 5: spec_shape=1.9258474818039883, spec_aniso=0.8610933658126065, spec_amp_mean=0.0007811054799640595, spec_amp_fluct=0.11937624121090945, real_moments=0.16623448873403607
+    [adjoint] dir 6: spec_shape=0.5950494104651333, spec_aniso=0.1359881641550238, spec_amp_mean=0.007881815393693111, spec_amp_fluct=0.025415356322073798, real_moments=0.1416868316962002
+    [adjoint] dir 7: spec_shape=0.5172263096113214, spec_aniso=0.2892463876127105, spec_amp_mean=0.0018636310146848383, spec_amp_fluct=0.016506942407706983, real_moments=0.1445675945133071
+    [adjoint] dir 8: spec_shape=0.5845924292594453, spec_aniso=0.08955801572923883, spec_amp_mean=0.006985151885206104, spec_amp_fluct=0.05360616297503486, real_moments=0.12091065188289664
+    [adjoint] dir 9: spec_shape=0.9482020808671981, spec_aniso=1.2818318923215661, spec_amp_mean=0.0019941409199543433, spec_amp_fluct=0.002831792399856002, real_moments=0.012662767212511637
+    [unrolled] dir 0: spec_shape=8.27120157791795e-09, spec_aniso=1.453103528215847e-09, spec_amp_mean=1.302211921771834e-08, spec_amp_fluct=1.608616700687368e-10, real_moments=3.018994805603442e-10
+    [unrolled] dir 1: spec_shape=6.009169306224479e-10, spec_aniso=1.4518217342904397e-09, spec_amp_mean=1.5125894106482734e-10, spec_amp_fluct=4.230301892925473e-09, real_moments=9.290322022613625e-10
+    [unrolled] dir 2: spec_shape=7.469848178983752e-09, spec_aniso=3.750187737825337e-09, spec_amp_mean=7.89486794398354e-11, spec_amp_fluct=9.04179287922487e-10, real_moments=3.1443531377226086e-10
+    [unrolled] dir 3: spec_shape=2.0878919266120295e-09, spec_aniso=9.250247240392135e-10, spec_amp_mean=1.134747480834841e-10, spec_amp_fluct=3.309021494075961e-09, real_moments=2.0016647560041334e-10
+    [unrolled] dir 4: spec_shape=5.656504940659148e-10, spec_aniso=2.798932581594922e-09, spec_amp_mean=2.922150802006207e-10, spec_amp_fluct=5.549044985976162e-09, real_moments=1.1086643525997558e-09
+    [unrolled] dir 5: spec_shape=7.782882663474085e-09, spec_aniso=1.901294223513079e-09, spec_amp_mean=2.7602045735054068e-11, spec_amp_fluct=2.957304707196347e-09, real_moments=8.255419046247239e-10
+    [unrolled] dir 6: spec_shape=1.772778784338247e-09, spec_aniso=1.884460278118235e-09, spec_amp_mean=4.76526020947364e-10, spec_amp_fluct=1.7280979739715662e-09, real_moments=6.525104132201945e-10
+    [unrolled] dir 7: spec_shape=1.1531674617980982e-09, spec_aniso=1.7255685033601292e-09, spec_amp_mean=1.0521907133862904e-10, spec_amp_fluct=3.254917744635238e-09, real_moments=1.3133646902296995e-09
+    [unrolled] dir 8: spec_shape=2.4950626166412453e-10, spec_aniso=4.693773343045263e-10, spec_amp_mean=2.65813714733624e-10, spec_amp_fluct=2.704411594704655e-09, real_moments=8.313607976657388e-10
+    [unrolled] dir 9: spec_shape=7.211765623862298e-09, spec_aniso=1.4420201036361955e-08, spec_amp_mean=4.166091895631994e-10, spec_amp_fluct=8.075565855176261e-11, real_moments=7.633529424653718e-10
+
+=== cost (threads pinned, isolated processes) ===
+  cost [adjoint B=1] 4.562 s/member (4.562 s/step), peak RSS 703 MB (+0 MB over setup)
+  cost [unrolled B=1] 1.544 s/member (1.544 s/step), peak RSS 1136 MB (+433 MB over setup)
+  cost [adjoint B=8] 104.298 s/member (834.381 s/step), peak RSS 705 MB (+2 MB over setup)
+  cost [unrolled B=8] 2.084 s/member (16.670 s/step), peak RSS 1219 MB (+516 MB over setup)
+
+wrote experiments/redesign_r3/fd_ab/results/fd_ab.json
+{
+  "converged": {
+    "adjoint": {
+      "worst_rel_err_over_terms": 1.7005906669783399e-06,
+      "passes_tol_all_terms": true,
+      "worst_per_term": {
+        "spec_shape": 1.7005906669783399e-06,
+        "spec_aniso": 4.529156563209415e-07,
+        "spec_amp_mean": 4.671036102992797e-08,
+        "spec_amp_fluct": 5.946787214704005e-09,
+        "real_moments": 1.752802018630484e-08
+      }
+    },
+    "unrolled": {
+      "worst_rel_err_over_terms": 1.9183233194328124e-08,
+      "passes_tol_all_terms": true,
+      "worst_per_term": {
+        "spec_shape": 1.408975946772013e-08,
+        "spec_aniso": 1.9183233194328124e-08,
+        "spec_amp_mean": 8.617114475214842e-09,
+        "spec_amp_fluct": 3.688733407684913e-09,
+        "real_moments": 9.352585959530773e-10
+      }
+    }
+  },
+  "stalled": {
+    "adjoint": {
+      "worst_rel_err_over_terms": 1.9258474818039883,
+      "passes_tol_all_terms": false,
+      "worst_per_term": {
+        "spec_shape": 1.9258474818039883,
+        "spec_aniso": 1.2818318923215661,
+        "spec_amp_mean": 0.39790688651021106,
+        "spec_amp_fluct": 0.22632836164135473,
+        "real_moments": 0.4326157595842094
+      }
+    },
+    "unrolled": {
+      "worst_rel_err_over_terms": 1.4420201036361955e-08,
+      "passes_tol_all_terms": true,
+      "worst_per_term": {
+        "spec_shape": 8.27120157791795e-09,
+        "spec_aniso": 1.4420201036361955e-08,
+        "spec_amp_mean": 1.302211921771834e-08,
+        "spec_amp_fluct": 5.549044985976162e-09,
+        "real_moments": 1.3133646902296995e-09
+      }
+    }
+  }
+}
+guarded_run: END rc=0 MemAvailable=15372MB

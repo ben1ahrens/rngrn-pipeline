@@ -2537,3 +2537,80 @@ it can be fixed deliberately. See `docs/FUTURE_WORK.md`.
 
 **Not established.** Whether the reference frames are recoverable at a smaller `dt`, and hence
 what a calibrated k\* tolerance for Milestone 1 would actually be. Both remain open.
+
+---
+
+### D-CLAIM5-1 — the observation-noise knob, its levels, and the reproducibility substitute
+
+**Date:** 2026-08-19. **Status:** DECIDED (mechanism) / UNCALIBRATED (probe levels), by
+design — this is the paper's claim 5 ("robustness of training to noisy training data"), whose
+deliverable is a **measured curve**, not a pass/fail bar. No calibrated noise threshold exists
+for this project and none is claimed here.
+
+**The mechanism.** `data.obs_noise_sigma` / `data.obs_noise_seed`
+(`src/rngrn/config.py::DataConfig`) add gaussian noise to the OBSERVED frame at the firewall
+gate (`src/rngrn/data/gate.py::_apply_obs_noise`), strictly after `_observe()` slices out the
+answer-key channels. `sigma` is defined **relative to each observed channel's own clean std**
+(scale-free, so the same sigma is comparable across samples with different signal amplitude),
+not as an absolute noise floor — a fixed absolute sigma would mean something different on a
+low-amplitude channel than a high-amplitude one, and this dataset's three channels differ in
+scale. `sigma=0` is the identity path (no RNG constructed, bit-identical output); `sigma>0`
+with no seed raises `ValueError` (house style, no silent irreproducibility).
+
+**The probe levels — UNCALIBRATED.** `sigma_rel in {0.01, 0.05, 0.2}` were chosen as a small
+log-ish spread (1%, 5%, 20% of channel std) spanning "negligible" to "large" perturbation,
+purely to see where the curve moves, if at all. They are not calibrated against any control
+because there is nothing to calibrate them against — claim 5 is exploratory by the controller's
+own framing ("measured curve only, no pass/fail language"). Rejected alternative: picking
+levels post-hoc from where the curve broke, which would have been fitting the report to a
+result instead of reporting a pre-specified probe.
+
+**The reproducibility substitute — disclosed deviation.** The obvious way to keep noisy runs
+byte-reproducible would be to materialise a noisy copy of the dataset as its own registered
+payload (own `manifest.json`, own `payload.h5`). This was rejected in favour of noise applied
+at load time, seeded and recorded in `frozen_config.yaml`: every noisy frame is regenerable
+byte-identically from (tracked dataset checksum, sigma, seed) alone, with **no new
+payload-writing script** and therefore no new entry needed in `tests/test_firewall.py`'s
+`FORBIDDEN` list (CLAUDE.md §5's `scripts/` gap only applies to scripts that write
+`payload.h5`; this path never does). Reproducibility is preserved exactly; the cost is that the
+"dataset" a noisy run trained on is not itself a browsable artifact, only a formula plus a seed.
+
+**A consequence, stated because it is deliberate rather than accidental.** Noise is applied to
+the observed channels only, which also perturbs `kstar_obs` — the FFT measured off the
+(now-noisy) observed frame, and hence the k-grid anchor (`CLAUDE.md` §7c point 2). This is
+correct, not a leak: `kstar_obs` is computed from the observed frame at recovery time (never
+from ground truth), so perturbing the observed frame is exactly what "noisy training data"
+means. A design that kept `kstar_obs` clean while noising only the pixel values would have
+tested a narrower and less honest claim.
+
+**What was measured (three_gene_qvar/sample_0001, nc1, c2_P config, 8 seeds/level, cubic
+dispersion, batched CUDA; `experiments/claim5_obs_noise/`):**
+
+| sigma_rel | recovered_turing | kstar_fft_rel_err (mean) | kstar_rel_err (mean) | morphology_match | morphology_distance (mean) | plausibility_score (mean) |
+|---|---|---|---|---|---|---|
+| 0.00 (control) | 8/8 | 0.0352 | 0.0365 | 7/7 scored | 0.3988 | 1.0000 |
+| 0.01 | 8/8 | 0.0278 | 0.0365 | 7/8 | 0.4764 | 1.0000 |
+| 0.05 | 8/8 | 0.0450 | 0.0261 | 7/7 scored | 0.4041 | 1.0000 |
+| 0.20 | 8/8 | 0.0448 | 0.0368 | 8/8 | 0.3762 | 1.0000 |
+
+Every level fully preserves `recovered_turing` (8/8) up to sigma_rel=0.20 on this one target;
+`kstar_fft_rel_err` and `morphology_distance` move within roughly the same band as the
+seed-to-seed spread already present at sigma=0, not monotonically with sigma. One seed (seed 3)
+fails to pattern on rollout (`rollout_status=unpatterned`, `morphology_match=None`) at sigma
+0.00 AND 0.05 but patterns at 0.01 and 0.20 — non-monotonic, consistent with restart-seed noise
+dominating over the injected observation noise at these levels on this one target, not with a
+noise-driven degradation. **This is one target, 8 seeds per level — not a claim of
+noise-tolerance in general**, and it should not be read as "noise doesn't matter"; it is a
+measured curve on the probe levels chosen, nothing more.
+
+**What was rejected.** (a) *A pass/fail bar on the curve.* Explicitly out of scope per the
+controller's framing and CLAUDE.md §8 — no calibrated threshold exists. (b) *Absolute-sigma
+noise instead of relative.* Would conflate channel-amplitude differences with noise-robustness
+differences on this dataset's non-uniform channel scales. (c) *More than one target.* Time-
+boxed by the paper deadline; the design was fixed by the controller to one target x 8 seeds x 4
+levels, which is what was run.
+
+**Code:** `src/rngrn/config.py::DataConfig.obs_noise_sigma/obs_noise_seed`,
+`src/rngrn/data/gate.py::_apply_obs_noise`, `src/rngrn/train.py::_resolve_recovery_input`.
+Tests: `tests/test_obs_noise.py` (8 tests, TDD). Runs:
+`experiments/claim5_obs_noise/sigma_{0p00,0p01,0p05,0p20}/`.

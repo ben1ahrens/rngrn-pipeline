@@ -4568,3 +4568,48 @@ state this rather than repeat §4.2's expectation);
 `tests/test_unrolled_grad.py::test_a_blown_up_segment_raises_rather_than_returning_a_nan_field`.
 Read with **D-R3-2**, whose segment length rests on the convergence and cost argument rather
 than on a stability one, and **D-PERF-6** (the per-call blow-up check this path reuses).
+
+### D-R3-4 — Task 15's grid-fidelity verdict comes from a PAIRED-IC design; the unpaired sweep is retained as pattern-selection-variance evidence, and its headline is SUPERSEDED as a fidelity claim
+
+**Date:** 2026-08-19. **Task:** R3 Task 15, fix round 1 (`feature/r3-raps-fidelity` @ the
+commit carrying this entry). **Status:** ANNOUNCED — a previously reported number changed
+meaning (reporting-numbers rule: stated loudly, here and in the task report).
+
+**The decision.** The 96²-vs-512² RAPS band-fidelity comparison is measured with both grids
+integrated from the SAME physical initial condition: the 512² IC is reconstructed
+bit-identically from its seed (`eval.rollout.simulate`'s rng path has a single consumer, so
+the draw is reproducible), spectrally decimated to each coarser grid (`decimate_field` on the
+IC, per species), and each coarse arm is a fresh ETDRK4 solve from that decimated IC under
+identical settings. Distances use the byte-identical estimator and band as the unpaired
+sweep, so the two designs differ ONLY in IC pairing.
+
+**Why.** The original (unpaired) sweep drew fresh white noise per grid per seed —
+`seed s @ 96²` and `seed s @ 512²` share nothing physical — so its 34–45 %/bin distances
+measure nonlinear pattern selection from unrelated ICs, not the coarse grid's estimator
+fidelity. Task review I1 identified the confound; the re-review verified the paired design
+on five checks, including 24/24 IC-reconstruction matches at |Δk*| = 0.0 exactly against
+seed-distinct references.
+
+**What changed meaning.** Unpaired: "no sub-512 grid clears D3's ~31 %/bin floor on
+worst-seed." Paired: **96² clears the floor on every seed of every fixture** (per-fixture
+mean/worst %/bin: 13.37/16.78, 4.04/9.38, 0.05/0.08), monotone in n. The unpaired number is
+NOT a fidelity result and must not be cited as one; it is retained
+(`results/raps_fidelity.json`) as evidence of pattern-selection variance across ICs, which
+is real and feeds the IC-averaging design question (Task 17). Anything written against the
+old headline (spec §4.3 fidelity paragraph, Task 17's dispatch, Task 21/22 roll-ups) must be
+re-read against `results/raps_fidelity_paired.json`.
+
+**Rejected.** (a) Re-using the committed 512² reference *arrays* — impossible, only scalars
+were serialised; replaced by re-running all 24 references and PROVING identity (raises above
+1e-9; observed max |Δk*| = 0.0, identical step counts). (b) Repairing the unpaired design by
+raising seed counts — averaging over unrelated ICs estimates the variance floor, not grid
+fidelity, at any seed count. (c) Deleting the unpaired result — it answers a different
+question the project still needs.
+
+**Calibration notes.** `NEAR_DUPLICATE_REL_TOL = 0.01` (fixture enumeration) is UNCALIBRATED
+and gates only an arm-matching disclosure. One caveat travels with the binding fixture:
+every `tune_comp_seed3` arm stops at its planned 606-step horizon
+(`stopped_reason: "horizon"`), not detected saturation; the residual coarse-IC induction
+bias is conservative in direction (inflates the coarse arm's distance), so it cannot
+manufacture the "clears" verdict. The n-question itself remains an OWNER decision; this
+entry records the measurement design, not a ruling on n.

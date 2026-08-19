@@ -75,8 +75,14 @@ initial condition (paired: the decimated 512^2 IC; unpaired: `simulate`'s own pe
   1. `diag_fft_d2.load_fixture` + `linear_kstar` → the fixture model and its own dispersion
      argmax k_lin. L = p*2*pi/k_lin (p=8, `solve_box.P_DEFAULT`), fixed across every grid
      for that fixture.
-  2. `eval.rollout.simulate` at n in {96, 128, 256, 512}, `early_stop=True` (saturated
-     patterns, not mid-transient), same L. The n=512 solve is REQUIRED per seed regardless
+  2. `eval.rollout.simulate` at n in {96, 128, 256, 512}, `early_stop=True`, same L.
+     NOTE (re-review finding): early_stop is a RULE, not a guarantee — d5_seed3/d5_seed5
+     arms stop saturated, but every tune_comp_seed3 arm (all 64) runs to the planned
+     horizon (`stopped_reason: "horizon"`, 606 steps), i.e. that fixture's fields are
+     late-growth, not detected-saturated. Both arms of a pair hit the SAME horizon, and
+     the shape-normalised distance cancels uniform amplitude, so the residual bias from
+     the coarse IC's smaller noise amplitude is conservative (inflates the coarse arm's
+     distance; cannot manufacture a pass). The n=512 solve is REQUIRED per seed regardless
      of grid count — it is the reference every other grid is compared against, not merely
      "a grid being tested" — so it cannot be skipped; what IS skipped is treating it as
      an open question (n=512-vs-itself is CHECKED to be ~0 every time, cheaply, and raises

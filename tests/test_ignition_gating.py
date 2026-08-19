@@ -18,6 +18,7 @@ import torch
 
 from rngrn import observables as OBS
 from rngrn.losses import total as LT
+from rngrn.losses import spectral as S
 from rngrn.losses.spectral import SpectralConfig, SpectralContext, build_frame_targets
 from rngrn.losses.weighting import FixedWeighting
 from rngrn.model import RNGRN, BatchedRNGRN
@@ -244,6 +245,78 @@ def test_compute_terms_batched_refuses_a_non_batched_model():
 
 
 # ---------------------------------------------------------------------------------
+# (d2) `_apply_spectral_batched` directly (Task 4, R3 review §5): the per-member
+# ignite-or-omit contract at the unit it is actually implemented in, not only through
+# `compute_terms_batched`'s end-to-end path above. Two things the (d) tests above do not
+# reach: the EXACT-0-vs-NaN split in isolation (no real BatchedRNGRN needed), and the
+# "abandoned" reason `active=` produces, which nothing under tests/ exercised before this.
+# ---------------------------------------------------------------------------------
+def test_apply_spectral_batched_exact_zero_for_a_member_the_solver_could_not_pattern():
+    """A member the forward solve could not pattern gets an EXACT 0.0 entry in `term_vals`
+    -- never omitted, never a NaN placeholder there (the NaN placeholder is a
+    `total_loss_batched`-level concern, already pinned by
+    `test_compute_terms_batched_accepts_a_batched_spectral_context` above) -- while its
+    `spectral_skipped`/`spec_computed` record the failure. `term_vals` must exist as a
+    concrete zero for EVERY member because it is what the batched loss sums over."""
+    frame, L, obs_idx = _tiny_recovery_inputs(N=3)
+    kstar_obs = _kstar_obs(frame, L)
+    cfg = SpectralConfig(ignition_margin=-1e9)
+    targets = build_frame_targets(frame.numpy(), L, kstar_obs, cfg)
+    pattern = _different_synthetic_pattern(N=3)
+    solver = _StubBatchedSpectralSolver(pattern, ok=[1], fail_reasons={0: "not_patterned"})
+    ctx = SpectralContext(solver=solver, targets=targets, cfg=cfg)
+    term_vals: dict = {}
+    parts = dict(ss_converged=np.array([True, True]), sig_max_pos=np.array([5.0, 5.0]))
+    xstar_pre = torch.zeros(2, 3, dtype=torch.float64)
+    conv = torch.tensor([True, True])
+
+    LT._apply_spectral_batched(term_vals, parts, ctx, xstar_pre, conv, active=None)
+
+    assert solver.calls == [[0, 1]], "both members ignited (margin=-1e9) -- both offered"
+    assert list(parts["spectral_skipped"]) == ["not_patterned", ""]
+    assert list(parts["spec_computed"]) == [False, True]
+    assert list(parts["spec_ignited"]) == [1.0, 1.0]
+    ref_vals, _ = S.spectral_terms(pattern, targets, cfg)   # member 1's own true value
+    for k in LT.SPECTRAL_TERM_KEYS:
+        assert float(term_vals[k][0]) == 0.0, f"{k}: not-patterned member must be EXACT 0"
+        assert float(term_vals[k][1]) == pytest.approx(float(ref_vals[k]), abs=1e-12), (
+            f"{k}: patterned member's entry does not match its own computed value -- the "
+            "index_copy scatter landed it in the wrong row or dropped it")
+
+
+def test_apply_spectral_batched_abandoned_is_distinguished_from_not_ignited():
+    """The `active` mask's "abandoned" reason must never be conflated with "not_ignited"
+    (losses/total.py:222-225): an abandoned lane may well have been Turing-unstable when
+    `recover` gave up on it, and the record should say WHY the solve was skipped, not imply
+    a stability verdict nobody made. Two members, NEITHER of which reaches a solve, for two
+    DIFFERENT reasons: member 0 is Turing-unstable but INACTIVE (`recover` abandoned it);
+    member 1 is simply not Turing-unstable. If `active` were ignored (or ANDed in the wrong
+    place), member 0 would read "not_ignited" exactly like member 1 and this test would
+    fail on the `spectral_skipped` assertion below."""
+    solver = _StubBatchedSpectralSolver(_different_synthetic_pattern(N=3), ok=[0, 1],
+                                        fail_reasons={})
+    cfg = SpectralConfig(ignition_margin=1e-3)
+    ctx = SpectralContext(solver=solver, targets=None, cfg=cfg)
+    term_vals: dict = {}
+    parts = dict(ss_converged=np.array([True, True]),
+                sig_max_pos=np.array([5.0, -5.0]))    # member 0 unstable, member 1 stable
+    xstar_pre = torch.zeros(2, 3, dtype=torch.float64)
+    conv = torch.tensor([True, True])
+    active = torch.tensor([False, True])               # member 0 abandoned by the caller
+
+    LT._apply_spectral_batched(term_vals, parts, ctx, xstar_pre, conv, active)
+
+    assert list(parts["spectral_skipped"]) == ["abandoned", "not_ignited"]
+    assert list(parts["spec_ignited"]) == [0.0, 0.0]
+    assert list(parts["spec_computed"]) == [False, False]
+    assert solver.calls == [], (
+        "neither member reached a solve (one abandoned, one not ignited) -- the expensive "
+        "forward solve must not run for either")
+    for k in LT.SPECTRAL_TERM_KEYS:
+        assert term_vals[k].tolist() == [0.0, 0.0], f"{k}: nothing solved, must be all-0"
+
+
+# ---------------------------------------------------------------------------------
 # (e) recover()-level misconfiguration raises
 # ---------------------------------------------------------------------------------
 def _tiny_recovery_input_np(N=3, H=16, L=10.0):
@@ -279,9 +352,18 @@ def test_recover_accepts_batched_with_a_spectral_weight():
     `lbfgs_steps=0` is explicit so that guard cannot fire, and `adam_steps=0` keeps this a fast
     validation-layer check: the point is that NO ValueError fires, not that anything converges.
 
-    NOT COVERED HERE, is Task 4's job: an end-to-end `batched=True, lbfgs_steps=0` spectral
-    recover() run checked NUMERICALLY against its serial twin (the batched-vs-serial
-    equivalence C1/C2 of docs/REVIEW_gpu_optim_delta.md still want). This test only pins that
+    NOT COVERED HERE -- Task 4 completed this, but NOT as a literal `recover()` call:
+    `test_batched_forward_solve.py::
+    test_total_loss_batched_matches_serial_with_a_spectral_weight_from_identical_warm_starts`
+    explains why recover() itself is impractical to pin (its first ignited step is always a
+    FRESH relax, and on CPU the serial and batched fresh relaxes are two independently-
+    implemented integrators seeded through different RNGs -- test_batched_forward_solve.py's
+    own module docstring: "their fresh relaxes differ by FFT backend and would confound
+    it"). It instead drives `losses.total.total_loss` / `total_loss_batched` -- the exact
+    assembler `recover()` calls per step -- from an IDENTICAL preset warm start on both
+    sides, the same discipline that module already uses for its gradient checks, and closes
+    the batched-vs-serial equivalence C1/C2 of docs/REVIEW_gpu_optim_delta.md wants. This
+    test here only pins that
     the combination is ACCEPTED at the validation layer -- it asserts nothing about the
     recovered result's correctness.
     """

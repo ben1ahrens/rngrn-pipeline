@@ -30,9 +30,15 @@ import pytest
 import torch
 
 import rngrn.forward as fwd
+from rngrn import observables as obs
+from rngrn import recover as R
+from rngrn.etdrk4_torch import _torch_reaction_builder, torch_half_coeffs
 from rngrn.forward import (THETA_NAMES, BatchedPatternSolver, PatternSolver,
                            relax_to_pattern_torch, relax_to_pattern_torch_batched)
+from rngrn.losses import total as LT
+from rngrn.losses.spectral import SpectralConfig, SpectralContext, build_frame_targets
 from rngrn.losses.terms import steady_state_batched
+from rngrn.losses.weighting import FixedWeighting
 from rngrn.model import RNGRN, BatchedRNGRN
 
 torch.set_default_dtype(torch.float64)
@@ -498,3 +504,289 @@ def test_solve_subset_keys_warm_state_by_global_member_and_clears_it_on_failure(
         "re-converges homogeneous forever")
     assert solver._warm[2] is not None, (
         "solving member 0 must not touch member 2's warm slot")
+
+
+# ========================================================================================
+# 6. the remaining forward.py batched primitives vs their serial twins (R3 task 4, step 3)
+# ========================================================================================
+# Pure elementwise-algebra checks, deliberately NOT built on the `batch` fixture: none of
+# these six symbols solves anything (no Newton, no relax), so a fresh, cheap (n=8) grid and
+# fresh random field/parameter draws are enough to pin the batched-vs-serial equivalence
+# the review (docs/REVIEW_gpu_optim_delta.md §5) found untested.
+_ALG_N, _ALG_L = 8, 5.0
+
+
+def _algebra_members(seed0=700, b=3):
+    return [RNGRN(N=3, form="competitive", seed=seed0 + r) for r in range(b)]
+
+
+def test_batched_reaction_fields_matches_serial_reaction_fields_per_member():
+    """`batched_reaction_fields` vs `reaction_fields`, member by member. Same ops, same
+    reduction axis and order (only the broadcast shape differs, per the function's own
+    docstring), so agreement should be exact, not merely close."""
+    models = _algebra_members()
+    bm = BatchedRNGRN(models)
+    idx = torch.arange(B)
+    rng = np.random.default_rng(701)
+    u = torch.from_numpy(rng.standard_normal((B, bm.N, _ALG_N, _ALG_N)))
+    f_b = fwd.batched_reaction_fields(bm, u, idx).detach()
+    worst = 0.0
+    for m in range(B):
+        f_s = fwd.reaction_fields(models[m], u[m]).detach()
+        worst = max(worst, float((f_b[m] - f_s).abs().max()))
+    print(f"\n[batched_reaction_fields] worst abs diff over {B} members: {worst:.3e}")
+    # Measured 2.22e-16 (1 ulp of float64): the batched form broadcasts the parameters
+    # with an extra einsum/broadcast reshape the serial form does not need, so the
+    # summation order differs by one ulp -- not bit-identical, per the function's own
+    # docstring ("same ops, same reduction axis and order; only the broadcast shape
+    # differs"), which promises the SAME ops, not the same intermediate shape.
+    assert worst < 1e-13, f"batched_reaction_fields vs reaction_fields: {worst:.3e}"
+
+
+def test_batched_reaction_fields_gradient_lands_only_on_the_selected_members_row():
+    """A gradient through `batched_reaction_fields` for a loss on member 1's output alone
+    must be exactly zero in every OTHER member's row of every (B, ...) theta tensor --
+    `index_select` should isolate the row it pulled, not the whole batch."""
+    models = _algebra_members()
+    bm = BatchedRNGRN(models)
+    idx = torch.tensor([1])
+    rng = np.random.default_rng(702)
+    u = torch.from_numpy(rng.standard_normal((1, bm.N, _ALG_N, _ALG_N)))
+    f = fwd.batched_reaction_fields(bm, u, idx)
+    # theta_D is excluded: the pointwise reaction never reads diffusivity (D enters only
+    # the Laplacian term, in make_spatial_F_batched), so it is correctly ABSENT from this
+    # function's graph -- not a scatter bug to check for.
+    react_names = [nm for nm in THETA_NAMES if nm != "theta_D"]
+    g = torch.autograd.grad(f.sum(), [getattr(bm, nm) for nm in react_names])
+    for nm, gi in zip(react_names, g):
+        assert float(gi[1].abs().sum()) > 0.0, f"{nm}: member 1's own row got no gradient"
+        for other in (0, 2):
+            leaked = int(torch.count_nonzero(gi[other]))
+            assert leaked == 0, f"{nm}: member {other} leaked {leaked} nonzero grad entries"
+
+
+def test_make_spatial_F_batched_matches_serial_make_spatial_F_per_member():
+    """`F_b(u)[j] == make_spatial_F(member j)(u[j])`, and the batched closure stays
+    differentiable through every member's theta (it is rebuilt per backward, per its own
+    docstring)."""
+    models = _algebra_members()
+    bm = BatchedRNGRN(models)
+    idx = torch.arange(B)
+    F_b = fwd.make_spatial_F_batched(bm, idx, _ALG_N, _ALG_L)
+    rng = np.random.default_rng(703)
+    u = torch.from_numpy(rng.standard_normal((B, bm.N, _ALG_N, _ALG_N)))
+    out_b = F_b(u)
+    worst = 0.0
+    for m in range(B):
+        F_s = fwd.make_spatial_F(models[m], _ALG_N, _ALG_L)
+        worst = max(worst, float((out_b[m] - F_s(u[m])).abs().max()))
+    print(f"\n[make_spatial_F_batched] worst abs diff over {B} members: {worst:.3e}")
+    assert worst < 1e-10, f"make_spatial_F_batched vs make_spatial_F: {worst:.3e}"
+
+    g = torch.autograd.grad(out_b.sum(), [getattr(bm, nm) for nm in THETA_NAMES])
+    for nm, gi in zip(THETA_NAMES, g):
+        assert torch.isfinite(gi).all(), f"{nm}: non-finite gradient through the closure"
+        assert float(gi.abs().sum()) > 0.0, f"{nm}: zero gradient through the closure"
+
+
+def test_member_F_equals_the_serial_closure_for_the_member_it_views():
+    """`_member_F` is what lets `newton_polish`/`solve_adjoint` reuse their serial-shaped
+    code on one member of a batched model -- its (N, n, n) -> (N, n, n) output must equal
+    `make_spatial_F(models[m], ...)` exactly, for every member."""
+    models = _algebra_members()
+    bm = BatchedRNGRN(models)
+    KX, KY = fwd._half_k_grids(_ALG_N, _ALG_L)
+    k2h = torch.from_numpy(KX**2 + KY**2)
+    rng = np.random.default_rng(704)
+    worst = 0.0
+    for m in range(B):
+        F_m = fwd._member_F(bm, m, _ALG_N, _ALG_L, k2h)
+        u = torch.from_numpy(rng.standard_normal((bm.N, _ALG_N, _ALG_N)))
+        F_s = fwd.make_spatial_F(models[m], _ALG_N, _ALG_L)
+        worst = max(worst, float((F_m(u) - F_s(u)).abs().max()))
+    print(f"\n[_member_F] worst abs diff over {B} members: {worst:.3e}")
+    assert worst < 1e-10, f"_member_F vs make_spatial_F per member: {worst:.3e}"
+
+
+def test_batched_reaction_builder_matches_serial_torch_reaction_builder_per_member():
+    """`_batched_reaction_builder` vs `etdrk4_torch._torch_reaction_builder`, member by
+    member: same competitive-form arithmetic, DETACHED parameters on both sides."""
+    models = _algebra_members()
+    bm = BatchedRNGRN(models)
+    idx = torch.arange(B)
+    reaction_b = fwd._batched_reaction_builder(bm, idx)
+    rng = np.random.default_rng(705)
+    X = torch.from_numpy(rng.standard_normal((B, bm.N, _ALG_N, _ALG_N)))
+    out_b = reaction_b(X)
+    worst = 0.0
+    for m in range(B):
+        reaction_s = _torch_reaction_builder(models[m], torch.device("cpu"))
+        out_s = reaction_s(X[m:m + 1])[0]
+        worst = max(worst, float((out_b[m] - out_s).abs().max()))
+    print(f"\n[_batched_reaction_builder] worst abs diff over {B} members: {worst:.3e}")
+    # Measured 4.44e-16 (1 ulp): same one-extra-broadcast-axis reason as
+    # batched_reaction_fields above, not a member-blending defect.
+    assert worst < 1e-13, f"_batched_reaction_builder vs _torch_reaction_builder: {worst:.3e}"
+
+
+def test_batched_reaction_builder_refuses_nc1_loudly():
+    """Same restriction as the serial `_torch_reaction_builder`: a silent half-port would
+    poison the equivalence check, so nc1 must raise, not degrade."""
+    models = [RNGRN(N=3, form="nc1", seed=800 + r) for r in range(2)]
+    bm = BatchedRNGRN(models)
+    with pytest.raises(NotImplementedError, match="competitive"):
+        fwd._batched_reaction_builder(bm, torch.arange(2))
+
+
+def test_half_coeffs_batched_matches_serial_torch_half_coeffs_per_member_dt_and_D():
+    """`_half_coeffs_batched` vs `torch_half_coeffs`, with DIFFERENT dt and D per member --
+    the batched form must broadcast the per-member (b, 1, 1, 1) dt and (b, N) D correctly,
+    not accidentally share one member's coefficients across the batch."""
+    D = np.array([[1.0, 2.0, 3.0], [0.5, 1.5, 2.5], [2.0, 1.0, 0.5]])   # (B, N), distinct
+    dt = np.array([0.01, 0.02, 0.015])                                  # (B,), distinct
+    dev = torch.device("cpu")
+    coeffs_b = fwd._half_coeffs_batched(D, _ALG_N, _ALG_L, dt, dev)
+    worst = 0.0
+    for m in range(D.shape[0]):
+        coeffs_s = torch_half_coeffs(D[m], _ALG_N, _ALG_L, float(dt[m]), dev)
+        for cb, cs in zip(coeffs_b, coeffs_s):
+            worst = max(worst, float((cb[m] - cs).abs().max()))
+    print(f"\n[_half_coeffs_batched] worst abs diff over {D.shape[0]} members: {worst:.3e}")
+    assert worst == 0.0, f"_half_coeffs_batched vs torch_half_coeffs: {worst:.3e}"
+
+
+def test_kstar_of_torch_batched_matches_serial_kstar_of_torch_per_member():
+    """`_kstar_of_torch_batched` vs `observables.kstar_of_torch`, member by member. The
+    docstring claims agreement "to floating-point associativity (~1e-16 relative)", not bit-
+    identity -- the mask-vs-slice centroid sums the same 5 terms in the same order but one
+    sums a full row with the rest masked to zero and the other slices; this measures that
+    claim rather than trusting it."""
+    n, Ltest = 32, 6.0
+    rng = np.random.default_rng(706)
+    fields = torch.from_numpy(rng.standard_normal((B, n, n)))
+    ks_b = fwd._kstar_of_torch_batched(fields, Ltest)
+    worst = 0.0
+    for m in range(B):
+        ks_s = obs.kstar_of_torch(fields[m], Ltest)
+        worst = max(worst, abs(float(ks_b[m]) - ks_s) / max(abs(ks_s), 1e-300))
+    print(f"\n[_kstar_of_torch_batched] worst relative diff over {B} members: {worst:.3e}")
+    assert worst < 1e-10, f"_kstar_of_torch_batched vs kstar_of_torch: {worst:.3e}"
+
+
+# ========================================================================================
+# 7. end-to-end spectral equivalence, batched vs serial, from an IDENTICAL warm start
+#    (R3 controller ruling on task 1, 2026-08-19 -- completes the D-PERF-4 legality pin
+#    tests/test_ignition_gating.py::test_recover_accepts_batched_with_a_spectral_weight
+#    names but explicitly leaves undone: "an end-to-end batched=True, lbfgs_steps=0
+#    spectral recover() run checked NUMERICALLY against its serial twin")
+# ========================================================================================
+def test_total_loss_batched_matches_serial_with_a_spectral_weight_from_identical_warm_starts(
+        batch):
+    """NUMERIC equivalence of the batched spectral wiring (`BatchedPatternSolver` +
+    `losses.total._apply_spectral_batched` + `losses.spectral.spectral_terms_batched`)
+    against the serial one, through `losses.total.total_loss` / `total_loss_batched` -- the
+    exact assembler `recover()`'s Adam loop calls per step once a spectral weight is on
+    (recover.py's serial restart loop wires a fresh `PatternSolver` per restart; its batched
+    branch, `_batched_restarts`, wires ONE `BatchedPatternSolver`).
+
+    NOT `recover()` ITSELF, and that is deliberate, not a shortcut taken for convenience.
+    `recover()`'s spectral solve on its first ignited step is always a FRESH relax, and on
+    CPU `PatternSolver._relax` dispatches to the NUMPY integrator
+    (`eval.numerics.integrate_etdrk4_rfft`, via `forward.relax_to_pattern`) while
+    `BatchedPatternSolver`'s relax is ALWAYS the TORCH one
+    (`relax_to_pattern_torch_batched`, forward.py:1054) -- two independently-implemented
+    integrators seeded through different RNGs. This module's OWN docstring names exactly
+    this confound ("their fresh relaxes differ by FFT backend and would confound it") as
+    the reason tests 1-2 above compare gradients from a WARM start instead of a fresh one.
+    A `recover()` call that reaches real ignition would hit the same confound the moment a
+    fresh relax runs, so pinning `recover()` end-to-end would measure relax-backend
+    divergence, not a defect in the spectral ASSEMBLY this test exists to check -- and
+    getting a recover()-driven model to ignite from its own (near-never Turing-unstable,
+    model.py's low_basal-init docstring: 0/398) random init within a test-suite step budget
+    is not practical in the first place.
+
+    So this follows the SAME discipline `_solve_warm` (tests 1-2 above) already uses: both
+    solvers get `_warm` preset to the SAME already-patterned field (`batch["u0"]`, this
+    module's own fixture), so with `warm_mode="newton"` (the default for BOTH
+    `PatternSolver` and `BatchedPatternSolver`) both paths do a pure Newton polish through
+    the shared, D1-verified `newton_polish` and NEVER touch either relax implementation.
+    What is compared is therefore exactly the spectral assembly under test (the ignition
+    gate, the solver wiring, `spectral_terms(_batched)`) -- the C1/C2 concern -- not relax
+    parity, which is a separate, already-measured claim (D2, etdrk4_torch.py's docstring).
+    """
+    L, u0 = batch["L"], batch["u0"]
+    obs_idx = list(range(3))
+    # Stand-in "observed frame": member 0's own already-patterned field. This test makes no
+    # data-fidelity claim -- a numeric-equivalence check needs any real image with spectral
+    # content in the fitting band, and the fixture's own patterned output supplies one.
+    frame_np = u0[0].detach().cpu().numpy()
+    frame_t = torch.from_numpy(frame_np)
+    kstar_obs = float(obs.kstar_of(frame_np[0], L=L))
+    # forces ignition regardless of margin -- the fixture is already verified Turing-
+    # unstable (the `batch` fixture's own sigma_max assertion), this just keeps the test
+    # robust to the per-member MEMBER_SPREAD offset without re-deriving a margin.
+    spec_cfg = SpectralConfig(ignition_margin=-1e9)
+    spec_targets = build_frame_targets(frame_np, L, kstar_obs, spec_cfg)
+    weights = dict(kstar=1.0, turing=1.0, resid=0.0, anticollapse=0.5, anchor=2.0,
+                   spec_shape=1.0, spec_aniso=1.0, spec_amp_mean=1.0, spec_amp_fluct=1.0,
+                   real_moments=1.0)
+    strategy = FixedWeighting(weights)
+    kgrid = R._kgrid_for(kstar_obs)
+    spec_keys = ("spec_shape", "spec_aniso", "spec_amp_mean", "spec_amp_fluct",
+                "real_moments")
+
+    # --- serial: one PatternSolver per member, on INDEPENDENT fresh model copies ---
+    models_s = _members()   # deterministic loader -- same theta as batch["models"]
+    loss_s, l_keys_s, g_s = [], [], []
+    for m in range(B):
+        solver = PatternSolver(models_s[m], N_GRID, L, SEEDS[m])
+        solver._warm = u0[m].detach().clone()
+        ctx = SpectralContext(solver=solver, targets=spec_targets, cfg=spec_cfg)
+        loss_m, parts_m = LT.total_loss(models_s[m], frame_t, L, obs_idx, kgrid, kstar_obs,
+                                        strategy, spectral=ctx, compute_resid=False)
+        assert solver.last_reason == "ok", (
+            f"member {m}: serial warm Newton polish did not re-converge "
+            f"({solver.last_reason!r}) -- the identical-warm-start setup is broken, not "
+            "the spectral wiring under test")
+        g = torch.autograd.grad(loss_m, [getattr(models_s[m], nm) for nm in THETA_NAMES])
+        loss_s.append(float(loss_m.detach()))
+        l_keys_s.append({k: parts_m[f"L_{k}"] for k in spec_keys})
+        g_s.append(g)
+
+    # --- batched: ONE BatchedPatternSolver, on INDEPENDENT fresh models stacked ---
+    models_b = _members()
+    bm = BatchedRNGRN(models_b)
+    solver_b = BatchedPatternSolver(bm, N_GRID, L, seeds=SEEDS)
+    for m in range(B):
+        solver_b._warm[m] = u0[m].detach().clone()
+    ctx_b = SpectralContext(solver=solver_b, targets=spec_targets, cfg=spec_cfg)
+    loss_vec, parts_b, conv = LT.total_loss_batched(bm, frame_t, L, obs_idx, kgrid,
+                                                     kstar_obs, strategy, spectral=ctx_b)
+    assert bool(conv.all()), f"batched steady state must converge for every member: {conv}"
+    assert list(parts_b["spec_computed"]) == [True] * B, (
+        "every member must reach a solved pattern for this to be a non-vacuous check: "
+        f"spec_computed={list(parts_b['spec_computed'])}")
+    g_b = torch.autograd.grad(loss_vec.sum(), [getattr(bm, nm) for nm in THETA_NAMES])
+
+    worst_loss = max(abs(loss_s[m] - float(loss_vec[m])) for m in range(B))
+    print(f"\n[spectral-e2e] worst |loss_serial - loss_batched| over {B} members: "
+         f"{worst_loss:.3e}")
+    # Measured 1.1e-16 (loss), 8.0e-17 (L_<key>), 7.8e-15 (grad) on this machine, this run --
+    # consistent with the ~1e-9 to 1e-12 order every other batched-vs-serial equivalence in
+    # this repo measures (test_batched.py, tests 1-2 above). Set several orders above the
+    # measured worst so the tripwire is not shaved to one draw's noise floor.
+    assert worst_loss < 1e-9, f"serial vs batched total loss differ by {worst_loss:.3e}"
+
+    worst_term = 0.0
+    for m in range(B):
+        for k, v_s in l_keys_s[m].items():
+            worst_term = max(worst_term, abs(float(parts_b[f"L_{k}"][m]) - v_s))
+    print(f"[spectral-e2e] worst |L_<spec_key> serial - batched|: {worst_term:.3e}")
+    assert worst_term < 1e-9, f"spectral L_<key> records differ by {worst_term:.3e}"
+
+    worst_grad = 0.0
+    for m in range(B):
+        for i in range(len(THETA_NAMES)):
+            worst_grad = max(worst_grad, float((g_b[i][m] - g_s[m][i]).abs().max()))
+    print(f"[spectral-e2e] worst |grad_serial - grad_batched| entrywise: {worst_grad:.3e}")
+    assert worst_grad < 1e-9, f"serial vs batched theta gradient differ by {worst_grad:.3e}"

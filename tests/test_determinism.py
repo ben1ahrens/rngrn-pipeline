@@ -4,6 +4,7 @@ Unit 10: determinism, seed plumbing, dispersion-backend recording.
 """
 from __future__ import annotations
 import numpy as np
+import pytest
 
 from rngrn import recover as R
 from rngrn.data.gate import RecoveryInput
@@ -84,6 +85,48 @@ def test_dispersion_backend_cubic_rejected_for_wrong_N():
         assert False, "expected ValueError for cubic backend with N != 3"
     except ValueError:
         pass
+
+
+# --------------------------------------------------------------------------------------
+# dispersion_backend='auto' resolution (R3 task 4, step 4). model.py:147-152 resolves
+# 'auto' to 'cubic' when N==3 (exact, and measured 162x faster on CUDA per restart-step)
+# and 'eig' otherwise (the general-N reference), AT CONSTRUCTION -- never lazily -- and
+# `.dispersion_backend` is documented to always read the concrete value, never 'auto'.
+# The only prior coverage (test_dispersion_backend_cubic_rejected_for_wrong_N above) is
+# the explicit-cubic-at-wrong-N rejection; nothing pinned what 'auto' itself resolves to.
+# --------------------------------------------------------------------------------------
+@pytest.mark.parametrize("N,expected", [(2, "eig"), (3, "cubic"), (4, "eig")])
+def test_dispersion_backend_auto_resolves_by_N(N, expected):
+    from rngrn.model import RNGRN
+    m = RNGRN(N=N, form="competitive", seed=0, dispersion_backend="auto")
+    assert m.dispersion_backend == expected, (
+        f"N={N}: 'auto' resolved to {m.dispersion_backend!r}, expected {expected!r}")
+
+
+@pytest.mark.parametrize("N", [2, 3, 4, 5])
+def test_dispersion_backend_auto_never_survives_construction(N):
+    """`.dispersion_backend` must always read a CONCRETE value -- a caller that reads it
+    back (BatchedRNGRN's member-compatibility check, model.py:422-427; recover.py's
+    docstring) must never see 'auto' itself."""
+    from rngrn.model import RNGRN
+    m = RNGRN(N=N, seed=0, dispersion_backend="auto")
+    assert m.dispersion_backend != "auto"
+    assert m.dispersion_backend in ("eig", "cubic")
+
+
+def test_batched_rngrn_from_seeds_resolves_auto_identically():
+    """`BatchedRNGRN.from_seeds` constructs one `RNGRN` per seed with the SAME
+    `dispersion_backend` argument (model.py:440-452) -- 'auto' must resolve to the same
+    concrete backend a serial construction at the same N would get, for every member."""
+    from rngrn.model import BatchedRNGRN, RNGRN
+    for N, expected in [(2, "eig"), (3, "cubic"), (4, "eig")]:
+        bm = BatchedRNGRN.from_seeds(N=N, seeds=[10, 11, 12], dispersion_backend="auto")
+        assert bm.dispersion_backend == expected, (
+            f"N={N}: BatchedRNGRN.from_seeds resolved 'auto' to "
+            f"{bm.dispersion_backend!r}, expected {expected!r}")
+        serial = RNGRN(N=N, seed=10, dispersion_backend="auto")
+        assert bm.dispersion_backend == serial.dispersion_backend, (
+            "batched and serial 'auto' resolution disagree at the same N")
 
 
 # --------------------------------------------------------------------------------------

@@ -160,9 +160,36 @@ def test_stall_event_lands_in_training_history_with_the_right_member_and_step():
 # ----------------------------------------------------------------------------------------
 # contract 2: the gradient path itself
 # ----------------------------------------------------------------------------------------
-def test_a_converged_member_gets_the_adjoint_path(fixture):
+def test_the_promoted_default_routes_a_CONVERGED_member_through_the_unrolled_path(fixture):
+    """REGISTER ITEM 8'S PROMOTION (owner ruling 2026-08-19, D-R3-5), and the sharpest single
+    statement of what it changed: this is the member that reached the 1e-9 bar — the adjoint
+    path's own designed regime, which under Task 13 routed to `adjoint` — and under the
+    DEFAULT `gradient_path` it now takes the unrolled gradient anyway.
+
+    The stall classification is still made (`stalled` is False here), because the counters
+    stay live as instrumentation on the promoted path; it just no longer routes."""
     model, n, L = fixture
     u, path, stalled, reason = R._spectral_solve_with_stall_switch(model, n, L, SEED)
+    assert reason == "ok", f"expected a patterned solve, got reason={reason!r}"
+    assert path == "unrolled", (
+        "the DEFAULT gradient_path must be 'unrolled' for EVERY member since the promotion — "
+        f"a converged member routed to {path!r} means the flip did not take")
+    assert not stalled, (
+        "this fixture reaches the 1e-9 bar (test_forward_solve.py::base proves "
+        "PatternSolver.solve() does on the same setup) — the counter must still say so")
+    assert u.requires_grad
+    grads = torch.autograd.grad(u.sum(), [getattr(model, nm) for nm in THETA_NAMES])
+    for nm, g in zip(THETA_NAMES, grads):
+        assert torch.isfinite(g).all(), f"non-finite unrolled gradient for {nm}"
+
+
+def test_gradient_path_adjoint_restores_the_task_13_routing_on_a_converged_member(fixture):
+    """The adjoint path is RETAINED and SELECTABLE for A/B verification — this is the
+    coverage the promotion redirected rather than deleted. Same member, same call, opting
+    into the pre-promotion estimator gets the pre-promotion answer."""
+    model, n, L = fixture
+    u, path, stalled, reason = R._spectral_solve_with_stall_switch(
+        model, n, L, SEED, gradient_path="adjoint")
     assert reason == "ok", f"expected a patterned solve, got reason={reason!r}"
     assert path == "adjoint" and not stalled, (
         "default newton_iter must reach the 1e-9 bar on this fixture — "
@@ -173,10 +200,17 @@ def test_a_converged_member_gets_the_adjoint_path(fixture):
         assert torch.isfinite(g).all(), f"non-finite adjoint gradient for {nm}"
 
 
-def test_a_stalled_member_gets_the_unrolled_path_from_the_same_saturated_field(monkeypatch, fixture):
+@pytest.mark.parametrize("gradient_path", ["unrolled", "adjoint"])
+def test_a_stalled_member_gets_the_unrolled_path_from_the_same_saturated_field(
+        monkeypatch, fixture, gradient_path):
+    """A stalled member takes the unrolled path on BOTH settings — under `"adjoint"` because
+    that is Task 13's switch (never a loosened 1e-9 bar), and under the promoted default
+    because every member does. D-R3-2's caller contract is satisfied identically either way:
+    `relax_to_pattern_torch` only returns a SATURATED field."""
     model, n, L = fixture
     _force_newton_stall(monkeypatch)
-    u, path, stalled, reason = R._spectral_solve_with_stall_switch(model, n, L, SEED)
+    u, path, stalled, reason = R._spectral_solve_with_stall_switch(
+        model, n, L, SEED, gradient_path=gradient_path)
     assert reason == "ok", f"expected a patterned solve, got reason={reason!r}"
     assert path == "unrolled" and stalled
     assert u.requires_grad
@@ -187,20 +221,52 @@ def test_a_stalled_member_gets_the_unrolled_path_from_the_same_saturated_field(m
 
 def test_stall_switch_solver_wraps_the_same_decision_the_function_makes(monkeypatch, fixture):
     """`_StallSwitchSolver` is what `recover()`'s serial loop actually installs as
-    `SpectralContext.solver`; this pins that its `.solve()` / `.last_path` / `.last_stalled`
-    agree with `_spectral_solve_with_stall_switch` directly, on both branches."""
+    `SpectralContext.solver` — under the promoted default as well as under Task 13's
+    adjoint-primary switch. This pins that its `.solve()` / `.last_path` / `.last_stalled`
+    agree with `_spectral_solve_with_stall_switch` directly, on every branch."""
     model, n, L = fixture
 
-    solver_ok = R._StallSwitchSolver(model, n, L, SEED)
+    solver_default = R._StallSwitchSolver(model, n, L, SEED)
+    u0, reason0 = solver_default.solve()
+    assert reason0 == "ok"
+    assert solver_default.last_path == "unrolled" and not solver_default.last_stalled, (
+        "the solver's default must be the PROMOTED default, not Task 13's")
+
+    solver_ok = R._StallSwitchSolver(model, n, L, SEED, gradient_path="adjoint")
     u, reason = solver_ok.solve()
     assert reason == "ok"
     assert solver_ok.last_path == "adjoint" and not solver_ok.last_stalled
 
     _force_newton_stall(monkeypatch)
-    solver_stall = R._StallSwitchSolver(model, n, L, SEED)
+    solver_stall = R._StallSwitchSolver(model, n, L, SEED, gradient_path="adjoint")
     u2, reason2 = solver_stall.solve()
     assert reason2 == "ok"
     assert solver_stall.last_path == "unrolled" and solver_stall.last_stalled
+
+
+def test_the_unrolled_primary_value_and_gradient_come_from_the_same_field(fixture):
+    """VALUE/GRADIENT CONSISTENCY (D-R3-5's design point). The field this function returns on
+    the promoted path is the differentiated segment ENDPOINT — the same computation the
+    gradient differentiates — and NOT the Newton-polished u* the adjoint path returns.
+    Returning the polished value while differentiating the segment would hand the optimiser a
+    gradient that is not the gradient of the loss it reads.
+
+    On this CONVERGED fixture the two fields are numerically close (which is why the promotion
+    is safe here) but they are not the same tensor, and only the segment endpoint carries a
+    graph back to theta through the ETDRK4 steps."""
+    model, n, L = fixture
+    u_seg, path_seg, _, r_seg = R._spectral_solve_with_stall_switch(model, n, L, SEED)
+    u_adj, path_adj, _, r_adj = R._spectral_solve_with_stall_switch(
+        model, n, L, SEED, gradient_path="adjoint")
+    assert (r_seg, r_adj) == ("ok", "ok")
+    assert path_seg == "unrolled" and path_adj == "adjoint"
+    assert u_seg.grad_fn is not None and u_adj.grad_fn is not None
+    assert type(u_seg.grad_fn) is not type(u_adj.grad_fn), (
+        "the two paths must differentiate through DIFFERENT machinery — the unrolled segment "
+        "vs PatternSolve's implicit-function backward")
+    assert not torch.equal(u_seg.detach(), u_adj.detach()), (
+        "the promoted path must return the segment endpoint, not the Newton-polished u*")
+
 
 
 def test_stall_switch_refuses_the_convergence_bar_as_a_parameter():
@@ -249,30 +315,37 @@ def test_stall_counters_default_to_zero_when_the_switch_is_off():
 # contract 5 (controller follow-up): the REAL train.py row-building helper, pinned
 # ----------------------------------------------------------------------------------------
 def test_stall_columns_are_flat_and_correct_from_a_result_with_a_known_stall():
-    """`train._stall_columns` is the exact function `fit()`'s row-building calls
-    (`row.update(_stall_columns(result, cfg.train.stall_switch))`). A "run with a known
-    stall": 9 ignited solves, 4 of them stalls."""
+    """`train._stall_columns` is the exact function `fit()`'s row-building calls. A "run with
+    a known stall": 9 ignited solves, 4 of them stalls.
+
+    RE-TARGETED by register item 8's promotion (D-R3-5): the helper's second parameter is now
+    `recover.uses_switch_solver(gradient_path, stall_switch)` rather than `stall_switch`
+    alone, and the column set gained `gradient_path`. This case is Task 13's adjoint-primary
+    switch; `tests/test_gradient_path.py` covers the promoted default."""
     result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
                               kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={},
                               n_ignited_solves=9, n_stalled_solves=4,
-                              stall_switch_fraction=0.20)
-    cols = T._stall_columns(result, stall_switch=True)
+                              stall_switch_fraction=0.20, gradient_path="adjoint")
+    cols = T._stall_columns(result, R.uses_switch_solver("adjoint", stall_switch=True))
     assert cols == {"n_ignited_solves": 9, "n_stalled_solves": 4,
-                    "stall_switch_fraction": 0.20}
+                    "stall_switch_fraction": 0.20, "gradient_path": "adjoint"}
     assert isinstance(cols["n_ignited_solves"], int) and isinstance(cols["n_stalled_solves"], int)
     assert isinstance(cols["stall_switch_fraction"], float)
+    assert isinstance(cols["gradient_path"], str)
 
 
-def test_stall_columns_are_absent_not_zero_or_nan_when_the_switch_is_off():
-    """Every run before this task, and every batched run (the switch is refused there) —
-    the columns must not appear on the row at all, per the controller's "pick absent unless
-    the row schema requires the key" ruling (`index.py`'s docstring: both the jsonl and the
-    additive-sqlite backend tolerate a row missing a key)."""
+def test_stall_columns_are_absent_not_zero_or_nan_when_no_switch_solver_ran():
+    """Every run before this task, and every batched run (both switch-aware combinations are
+    refused there) — the columns must not appear on the row at all, per the controller's
+    "pick absent unless the row schema requires the key" ruling (`index.py`'s docstring: both
+    the jsonl and the additive-sqlite backend tolerate a row missing a key). Since the
+    promotion that is exactly the pre-promotion combination, adjoint-primary without the
+    switch."""
     result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
                               kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={},
                               n_ignited_solves=9, n_stalled_solves=4)   # non-zero on purpose:
     # even a result that DID stall must not leak into the row when the config said off.
-    assert T._stall_columns(result, stall_switch=False) == {}
+    assert T._stall_columns(result, R.uses_switch_solver("adjoint", stall_switch=False)) == {}
 
 
 def test_stall_columns_survive_a_real_dict_update_row_build():
@@ -281,12 +354,12 @@ def test_stall_columns_survive_a_real_dict_update_row_build():
     result = R.RecoveryResult(model=None, params={}, topology={}, xstar=np.zeros(3),
                               kstar_model=0.1, kstar_obs=0.1, loss=0.0, parts={},
                               n_ignited_solves=9, n_stalled_solves=4,
-                              stall_switch_fraction=0.20)
+                              stall_switch_fraction=0.20, gradient_path="adjoint")
     row = dict(run_id="fake-run")
-    row.update(T._stall_columns(result, stall_switch=True))
+    row.update(T._stall_columns(result, R.uses_switch_solver("adjoint", stall_switch=True)))
     row.update(run_id="fake-run")
     assert row == {"run_id": "fake-run", "n_ignited_solves": 9, "n_stalled_solves": 4,
-                   "stall_switch_fraction": 0.20}
+                   "stall_switch_fraction": 0.20, "gradient_path": "adjoint"}
 
 
 # ----------------------------------------------------------------------------------------
@@ -316,7 +389,12 @@ def test_stall_switch_and_fraction_are_threaded_from_config_into_recover(monkeyp
         raise RuntimeError("stop after capturing kwargs")
 
     monkeypatch.setattr(T.R, "recover", _spy)
-    cfg = _tiny_cfg(**{"train.stall_switch": "true", "train.stall_switch_fraction": "0.15"})
+    # gradient_path=adjoint alongside it: since register item 8's promotion, stall_switch is
+    # the switch AWAY FROM an adjoint primary and recover() refuses the pair with the
+    # promoted default. The spy never reaches that check, but the config must still mean
+    # something a real run could execute.
+    cfg = _tiny_cfg(**{"train.stall_switch": "true", "train.stall_switch_fraction": "0.15",
+                       "train.gradient_path": "adjoint"})
     with pytest.raises(RuntimeError, match="stop after capturing"):
         T.fit(cfg, runs_root=tempfile.mkdtemp())
     assert seen.get("stall_switch") is True, (

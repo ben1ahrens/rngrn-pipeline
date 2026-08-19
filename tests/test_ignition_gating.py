@@ -432,12 +432,27 @@ def test_recover_accepts_batched_with_a_spectral_weight():
     test here only pins that
     the combination is ACCEPTED at the validation layer -- it asserts nothing about the
     recovered result's correctness.
+
+    RE-TARGETED by register item 8's PROMOTION (2026-08-19, docs/DECISIONS.md D-R3-5), which
+    made `gradient_path="unrolled"` the default. `unrolled.unrolled_relax` is SERIAL MODEL
+    ONLY -- there is no `BatchedRNGRN` twin -- so the promoted default now REFUSES this
+    combination rather than silently solving it through the OTHER estimator and leaving the
+    run's index row claiming an estimator it did not use. D-PERF-4's contract is UNCHANGED
+    and still pinned here: batched + a spectral weight is legal, and this asserts it. What
+    changed is that the estimator must now be named explicitly -- which is the point: a
+    batched spectral run is on the adjoint path and must report that with its numbers.
+    `tests/test_gradient_path.py::test_the_promoted_default_refuses_a_batched_spectral_run`
+    pins the other side of this.
     """
     from rngrn import recover as R
     ri = _tiny_recovery_input_np()
     result = R.recover(ri, strategy=_spectral_on_strategy(), batched=True,
+                       gradient_path="adjoint",
                        lbfgs_steps=0, adam_steps=0, n_restarts=1)
     assert result is not None
+    assert result.gradient_path == "adjoint", (
+        "the run must record the estimator it actually used -- a batched spectral run is on "
+        "the adjoint path (D-R3-5 rider 6)")
 
 
 def test_recover_raises_on_non_identity_observed_idx_with_a_spectral_weight():
@@ -549,7 +564,12 @@ def test_batched_recover_completes_a_full_ignition_gated_run_with_history(monkey
     ri = _tiny_recovery_input_np(N=3, H=16)
     hist = TrainingHistory(every=1, total_steps=4, n_members=3, N=3)
 
+    # gradient_path="adjoint": the batched path has no unrolled twin, so the promoted default
+    # refuses this combination loudly rather than solving it through the other estimator
+    # (docs/DECISIONS.md D-R3-5 rider 6). This test is about ignition gating and history, not
+    # about the estimator, so it names the only one the batched path implements.
     result = R.recover(ri, strategy=_spectral_on_strategy(), batched=True,
+                       gradient_path="adjoint",
                        lbfgs_steps=0, adam_steps=4, n_restarts=3, history=hist)
 
     assert result is not None, "the run must complete and return a RecoveryResult"

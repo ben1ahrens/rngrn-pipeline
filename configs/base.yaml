@@ -34,6 +34,15 @@ loss:
   # terms (losses/spectral.py). 0.0 is OFF, same reason as param_prior above: apply_overrides
   # fails loud on a key this dict does not already carry, so without this row
   # `-o loss.weights.spec_shape=...` would be unreachable from the CLI.
+  #
+  # A0 PROTECTION, register item 8's gradient-path promotion (2026-08-19, docs/DECISIONS.md
+  # D-R3-5). These five zeros are the ONLY thing keeping the A0 baseline arm off the gradient
+  # estimator that promotion flipped. `recover()` computes `use_spectral` as "any spectral
+  # weight is non-zero"; at all-zero it builds NO forward solver, `losses.total` never calls
+  # `_apply_spectral`, and `train.gradient_path` is never read -- so A0 is bit-identical under
+  # either estimator, MEASURED (tests/test_gradient_path.py), not asserted. Raising any one of
+  # these five is therefore not a tweak to A0: it is a DIFFERENT ARM, on whichever estimator
+  # `train.gradient_path` then selects, and it must be reported as such.
   weights: {kstar: 1.0, turing: 1.0, resid: 0.0, anticollapse: 0.5, anchor: 2.0, morphology: 0.1,
             param_prior: 0.0, spec_shape: 0.0, spec_aniso: 0.0, spec_amp_mean: 0.0,
             spec_amp_fluct: 0.0, real_moments: 0.0}

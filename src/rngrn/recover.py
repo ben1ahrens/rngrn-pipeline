@@ -123,6 +123,11 @@ class RecoveryResult:
     stall_switch_fraction: float = float("nan")   # the CONFIGURED knob this call ran with
     # (echoed regardless of stall_switch, so Task 16 can read n_stalled_solves/
     # n_ignited_solves against it without re-reading the run's frozen config)
+    # ---- register item 8 promotion (appended; has a default) --------------------------
+    # Which of the two 4.2 gradient estimators this call's PRIMARY path was. Recorded
+    # because it changes what every gradient-derived number means, and a silently
+    # non-comparable number is worse than a missing one (CLAUDE.md 8).
+    gradient_path: str = "unrolled"
 
 
 def _restart_seed(model_seed, r):
@@ -186,9 +191,42 @@ def _clip_grad_norm_per_member(params, max_norm, B):
     return nrm
 
 
+GRADIENT_PATHS = ("unrolled", "adjoint")
+#: The PRIMARY gradient estimator, register item 8's promotion (owner-ruled 2026-08-19,
+#: docs/DECISIONS.md D-R3-5). "unrolled" is the default for every member; "adjoint" restores
+#: the pre-promotion estimator and is retained as the A/B VERIFICATION path.
+GRADIENT_PATH_DEFAULT = "unrolled"
+
+
+def _check_gradient_path(gradient_path: str) -> str:
+    """Validate the estimator name. Fail loud rather than silently defaulting: which
+    estimator ran changes what every gradient-derived number means."""
+    if gradient_path not in GRADIENT_PATHS:
+        raise ValueError(
+            f"gradient_path must be one of {GRADIENT_PATHS}, got {gradient_path!r}. "
+            f"'unrolled' is the promoted default (register item 8, D-R3-5); 'adjoint' is "
+            f"the retained A/B verification path.")
+    return gradient_path
+
+
+def uses_switch_solver(gradient_path: str, stall_switch: bool) -> bool:
+    """Does `recover()` install `_StallSwitchSolver` (rather than `forward.PatternSolver`)?
+
+    THE SINGLE SOURCE OF TRUTH for that question, because two places need it and they must
+    not drift: `recover()` itself, and `train._stall_columns`, which decides whether the run
+    index carries the stall counters. It is True whenever the switch-aware solver runs — under
+    the promoted `gradient_path="unrolled"` default (every member unrolled) and under
+    `gradient_path="adjoint", stall_switch=True` (Task 13's adjoint-primary switch). Only the
+    pre-promotion combination `gradient_path="adjoint", stall_switch=False` goes to
+    `PatternSolver`, which has no stall accounting at all.
+    """
+    return _check_gradient_path(gradient_path) == "unrolled" or bool(stall_switch)
+
+
 def _spectral_solve_with_stall_switch(model, n, L, seed, *, device=None,
                                       noise=1e-2, chunk=500, max_chunks=400,
-                                      newton_iter=30, segment_steps=SEGMENT_STEPS_DEFAULT):
+                                      newton_iter=30, segment_steps=SEGMENT_STEPS_DEFAULT,
+                                      gradient_path=GRADIENT_PATH_DEFAULT):
     """One forward solve on WHATEVER (n, L) grid the caller passes in.
 
     **Correction (2026-08-19 review): this is NOT yet a commensurate-box solve.** An
@@ -206,18 +244,45 @@ def _spectral_solve_with_stall_switch(model, n, L, seed, *, device=None,
     switch itself (the actual subject of this function) is unaffected by which grid it
     runs on.
 
-    On WHICHEVER of the two §4.2 gradient paths this one solve earns:
+    ROUTING, since register item 8's promotion (owner ruling 2026-08-19, D-R3-5):
 
-      * Newton meets `forward.PatternSolver.CONVERGENCE_TOL` (1e-9, D1 verbatim -- READ
-        here, never redefined: F-D1-5 option (b), loosening the bar, stays off the table)
-        -> path="adjoint", `forward.PatternSolve`'s IFT backward.
-      * it does not -> STALL -> path="unrolled", `unrolled.unrolled_relax` from the SAME
-        field the Newton polish was handed. `forward.relax_to_pattern_torch` only
-        RETURNS once its own flat_tol detector confirms saturation (it RAISES otherwise,
-        see its docstring) -- so that field is SATURATED **by construction**, which is
-        what satisfies D-R3-2's caller contract ("the unrolled path may only be invoked
-        from a SATURATED warm state") without needing a separate runtime check here: the
-        one function that could hand this a non-saturated field refuses to return one.
+      * `gradient_path="unrolled"` (the DEFAULT) -> path="unrolled" for EVERY member,
+        converged or stalled. `unrolled.unrolled_relax` from the saturated relax endpoint.
+      * `gradient_path="adjoint"` -> Task 13's adjoint-primary semantics, retained for A/B
+        verification: Newton meets `forward.PatternSolver.CONVERGENCE_TOL` (1e-9, D1
+        verbatim -- READ here, never redefined: F-D1-5 option (b), loosening the bar, stays
+        off the table) -> path="adjoint", `forward.PatternSolve`'s IFT backward; it does not
+        -> STALL -> path="unrolled" from the SAME field the Newton polish was handed.
+
+    D-R3-2's CALLER CONTRACT now guards the DEFAULT path for every member, and is satisfied
+    the same way it always was, by construction rather than by a runtime check:
+    `forward.relax_to_pattern_torch` only RETURNS once its own flat_tol detector confirms
+    saturation (it RAISES otherwise, see its docstring), so `X_sat` is SATURATED and the one
+    function that could hand this a non-saturated field refuses to return one. D-R3-2
+    explicitly REJECTED adding a runtime saturation guard here ("a guess dressed as a
+    check"), and the promotion does not reopen that.
+
+    THE NEWTON POLISH IS STILL RUN UNDER `gradient_path="unrolled"`, and its result is
+    DISCARDED -- only its residual is read, to classify the solve as a stall for the per-run
+    counter. That is deliberate and it has a cost: the promotion saves the LSMR adjoint
+    backward, NOT the relax and NOT the polish. Measured at B=1 with the relax hoisted out of
+    both timings (`experiments/redesign_r3/fd_ab/results/fd_ab.json`), what is replaced costs
+    4.56 s/member-step and what replaces it costs 1.54 s (2.95x); the polish retained on top
+    of that is unmeasured here and is paid as instrumentation. Dropping it would silence the
+    stall rate, which T16 measured at 25.7% pooled and which is the retro-support for the
+    promotion itself -- so it stays until something measures that the counter is worth less
+    than the polish costs.
+
+    VALUE AND GRADIENT COME FROM THE SAME COMPUTATION on both paths. Under
+    `gradient_path="adjoint"` that is the Newton-polished u*; under `"unrolled"` it is the
+    differentiated segment ENDPOINT -- the field this function returns is the one the loss is
+    evaluated on and the one the gradient differentiates, exactly as `scripts/r3_fd_ab.py`'s
+    `UnrolledPath` does. Returning the polished u* as the value while differentiating the
+    segment would hand the optimiser a gradient that is not the gradient of the loss it
+    reads. On a converged member the two values agree to ~3e-9 relative (measured over the
+    five active spectral terms, fd_ab.json `arms.converged.paths.*.base_values`); on a
+    stalled one they do not, and there the polished value is the one premised on F(u*) = 0,
+    which is false by construction.
 
     NOT warm-started across calls: every call relaxes fresh from x* + noise, unlike
     `forward.PatternSolver`'s warm-start reuse. Simpler and always correct is the point of
@@ -236,6 +301,7 @@ def _spectral_solve_with_stall_switch(model, n, L, seed, *, device=None,
     from .eval.numerics import _spectral_k2
     from .losses.terms import steady_state
 
+    _check_gradient_path(gradient_path)
     dev = model.device if device is None else torch.device(device)
     xs, ok = steady_state(model)
     if not ok:
@@ -262,18 +328,23 @@ def _spectral_solve_with_stall_switch(model, n, L, seed, *, device=None,
     modes_of = lambda uu: translation_modes(uu, n, L)              # noqa: E731
     u, res = newton_polish(F_fn, X_sat, modes_of, k2_full, D_np, gamma, n_iter=newton_iter)
 
-    if res <= PatternSolver.CONVERGENCE_TOL:
+    # The stall classification is made on EVERY path -- it is the per-run counter's input and
+    # stays live as instrumentation whichever estimator runs (D-R3-5). Under the promoted
+    # default it is the ONLY thing the Newton polish is run for.
+    stalled = bool(res > PatternSolver.CONVERGENCE_TOL)
+    if gradient_path == "adjoint" and not stalled:
         payload = dict(model=model, u_star=u.detach(), n=n, L=L, k2_full=k2_full,
                        D_np=D_np, gamma=gamma, k2h=None, k2_dev=None, D_dev=None)
         out = PatternSolve.apply(payload, *(getattr(model, nm) for nm in THETA_NAMES))
-        path, stalled = "adjoint", False
+        path = "adjoint"
     else:
-        # STALL. §4.3's rule: never loosen CONVERGENCE_TOL (F-D1-5 option (b), off the
-        # table) -- switch this member's gradient to the truncated-unrolled path instead,
-        # from X_sat: the SAME saturated field the Newton polish just failed to refine,
-        # never a fresh growth-phase relax (D-R3-2 caller contract, enforced above).
+        # Either the promoted default (every member unrolled), or an adjoint-primary STALL.
+        # §4.3's rule in the latter case: never loosen CONVERGENCE_TOL (F-D1-5 option (b),
+        # off the table) -- switch this member's gradient to the truncated-unrolled path
+        # instead. Both start from X_sat: the SAME saturated field the Newton polish was
+        # handed, never a fresh growth-phase relax (D-R3-2 caller contract, above).
         out = unrolled_relax(model, X_sat, n, L, dt, segment_steps=segment_steps, device=dev)
-        path, stalled = "unrolled", True
+        path = "unrolled"
 
     # Patterned-ness (the eval/rollout.py floor, D-FFT-9 closure 2), same formula
     # `PatternSolver.solve()` uses: a converged-or-relaxed-but-HOMOGENEOUS field is not a
@@ -293,6 +364,13 @@ class _StallSwitchSolver:
     point: "A test stub satisfying whichever method its assembler calls is a legal
     solver"), additionally dispatching the gradient path per spec §4.2/§4.3 -- see
     `_spectral_solve_with_stall_switch`, which does the actual work.
+
+    The estimator itself is chosen by the `gradient_path` keyword, passed through `**solve_kw`
+    to `_spectral_solve_with_stall_switch`; since the register-item-8 promotion this class is
+    what `recover()` installs under the DEFAULT `gradient_path="unrolled"` as well as under
+    Task 13's `gradient_path="adjoint", stall_switch=True`. `last_stalled` therefore keeps
+    reporting the 1e-9 classification on the unrolled path too, where it is a diagnostic
+    rather than a router — see `uses_switch_solver`.
 
     `last_path` ("adjoint" | "unrolled" | None) and `last_stalled` are read by `recover()`'s
     serial loop immediately after each `losses.total.total_loss` call, to update the
@@ -520,14 +598,12 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             history=None,              # plottable training trajectory
             # ---- Task 13 (R3 redesign): stall accounting + the two-path switch, spec 4.3 --
             stall_switch=False,        # Task 13
-            stall_switch_fraction=0.20):   # Task 13, UNCALIBRATED -- Task 16 calibrates it
-                                            # from the measured stall-rate distribution.
-                                            # NOT A BUG that this does not gate anything
-                                            # below: controller ruling 2026-08-19 confirmed
-                                            # per-solve routing is UNCONDITIONAL (the plan's
-                                            # own Step-1 test spec is per-member, not
-                                            # rate-gated); this knob is recorded for Task 16
-                                            # to compare the measured rate against, only.
+            stall_switch_fraction=0.20,    # Task 13; DIAGNOSTIC-ONLY since T16 retired it as
+                                            # a threshold (D-R3-7). It never gated anything:
+                                            # per-solve routing is UNCONDITIONAL. Recorded so
+                                            # a run says which rate it was compared against.
+            # ---- register item 8 PROMOTION (owner-ruled 2026-08-19, D-R3-5) --------------
+            gradient_path=GRADIENT_PATH_DEFAULT):
     """Recover a GRN from one RecoveryInput. Returns the best RecoveryResult.
 
     strategy: a WeightingStrategy instance (default FixedWeighting(weights or defaults)).
@@ -611,29 +687,60 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         the tracked `m3_registry_20260730_005701` recovery, see
         docs/LGEN_TRANSFER_FIRST_RESULT.md).
 
-    stall_switch: False (DEFAULT, unchanged behaviour -- bit-identical to every call before
-        this parameter existed). True replaces the serial spectral solver
-        (`forward.PatternSolver`, warm-started) with `_StallSwitchSolver`
-        (`_spectral_solve_with_stall_switch`, fresh-relaxed every call, spec 4.3): a member
-        whose Newton polish meets `forward.PatternSolver.CONVERGENCE_TOL` (1e-9) still gets
-        the adjoint/IFT gradient; a member that misses it (a "stall") gets the
-        truncated-unrolled gradient (`unrolled.unrolled_relax`) from the SAME saturated
-        field instead -- never a loosened convergence bar (F-D1-5 option (b) stays off the
-        table). `RecoveryResult.n_ignited_solves` / `.n_stalled_solves` count the whole
-        call. Requires `batched=False`: `unrolled_relax` is SERIAL MODEL ONLY (no
-        `BatchedRNGRN` twin yet -- Task 14). A no-op unless a spectral weight is also
-        non-zero (`use_spectral`).
+    gradient_path: 'unrolled' (the DEFAULT since register item 8's PROMOTION, owner-ruled
+        2026-08-19) | 'adjoint'. Which of spec 4.2's two estimators is PRIMARY for every
+        ignited-member spectral solve.
 
-    stall_switch_fraction: 0.20 (the spec's ~20%), UNCALIBRATED -- `docs/PLAN_redesign_R3.md`
-        Task 16 calibrates it from the measured stall-rate distribution, against the
-        measured gradient-error difference between the two paths, "not for convenience"
-        (spec 4.3 verbatim). Recorded for that comparison (on `RecoveryResult` and, when
-        `stall_switch=True`, the run-index row); this call does NOT gate the per-member
-        switch on it -- routing is unconditional on whether THIS solve stalled, per the
-        spec's "Interfaces" line (a per-run counter + a per-member switch "for those
-        members" that missed the bar). CONFIRMED, not a local guess: controller ruling
-        2026-08-19 read the plan's own Step-1 test spec the same way and let this design
-        stand. Only meaningful when `stall_switch=True`.
+        'unrolled' takes `unrolled.unrolled_relax`'s truncated-unrolled gradient for EVERY
+        member, converged or stalled. The ruling's pre-specified promotion condition was met
+        on both clauses (`experiments/redesign_r3/fd_ab/results/fd_ab.json`, D-R3-5):
+        FD-faithful at 1.92e-08 (converged) / 1.44e-08 (stalled) against tol 1e-4, where the
+        adjoint path measures 1.70e-06 converged and FAILS the stalled arm at 1.93; and
+        2.95x cheaper per member-step at B=1 (1.54 s vs 4.56 s).
+
+        'adjoint' restores `forward.PatternSolve`'s IFT backward as the primary. It is
+        RETAINED as the A/B VERIFICATION path -- the thing the promotion was measured
+        against, and the thing a future re-measurement compares to -- not as a fallback for
+        convenience. With `stall_switch=False` it reproduces the pre-promotion default
+        exactly (`forward.PatternSolver`, warm-started, no stall accounting); with
+        `stall_switch=True` it is Task 13's adjoint-primary switch.
+
+        'unrolled' REQUIRES `batched=False` whenever a spectral weight is non-zero:
+        `unrolled_relax` is SERIAL MODEL ONLY (no `BatchedRNGRN` twin). That combination
+        raises rather than silently solving through the other estimator, because which
+        estimator ran changes what every gradient-derived number means. A batched spectral
+        run must say `gradient_path='adjoint'` deliberately, and say so with its numbers.
+
+        UNREAD when no spectral weight is non-zero -- no forward solver is built at all, so
+        a run of the A0 baseline objective is bit-identical under either value. That is the
+        A0 clause of D-R3-5, pinned by `tests/test_gradient_path.py`.
+
+    stall_switch: False (DEFAULT). ONLY meaningful alongside `gradient_path='adjoint'`, of
+        which it is the switch AWAY from the adjoint primary; `stall_switch=True` with the
+        promoted `gradient_path='unrolled'` RAISES rather than quietly meaning nothing, since
+        a caller who asked for the fallback expected an adjoint primary. Under
+        `gradient_path='adjoint'`: False leaves the serial spectral solver on
+        `forward.PatternSolver` (warm-started -- the pre-promotion behaviour, bit-identical
+        to every call before this parameter existed); True installs `_StallSwitchSolver`
+        (`_spectral_solve_with_stall_switch`, fresh-relaxed every call, spec 4.3), where a
+        member whose Newton polish meets `forward.PatternSolver.CONVERGENCE_TOL` (1e-9) gets
+        the adjoint/IFT gradient and a member that misses it (a "stall") gets the
+        truncated-unrolled gradient from the SAME saturated field -- never a loosened
+        convergence bar (F-D1-5 option (b) stays off the table).
+        `RecoveryResult.n_ignited_solves` / `.n_stalled_solves` count the whole call, on the
+        promoted default too (see `uses_switch_solver`). Requires `batched=False`. A no-op
+        unless a spectral weight is also non-zero (`use_spectral`).
+
+    stall_switch_fraction: 0.20 (the spec's ~20%). **RETIRED AS A THRESHOLD by T16's ruling
+        (2026-08-19, D-R3-7)** and kept as a recorded DIAGNOSTIC only. It never gated
+        anything: routing is unconditional on whether THIS solve stalled, per the spec's
+        "Interfaces" line (a per-run counter + a per-member switch "for those members" that
+        missed the bar) -- CONFIRMED by controller ruling 2026-08-19 against the plan's own
+        Step-1 test spec. The rate it was to be calibrated against was measured by T16 at
+        25.7% pooled off-checkpoint, and the promotion answered that by moving every member
+        to the unrolled path rather than by picking a rate. Recorded on `RecoveryResult` and,
+        whenever the switch-aware solver ran, the run-index row. Do not report it as a
+        calibrated threshold.
     """
     ri = recovery_input
     model_seed = seed if model_seed is None else model_seed
@@ -696,12 +803,33 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
     # is gone -- there is a batched forward solve now; see the `spectral_*` docstring.)
     from .losses.spectral import SPECTRAL_TERM_KEYS  # unit U4
     use_spectral = any(float(strategy.base.get(k, 0.0)) != 0.0 for k in SPECTRAL_TERM_KEYS)
+    # register item 8 promotion: validated even when `use_spectral` is False, so a typo is
+    # caught on every run rather than only on the runs that happen to reach the solver.
+    _check_gradient_path(gradient_path)
+    if gradient_path == "unrolled" and stall_switch:
+        raise ValueError(
+            "stall_switch=True is meaningless with gradient_path='unrolled': the switch is "
+            "the fallback AWAY FROM the adjoint primary, and register item 8's promotion "
+            "(D-R3-5) made the unrolled path the primary for every member, so there is "
+            "nothing left to fall back to. Refusing rather than silently giving you an "
+            "unrolled-primary run you did not ask for. Set gradient_path='adjoint' for Task "
+            "13's adjoint-primary switch, or drop stall_switch.")
     if stall_switch and batched:
         raise ValueError(
             "stall_switch=True is not supported with batched=True: unrolled.unrolled_relax "
             "(the stall fallback, spec 4.3) is SERIAL MODEL ONLY -- it has no BatchedRNGRN "
             "twin yet (unrolled.py's docstring; Task 14 owns that). Run the switch on the "
             "serial path (batched=False).")
+    if gradient_path == "unrolled" and batched and use_spectral:
+        raise ValueError(
+            "gradient_path='unrolled' (the promoted default, D-R3-5) is not supported with "
+            "batched=True and a non-zero spectral weight: unrolled.unrolled_relax is SERIAL "
+            "MODEL ONLY -- it has no BatchedRNGRN twin (unrolled.py's docstring). Refusing "
+            "rather than silently solving through the OTHER estimator, which would make this "
+            "run's gradients non-comparable to every other run without saying so. Either run "
+            "serial (batched=False), or set gradient_path='adjoint' deliberately and report "
+            "that with the numbers. (A batched run with every spectral weight at 0.0 -- the "
+            "A0 baseline arm included -- never reaches here: no forward solver is built.)")
     if use_spectral and not split_hinges:
         raise ValueError(
             "a spectral weight is non-zero but split_hinges=False (unit U4): spectral "
@@ -819,8 +947,11 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             spec_cfg=spec_cfg, spec_targets=spec_targets)
     # Task 13: the per-run stall counter (spec 4.3). [n_ignited_solves, n_stalled_solves] --
     # a mutable pair rather than two locals so `_account_for_stall` can update both without
-    # `nonlocal`. Stays [0, 0] unless stall_switch=True (batched=True never touches it: the
-    # switch is refused there, above).
+    # `nonlocal`. Stays [0, 0] unless the switch-aware solver ran (batched=True never touches
+    # it: both switch-aware combinations are refused there, above). Since register item 8's
+    # promotion the counters stay live on the PROMOTED DEFAULT too -- they are instrumentation
+    # (the stall rate T16 measured), not the router they were under Task 13.
+    switch_solver = uses_switch_solver(gradient_path, stall_switch)
     stall_counts = [0, 0]
     # the serial loop is skipped entirely when the batched path ran; it stays the REFERENCE
     # implementation and the default, so no pre-existing number changes method.
@@ -834,11 +965,14 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         spectral_ctx = None
         if use_spectral:
             from .losses.spectral import SpectralContext
-            if stall_switch:
-                # Task 13, spec 4.3: the stall-aware solver (fresh-relaxed every call; see
-                # its docstring for why it does not reuse PatternSolver's warm start).
+            if switch_solver:
+                # Task 13, spec 4.3 + register item 8's promotion: the switch-aware solver
+                # (fresh-relaxed every call; see its docstring for why it does not reuse
+                # PatternSolver's warm start). Installed under the promoted default
+                # gradient_path="unrolled" as well as under adjoint-primary stall_switch.
                 solver = _StallSwitchSolver(model, frame.shape[-1], L_model,
-                                            _restart_seed(model_seed, r), device=dev)
+                                            _restart_seed(model_seed, r), device=dev,
+                                            gradient_path=gradient_path)
             else:
                 from .forward import PatternSolver
                 # warm_mode="relax" is the TRAINING policy (GPU-port unit, 2026-08-12): the
@@ -882,7 +1016,7 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
             # Task 13, spec 4.3: this step attempted an ignited-member solve iff
             # `spec_ignited == 1.0` -- ONLY then is `solver.last_stalled` fresh (not stale
             # from a previous ignited step) -- see `_account_for_stall`'s docstring.
-            if stall_switch and use_spectral and float(parts.get("spec_ignited", 0.0)) == 1.0:
+            if switch_solver and use_spectral and float(parts.get("spec_ignited", 0.0)) == 1.0:
                 _account_for_stall(spectral_ctx.solver, history, step, r, stall_counts)
             # BEFORE opt.step(): the recorded parameters are the ones that produced this loss.
             if history is not None and history.should_record(step):
@@ -954,7 +1088,7 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         # here: the LBFGS closure above, which can call `spectral_ctx.solver.solve()` an
         # UNKNOWN number of times per line-search trial -- a known undercount when
         # `lbfgs_steps > 0`, left as a limitation rather than guessed at.
-        if stall_switch and use_spectral and float(parts.get("spec_ignited", 0.0)) == 1.0:
+        if switch_solver and use_spectral and float(parts.get("spec_ignited", 0.0)) == 1.0:
             _account_for_stall(spectral_ctx.solver, history, adam_steps, r, stall_counts)
 
         # The FINAL parameters -- post-LBFGS, the ones that get checkpointed -- are always in
@@ -1017,4 +1151,5 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
                           kstar_model_nondim=kstar_model_hat,
                           q_model=kstar_model_hat / (2.0 * math.pi),
                           n_ignited_solves=stall_counts[0], n_stalled_solves=stall_counts[1],
-                          stall_switch_fraction=float(stall_switch_fraction))
+                          stall_switch_fraction=float(stall_switch_fraction),
+                          gradient_path=str(gradient_path))

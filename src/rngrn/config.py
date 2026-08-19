@@ -171,24 +171,51 @@ class TrainConfig:
     history_every: int = 10                 # unit P1
 
     # ---- Task 13 (R3 redesign): stall accounting + the two-path switch, spec 4.3 --------
-    # stall_switch=False (DEFAULT, unchanged behaviour) leaves recover()'s serial spectral
-    # solve on forward.PatternSolver, exactly as before this task. True installs
-    # recover._StallSwitchSolver instead: an ignited member whose Newton polish misses the
-    # 1e-9 bar (a "stall") gets the truncated-unrolled gradient path instead of losing its
-    # gradient for that step. Requires train.batched=False (recover() raises otherwise --
-    # unrolled.unrolled_relax has no BatchedRNGRN twin yet, Task 14). No-op unless a
-    # spectral loss weight is also non-zero. Threaded into recover() by fit() below, so
-    # (unlike the unit-C1 class of defect this file's history already records once) this is
-    # NOT a silent no-op.
+    # stall_switch is ONLY meaningful alongside gradient_path='adjoint' (below): it is the
+    # switch AWAY from the adjoint primary, and the promotion made 'unrolled' the primary, so
+    # under the default there is nothing left to switch to. False leaves an adjoint-primary
+    # serial spectral solve on forward.PatternSolver, exactly as before Task 13; True installs
+    # recover._StallSwitchSolver, where an ignited member whose Newton polish misses the 1e-9
+    # bar (a "stall") gets the truncated-unrolled gradient instead of losing its gradient for
+    # that step. `stall_switch=True` with `gradient_path='unrolled'` RAISES rather than
+    # silently meaning nothing (a caller who asked for the fallback expected an adjoint
+    # primary). Requires train.batched=False -- unrolled.unrolled_relax has no BatchedRNGRN
+    # twin. No-op unless a spectral loss weight is also non-zero. Threaded into recover() by
+    # fit() below, so (unlike the unit-C1 class of defect this file's history already records
+    # once) this is NOT a silent no-op.
     stall_switch: bool = False                       # Task 13
-    # stall_switch_fraction: the spec's ~20%, UNCALIBRATED -- docs/PLAN_redesign_R3.md
-    # Task 16 calibrates it from the measured stall-rate distribution, against the measured
-    # gradient-error difference between the two paths ("not for convenience", spec 4.3
-    # verbatim). recover() does not gate per-member routing on it (controller ruling,
-    # 2026-08-19: the plan's own Step-1 test spec is per-member unconditional); it is
-    # recorded on RecoveryResult and the run-index row so Task 16 can read the measured
-    # rate against it. NOT a bug that it does not branch anything today.
-    stall_switch_fraction: float = 0.20              # Task 13, UNCALIBRATED
+    # stall_switch_fraction: the spec's ~20%. **RETIRED AS A THRESHOLD by T16's ruling
+    # (2026-08-19, docs/DECISIONS.md D-R3-7).** It never gated anything -- per-member routing
+    # was always unconditional -- and the population stall-rate survey it was to be calibrated
+    # against measured 25.7% pooled off-checkpoint, which the promotion answered by moving
+    # every member to the unrolled path rather than by picking a rate. The field is KEPT as a
+    # recorded diagnostic (RecoveryResult + the run-index row) so a run still says which rate
+    # it was compared against; it is not a knob that changes behaviour and must not be
+    # reported as a calibrated threshold.
+    stall_switch_fraction: float = 0.20              # Task 13; diagnostic-only since T16
+
+    # ---- register item 8 PROMOTION (R3, owner-ruled 2026-08-19): the primary gradient -----
+    # 'unrolled' (the DEFAULT since the promotion) takes the truncated-unrolled gradient
+    # (unrolled.unrolled_relax) for EVERY ignited-member solve, converged or stalled.
+    # 'adjoint' restores the pre-promotion estimator -- forward.PatternSolve's IFT backward --
+    # and is retained as the A/B VERIFICATION path, not as a fallback for convenience.
+    #
+    # The ruling's evidence (docs/DECISIONS.md D-R3-5, artefact
+    # experiments/redesign_r3/fd_ab/results/fd_ab.json): at the operating point the unrolled
+    # path is FD-faithful at 1.92e-08 (converged) / 1.44e-08 (stalled) against tol 1e-4, where
+    # the adjoint path measures 1.70e-06 converged and FAILS the stalled arm at 1.93; and it
+    # is 2.95x cheaper per member-step at B=1 (1.54 s vs 4.56 s).
+    #
+    # WHAT THIS DOES NOT TOUCH: a run with every spectral loss weight at 0.0 -- which is every
+    # config in `configs/`, the A0 baseline arm included -- never builds a forward solver at
+    # all, so this field is unread and A0 is bit-identical either way (D-R3-5's A0 clause,
+    # pinned by tests/test_gradient_path.py).
+    #
+    # 'unrolled' is SERIAL ONLY: unrolled.unrolled_relax has no BatchedRNGRN twin, so
+    # train.batched=True with a non-zero spectral weight REFUSES rather than silently solving
+    # through the other estimator. Set gradient_path='adjoint' deliberately for a batched
+    # spectral run, and say so with the number.
+    gradient_path: str = "unrolled"                  # register item 8 promotion
 
 
 @dataclass

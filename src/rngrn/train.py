@@ -159,20 +159,32 @@ def _best_restart(restarts) -> int | None:
     return best_i
 
 
-def _stall_columns(result, stall_switch: bool) -> dict:
+def _stall_columns(result, counters_live: bool) -> dict:
     """Task 13 (R3 redesign, spec 4.3): the run-index columns this call contributes for
-    stall accounting -- `{}` (the keys stay ABSENT from the row) when `stall_switch` is
-    False, since every run before this task and every batched run (the switch is refused
-    there) never had a value that meant anything for these columns. When True, three flat
-    scalars straight off `RecoveryResult` (never `**`-expansion): `n_ignited_solves`,
-    `n_stalled_solves` (both `int`), `stall_switch_fraction` (`float`). Factored out of
-    `fit()`'s row-building so it is testable without a full end-to-end run.
+    stall accounting -- `{}` (the keys stay ABSENT from the row) when the switch-aware solver
+    did NOT run, since every run before Task 13 and every batched run (both switch-aware
+    combinations are refused there) never had a value that meant anything for these columns.
+    Otherwise four flat scalars straight off `RecoveryResult` (never `**`-expansion):
+    `n_ignited_solves`, `n_stalled_solves` (both `int`), `stall_switch_fraction` (`float`)
+    and `gradient_path` (`str`). Factored out of `fit()`'s row-building so it is testable
+    without a full end-to-end run.
+
+    `counters_live` is `recover.uses_switch_solver(gradient_path, stall_switch)` -- the SINGLE
+    source of truth for "did `_StallSwitchSolver` run", shared with `recover()` so the row and
+    the run cannot drift. RE-TARGETED by register item 8's promotion (D-R3-5): the parameter
+    used to be `stall_switch` alone, which since the promotion would omit the counters from
+    every DEFAULT run -- the counters are instrumentation now, live on both estimators.
+
+    `gradient_path` is emitted alongside them because the promotion changed which estimator a
+    run's gradients came from, and a number whose estimator is not recorded cannot be compared
+    to one whose estimator is (CLAUDE.md 8).
     """
-    if not stall_switch:
+    if not counters_live:
         return {}
     return dict(n_ignited_solves=int(result.n_ignited_solves),
                n_stalled_solves=int(result.n_stalled_solves),
-               stall_switch_fraction=float(result.stall_switch_fraction))
+               stall_switch_fraction=float(result.stall_switch_fraction),
+               gradient_path=str(result.gradient_path))
 
 
 def _save_run_arrays(cfg: Config, rdir: str, run_id: str, ri, result, J_rec,
@@ -290,7 +302,11 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
                        # silent no-op (recorded in frozen_config.yaml but never reaching
                        # recover()).
                        stall_switch=cfg.train.stall_switch,
-                       stall_switch_fraction=cfg.train.stall_switch_fraction)
+                       stall_switch_fraction=cfg.train.stall_switch_fraction,
+                       # register item 8's PROMOTION (D-R3-5): threaded for the same reason
+                       # -- a gradient estimator recorded in frozen_config.yaml but never
+                       # reaching recover() would make the row lie about which path ran.
+                       gradient_path=cfg.train.gradient_path)
 
     # Scoring uses the answer key; recovery did not. `ri.frame` is passed as target_frame
     # so MORPHOLOGY — the owner's primary criterion — is recorded on every run. That is
@@ -427,16 +443,21 @@ def fit(cfg: Config, runs_root: str = "experiments", run_id: str | None = None,
         n_restarts_ss_failed=sum(1 for e in result.restarts if e.get("steady_state_failed")),
     )
     # Task 13 (R3 redesign, spec 4.3): the per-run stall counter. ABSENT (not 0, not NaN)
-    # when cfg.train.stall_switch is False -- every run before this task, and every batched
-    # run (the switch is refused there, recover.py's docstring) -- rather than a column full
-    # of a value that never meant anything. `index.py`'s docstring is explicit that both
+    # when the switch-aware solver did not run -- every run before that task, and every
+    # batched run (both switch-aware combinations are refused there, recover.py's docstring)
+    # -- rather than a column full of a value that never meant anything. Which combinations
+    # those are is `recover.uses_switch_solver`'s to say, NOT this call site's: since register
+    # item 8's promotion the counters are live on the DEFAULT gradient_path too, and a
+    # duplicated predicate here would silently drop them from every default run.
+    # `index.py`'s docstring is explicit that both
     # backends tolerate a row missing a key (jsonl: independent JSON objects per line;
     # sqlite: an additive ALTER-TABLE schema, absent key -> NULL for that row), so this does
     # not require every prior row to be rewritten. When present, values are flat scalars
     # (int/int/float) straight off RecoveryResult. Factored into `_stall_columns` (below)
     # so the column set this call contributes is testable without a full fit() run; still
     # reached via `row.update(...)`, never `**`-expansion into a `dict()` literal.
-    row.update(_stall_columns(result, cfg.train.stall_switch))
+    row.update(_stall_columns(
+        result, R.uses_switch_solver(cfg.train.gradient_path, cfg.train.stall_switch)))
     # EXECUTION PATH identity. The frozen config records these, but the run index is what
     # gets aggregated and compared, and without them a row cannot say whether it came from
     # the serial or the batched optimiser, on CPU or CUDA, through which dispersion

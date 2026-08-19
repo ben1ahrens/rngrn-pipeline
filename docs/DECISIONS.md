@@ -2718,3 +2718,17 @@ the two Adam loops; `src/rngrn/train.py::fit`. Tests: `tests/test_weight_noise.p
 `experiments/claim_wnoise/sigma_w_{0p00,0p20,0p048,0p10}/` (run in that order so the
 extremes exist if time runs out), smoke at `experiments/claim_wnoise/smoke/` (plumbing
 only, never a number source).
+
+**Outcome (2026-08-19, all four cells complete — recorded against the pre-registered
+analysis above, no re-decision).** The curve is decisively negative for the
+noise-helps-robustness hypothesis at the probed levels: Turing-unstable recoveries
+8/8 → 6/8 → 1/8 → 0/8 across σ_w = 0 → 0.048 → 0.10 → 0.20; rollout patterning
+7/8 → 5/8 → 0/8 → 0/8; k*_fft rel-err median 0.031 → 0.059 → 0.621 → 0.977. The one
+pro-noise signal — vol_20pct median 0.992 over the six σ_w=0.048 survivors vs 0.935 over
+all eight control seeds — is survivor-biased and bought at ~2× k* error; recorded as a
+hypothesis for a sub-0.048 sweep, not a claim. Full report:
+`docs/PAPER_CLAIM_WNOISE.md`; tables `experiments/claim_wnoise/summary_table.json` +
+`seed_level.csv`. Cell 0p20's first attempt never ran (flock-acquisition timeout behind
+an unrelated R3-lane run, exit 4); re-launched same day with the identical invocation,
+exit 0 — provenance in `experiments/claim_wnoise/README.md`. The documented fallback
+(per-restart held noise) and a finer σ_w < 0.048 sweep remain unrun.

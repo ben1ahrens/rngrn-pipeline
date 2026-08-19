@@ -1,0 +1,13 @@
+=== 2026-08-19T13:01:38+01:00 SMOKE starting (sigma_w=0.048, 2 seeds, 50 steps) ===
+=== 2026-08-19T13:54:39+01:00 SMOKE exit 0 ===
+=== 2026-08-19T13:54:39+01:00 SMOKE GATE PASSED (frozen config carries the knobs, 2 rows) ===
+=== 2026-08-19T13:54:39+01:00 starting cell 0p00 ===
+=== 2026-08-19T14:38:10+01:00 cell 0p00 exit 0 ===
+=== 2026-08-19T14:38:10+01:00 starting cell 0p20 ===
+=== 2026-08-19T16:38:10+01:00 cell 0p20 exit 4 ===
+=== 2026-08-19T16:38:10+01:00 starting cell 0p048 ===
+=== 2026-08-19T17:06:07+01:00 cell 0p048 exit 0 ===
+=== 2026-08-19T17:06:07+01:00 starting cell 0p10 ===
+=== 2026-08-19T17:09:29+01:00 cell 0p10 exit 0 ===
+=== 2026-08-19T17:09:29+01:00 ALL CELLS DONE ===
+=== 2026-08-19T17:09:29+01:00 TOP DRIVER DONE ===

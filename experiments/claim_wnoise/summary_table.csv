@@ -1,0 +1,5 @@
+sigma_w,cell,n_seeds,n_recovered,n_turing,kstar_fft_rel_err_mean,kstar_fft_rel_err_median,morphology_match_frac,morphology_n_compared,turing_volume_1pct_mean,turing_volume_1pct_median,turing_volume_4p8pct_mean,turing_volume_4p8pct_median,turing_volume_10pct_mean,turing_volume_10pct_median,turing_volume_20pct_mean,turing_volume_20pct_median
+0.0,sigma_w_0p00,8,8,8,0.03522518377119767,0.030538465181208996,1.0,7,1.0,1.0,1.0,1.0,0.99875,1.0,0.938125,0.935
+0.048,sigma_w_0p048,8,8,6,0.1724986883940722,0.059142407449396237,0.8,5,1.0,1.0,1.0,1.0,0.9925,1.0,0.9558333333333334,0.9924999999999999
+0.1,sigma_w_0p10,8,8,1,0.5569243368151473,0.6209952782186599,nan,0,1.0,1.0,1.0,1.0,0.98,0.98,0.88,0.88
+0.2,sigma_w_0p20,8,8,0,0.976816984371548,0.976816984371548,nan,0,nan,nan,nan,nan,nan,nan,nan,nan

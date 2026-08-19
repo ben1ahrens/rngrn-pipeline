@@ -51,25 +51,32 @@ def _phi_contour_torch(Lop: torch.Tensor, dt: float, M: int = 32):
     return E, E2, Q, f1, f2, f3
 
 
-def _torch_reaction_builder(model: RNGRN, device: torch.device):
+def _torch_reaction_builder(model: RNGRN, device: torch.device,
+                            differentiable: bool = False):
     """Batched reaction for (B, N, n, n) fields — competitive form only (as in D2).
 
-    Same arithmetic as rollout._reaction_np_builder's competitive branch, in torch,
-    parameters DETACHED (the relax is gradient-free by design; gradients come from the
-    IFT adjoint, never from backprop through the integrator). nc1 is refused loudly
-    rather than half-ported: a silent wrong port would poison the equivalence check.
-    A CUDA spectral run on an nc1 model therefore fails loud at relax time.
+    Same arithmetic as rollout._reaction_np_builder's competitive branch, in torch. By
+    default the parameters are DETACHED: the forward relax behind the IFT/adjoint path is
+    gradient-free by design, and its gradients come from the adjoint, never from backprop
+    through the integrator. ``differentiable=True`` keeps them attached, which is what the
+    §4.2 truncated-unrolled path (`rngrn.unrolled`) backpropagates through — the parameter
+    tensors are then built ONCE here and shared by every step of the segment, so the
+    theta -> KA/alpha/... subgraph is not rebuilt (or recomputed under checkpointing)
+    per step. nc1 is refused loudly rather than half-ported: a silent wrong port would
+    poison the equivalence check. A CUDA spectral run on an nc1 model therefore fails loud
+    at relax time.
     """
     if model.form != "competitive":
         raise NotImplementedError(
             f"torch ETDRK4 reaction supports form='competitive' only, got "
             f"{model.form!r} (ported from diagnostic D2, which needed only the "
             f"fixture's form; port nc1 with its own equivalence check before using it)")
-    KA = model.KA.detach().to(device)
-    KR = model.KR.detach().to(device)
-    alpha = model.alpha.detach().to(device)
-    beta = model.beta.detach().to(device)
-    delta = model.delta.detach().to(device)
+    keep = (lambda t: t) if differentiable else (lambda t: t.detach())
+    KA = keep(model.KA).to(device)
+    KR = keep(model.KR).to(device)
+    alpha = keep(model.alpha).to(device)
+    beta = keep(model.beta).to(device)
+    delta = keep(model.delta).to(device)
     n_h = model.n_hill
 
     def reaction_t(X: torch.Tensor) -> torch.Tensor:           # (B, N, n, n)
@@ -81,16 +88,32 @@ def _torch_reaction_builder(model: RNGRN, device: torch.device):
     return reaction_t
 
 
-def torch_half_coeffs(D: np.ndarray, n: int, L: float, dt: float,
-                      device: torch.device):
-    """ETDRK4 half-spectrum coefficients as torch tensors (mirrors _cached_half_coeffs)."""
+def torch_half_coeffs(D, n: int, L: float, dt: float, device: torch.device):
+    """ETDRK4 half-spectrum coefficients as torch tensors (mirrors _cached_half_coeffs).
+
+    `D` may be a numpy array (the gradient-free path: the coefficients are then constants)
+    or a torch tensor. A TENSOR is used as given — if it carries a graph, so do the six
+    returned coefficients, which is the ONLY route by which theta_D reaches the field in the
+    §4.2 unrolled path: D enters ETDRK4 through the linear operator -D k^2 and nowhere else.
+    `dt` stays a float in both cases; the timestep is set from the detached |eig(J)|_max
+    timescale and is not differentiated.
+    """
     k2 = torch.from_numpy(_spectral_k2_half(n, L)).to(device)
-    Lop = torch.stack([-float(D[i]) * k2 for i in range(len(D))])
+    if torch.is_tensor(D):
+        if D.dim() != 1:
+            raise ValueError(
+                f"D must be the (N,) diffusion vector of ONE model, got shape "
+                f"{tuple(D.shape)} — a BatchedRNGRN's (B, N) D would be flattened into B*N "
+                f"fake species here; use forward._half_coeffs_batched for the member axis")
+        Lop = -D.to(device).reshape(-1)[:, None, None] * k2
+    else:
+        Lop = torch.stack([-float(D[i]) * k2 for i in range(len(D))])
     return _phi_contour_torch(Lop, dt)
 
 
 def integrate_etdrk4_rfft_torch(X0: torch.Tensor, reaction_t, n: int, dt: float,
-                                nsteps: int, coeffs) -> tuple[torch.Tensor, bool]:
+                                nsteps: int, coeffs,
+                                check_blowup: bool = True) -> tuple[torch.Tensor, bool]:
     """Line-for-line torch port of numerics.integrate_etdrk4_rfft, batched over a
     leading IC dimension: X0 is (B, N, n, n), coefficients broadcast over B.
 
@@ -113,6 +136,12 @@ def integrate_etdrk4_rfft_torch(X0: torch.Tensor, reaction_t, n: int, dt: float,
     otherwise makes (forward.py), not merely lost diagnostic granularity. It does not affect
     correctness on non-blowing-up trajectories, which is all `tests/test_etdrk4_torch.py`
     currently pins.
+
+    `check_blowup=False` skips even that one check and returns ``blew=False`` unconditionally
+    — for the §4.2 unrolled path, whose blocks are re-entered by gradient checkpointing (so
+    the check would run twice per block) and which does its own single finiteness check on
+    the segment's output. `blew` is then NOT a statement about the field; only a caller that
+    checks finiteness itself may pass it.
     """
     E, E2, Q, f1, f2, f3 = coeffs
 
@@ -130,5 +159,5 @@ def integrate_etdrk4_rfft_torch(X0: torch.Tensor, reaction_t, n: int, dt: float,
         c = E2 * a + Q * (2.0 * Nb - Nv)
         Nc = Nfun(c)
         v = E * v + Nv * f1 + 2.0 * (Na + Nb) * f2 + Nc * f3
-    blew = not bool(torch.isfinite(v).all())
+    blew = (not bool(torch.isfinite(v).all())) if check_blowup else False
     return torch.fft.irfft2(v, s=(n, n), dim=(-2, -1)), blew

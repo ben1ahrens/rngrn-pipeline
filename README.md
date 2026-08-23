@@ -85,8 +85,7 @@ own controls
 | `hdf5_3gene` | one raw external HDF5 by path | `hdf5_path` + `sample_key` |
 
 **The dataset registry** (`data/registry.py`) is the store for datasets you generated
-elsewhere and downloaded — the ones you can't (or don't want to) regenerate from a
-spec in this codebase. Register once, then load by name from any config:
+elsewhere and downloaded. Register once, then load by name from any config:
 
 ```bash
 # either: let the CLI copy the file into the store

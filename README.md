@@ -1,4 +1,4 @@
-# rngrn-pipeline
+# rngrn-pipeline README.md
 
 Per-frame variational recovery of a gene regulatory network (GRN) from a single
 converged Turing-pattern image — the **inverse Turing problem**. The learnable

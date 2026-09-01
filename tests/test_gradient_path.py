@@ -280,6 +280,35 @@ def test_pattern_solve_backward_works_on_a_pinned_model(monkeypatch):
     assert all(g is not None for g in grads), "a registered theta received no gradient"
     assert all(torch.isfinite(g).all() for g in grads)
 
+    # VALUE assertion (Task 22 scoped re-review, minor 1). With lambda fixed at ones by the
+    # monkeypatch, the bridge's gradient is d/dtheta of psi(theta) = (-lambda * F(theta,
+    # u*)).sum() = -F.sum() — so central differences of psi over sampled theta entries pin
+    # the -lam^T dF/dtheta assembly ITSELF (through the derived-beta chain), not just its
+    # shape. The re-reviewer's external run of this exact check measured worst relative
+    # error 8.6e-9 at n=12; 1e-6 leaves honest margin over that and FD truncation.
+    F_fn = F.make_spatial_F(m, payload["n"], payload["L"])
+    u_star = payload["u_star"]
+
+    def psi() -> float:
+        with torch.no_grad():
+            return float(-(F_fn(u_star)).sum())
+
+    h = 1e-6
+    for nm in F.theta_names_for(pinned=True):
+        p = getattr(m, nm)
+        flat = p.data.reshape(-1)
+        for i in (0, flat.numel() - 1):            # two sampled entries per parameter
+            orig = float(flat[i])
+            flat[i] = orig + h
+            f_plus = psi()
+            flat[i] = orig - h
+            f_minus = psi()
+            flat[i] = orig
+            fd = (f_plus - f_minus) / (2.0 * h)
+            an = float(p.grad.reshape(-1)[i])
+            assert abs(an - fd) <= 1e-6 * max(1.0, abs(fd)), (
+                f"{nm}[{i}]: bridge {an!r} vs central FD {fd!r}")
+
 
 def test_batched_pattern_solve_backward_works_on_a_pinned_model(monkeypatch):
     """The batched bridge had the identical `THETA_NAMES` iteration; same fix, same
@@ -288,7 +317,8 @@ def test_batched_pattern_solve_backward_works_on_a_pinned_model(monkeypatch):
     from rngrn.model import BatchedRNGRN
     from rngrn.eval.numerics import _spectral_k2
     n, L, B = 12, 40.0, 2
-    bm = BatchedRNGRN.from_seeds(N=2, seeds=[0, 1], pin_xstar=[1.0, 1.0])
+    models = [F.RNGRN(N=2, seed=s, pin_xstar=[1.0, 1.0]) for s in (0, 1)]
+    bm = BatchedRNGRN(models)
     assert not hasattr(bm, "theta_beta")
     monkeypatch.setattr(F, "solve_adjoint",
                         lambda *a, **kw: (torch.ones(2 * n * n, dtype=torch.float64),
@@ -306,6 +336,24 @@ def test_batched_pattern_solve_backward_works_on_a_pinned_model(monkeypatch):
     grads = [getattr(bm, nm).grad for nm in F.theta_names_for(pinned=True)]
     assert all(g is not None for g in grads)
     assert all(torch.isfinite(g).all() for g in grads)
+
+    # VALUE assertion (Task 22 scoped re-review, minor 1). Each member's row of the batched
+    # gradient must EQUAL the serial bridge run on that member alone — same u*[j], same
+    # fixed lambda from the monkeypatch. Combined with the serial test's FD check above,
+    # this closes the chain: serial is FD-correct, batched equals serial per member. The
+    # re-reviewer's external run of this check measured worst relative deviation 1.5e-15;
+    # 1e-12 leaves honest margin.
+    for j, mm in enumerate(models):
+        pay_j = dict(model=mm, u_star=u_stack[j].detach().clone(), n=n, L=L,
+                     k2_full=_spectral_k2(n, L), D_np=mm.D.detach().cpu().numpy(),
+                     gamma=1.0, k2h=None, k2_dev=None, D_dev=None)
+        out_j = F.PatternSolve.apply(pay_j, *F._registered_theta_params(mm))
+        out_j.sum().backward()
+        for nm in F.theta_names_for(pinned=True):
+            gb = getattr(bm, nm).grad[j]
+            gs = getattr(mm, nm).grad
+            assert torch.allclose(gb, gs, rtol=1e-12, atol=1e-12), (
+                f"member {j}, {nm}: batched row differs from serial bridge")
 
 
 @pytest.mark.parametrize("which", ["serial", "batched"])

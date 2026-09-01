@@ -151,13 +151,16 @@ not appear in its imports.
 - Recovery-side modules: `model.py`, `observables.py`, `recover.py`, `history.py`,
   `losses/{terms,total,weighting}.py`,
   `eval/{rollout,numerics,dynamical,analysis,topology}.py`.
-- Forbidden imports (`tests/test_firewall.py::FORBIDDEN`, 12 names — **re-read the list
-  there rather than trusting this one**): `rd_models`, `data.solver`, `data.cache`,
-  `data.gate`, `data.registry`, `AnswerKey`, `answer_key`, plus the payload-reading
-  scripts `td_figures`, `gen_tg3`, `canon_select`, `canon_generate`, `canon_annotate`.
-  The `data.*` names must stay **dotted**: a bare `registry` would false-positive on
-  `rngrn/registry.py`, the component registry that `model.py` and `losses/weighting.py`
-  legitimately import.
+- Forbidden imports: **`tests/test_firewall.py::FORBIDDEN` is the authority — re-read it;
+  do not trust any count or list restated here.** (Restated counts in this file have
+  drifted twice: this paragraph said 12 names while the file held 29, counted 2026-09-01
+  during the R3 docs pass; the R3 plan's own "27" was also stale by the time it was
+  read.) The list covers the generation-side modules (`rd_models`, the dotted `data.*`
+  names, `AnswerKey`/`answer_key`) plus the payload-reading scripts known to
+  date, importable by bare top-level name — the class that grows, which is why the
+  count rots. The `data.*` names
+  must stay **dotted**: a bare `registry` would false-positive on `rngrn/registry.py`,
+  the component registry that `model.py` and `losses/weighting.py` legitimately import.
 - The answer key's *contents* are read in **exactly one place**: `validate.score_recovery`.
   `train.fit` holds the key and passes it to the scorer — it touches only
   `n_species_true`, to classify the experiment arm — and `_resolve_recovery_input` is the

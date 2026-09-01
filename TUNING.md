@@ -138,6 +138,23 @@ Legend: **[TUNE]** = a numeric/choice knob to search · **[IMPL]** = a stub to i
   `loss.strategy: ratio`. No other doc mentions it.
 - **[TUNE] seed replicates** — `optim/sweep.py::run_sweep(seeds=...)`. Rank configs by a seed
   aggregate, never one init. `sweep_example.yaml` shows the axis format.
+- **[VALIDATE] gradient path (R3, register item 8)** — `train.gradient_path`
+  (`config.py::TrainConfig`), default `'unrolled'` since the owner-ruled promotion
+  (D-R3-5, 2026-08-19): the truncated-unrolled estimator for every ignited-member solve.
+  `'adjoint'` restores the IFT/LSMR backward and is the A/B *verification* path, not a
+  convenience fallback. Serial-only: `batched=True` + non-zero spectral weight REFUSES
+  under the default — select `'adjoint'` deliberately for a batched spectral run. A run
+  with all spectral weights 0.0 (every config in `configs/`, A0 included) never reads
+  this field (bit-identity pinned by `tests/test_gradient_path.py`).
+- **[VALIDATE] unrolled segment length** — `unrolled.py::SEGMENT_STEPS_DEFAULT = 128`
+  (D-R3-2): CALIBRATED inside the designed regime (saturated warm state, the measured
+  fixture/box), UNCALIBRATED outside it. Not a free knob — the calibration travels with
+  the regime.
+- **[NOTE] stall accounting (R3 Task 13/16)** — `train.stall_switch` (default False; only
+  meaningful with `gradient_path='adjoint'`, RAISES with `'unrolled'`) and
+  `train.stall_switch_fraction` (0.20): the fraction is **RETIRED AS A THRESHOLD**
+  (D-R3-7) — it never gated anything and is kept as a recorded diagnostic only. Do not
+  report it as calibrated.
 
 ## Stage 4 — validation / milestones (validate.py, train.fit)
 

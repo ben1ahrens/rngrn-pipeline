@@ -26,8 +26,11 @@ any task. Decision records: `docs/DECISIONS.md` D-LIFT-1, D-REDESIGN-1, D-REDESI
 This document plans **R1 and R2 only**. R3–R5 are measurement-gated by the spec and get
 their own plan documents when their inputs exist:
 
-- `PLAN_redesign_R3.md` — unlocked by R2's throughput/RSS curve and ignition-rate
-  measurement (sets B, K) and the spec §4.1 batched-implementation surface.
+- `PLAN_redesign_R3.md` — **written and executed** (2026-08; 22 tasks in 5 phases, on
+  the `docs/redesign-rngrn` branch; results collated in `docs/DIAGNOSTICS_r3.md`).
+  Was unlocked, as planned here, by R2's throughput/RSS curve and ignition-rate
+  measurement and the spec §4.1 batched-implementation surface. *(Pointer updated
+  2026-09-01, R3 Task 21.)*
 - `PLAN_redesign_R4.md` — unlocked by R3's FD A/B report, stall-rate distribution, and
   96²-vs-512² RAPS fidelity measurement; includes the D-FFT-14 weight-noise arm, whose
   schedule/magnitude must be pre-registered in `docs/DECISIONS.md` before that plan runs.

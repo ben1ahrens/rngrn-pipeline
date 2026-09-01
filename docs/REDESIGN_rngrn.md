@@ -252,20 +252,26 @@ population. What exists and what is new work, stated plainly:
   `kstar_anchor`, `turing_hinges{,_split}`, `anticollapse`, `frame_scale_anchor`,
   `param_prior`) on `BatchedRNGRN`, with the closed-form cubic dispersion backend
   (162× over eigvals on CUDA; `model.py`).
-- **Not batched, and refused by name:** the spectral terms and the forward solve.
-  `losses/total.py::compute_terms_batched` raises on them, for two stated structural
-  reasons — `PatternSolver` owns per-restart warm-start state with no batched form,
-  and the batched reaction does not broadcast to per-pixel fields. **Batching both is
-  new work on R3's critical path**, and its bit-level equivalence test against the
-  serial path does not yet exist. Measured raw material: ETDRK4 at 3.25 ms/step at
+- **Batched since R3 Phase B** *(amended 2026-09-01, R3 Task 21; this bullet
+  originally read "Not batched, and refused by name" — that described the pre-R3 tree)*:
+  the spectral terms and the forward solve are batched
+  (`losses/total.py::compute_terms_batched`, `forward.BatchedPatternSolver`), and the
+  by-name refusal is replaced by input validation. The mandate in this section — a
+  bit-level equivalence test before the batched path trains anything — is satisfied by
+  Phase A's equivalence suite. One refusal is deliberately retained (D-R3-5): the
+  promoted default `gradient_path='unrolled'` is serial-only (`unrolled_relax` has no
+  batched twin), so `batched=True` with a non-zero spectral weight REFUSES; a batched
+  spectral run must select `gradient_path='adjoint'` explicitly, with the demotion
+  acknowledged. Measured raw material behind the batching: ETDRK4 at 3.25 ms/step at
   512² GPU-native (D-FFT-11 flag-1 closure) and 11.6× over serial CPU at 96²/B=32
   (`docs/DIAGNOSTICS_fft.md` D2). CPU forward solves are disqualified for training
   (938–1374 s/solve at 96², `forward.py` docstring).
 - Population sizes are set from measured GPU throughput and RSS (§4.5), under the
   `CLAUDE.md` §7a host-RAM guard, which still governs every launch.
-- Serial per-member CPU paths survive as reference implementations; the batched twins
-  that exist today already carry bit-level equivalence tests, and the new batched
-  spectral path gets one before it trains anything.
+- Serial per-member CPU paths survive as reference implementations; every batched twin
+  — the batched spectral/forward path included, since Phase A — carries a bit-level
+  equivalence test against its serial reference. *(Amended 2026-09-01: this bullet
+  originally deferred the spectral path's test to future work.)*
 
 ### 4.2 Backpropagation through the network: two gradient paths
 
@@ -287,17 +293,29 @@ senses, and the redesign uses both:
   unrolled steps with gradient checkpointing. This requires **no convergence at all**:
   the loss is defined on the relaxed field after finite time, so the F-D1-5 stall
   class cannot touch it. Costs, stated plainly: checkpointed activation memory
-  (bounded by segment length × fields, tractable at the n=96 training grid); and
-  gradients through the exponential-growth phase of the instability can explode —
-  mitigated by **truncated** backprop: detach the warm-started state and differentiate
-  only the final saturated segment (length UNCALIBRATED; set at R3 from the measured
-  gradient-error-vs-length curve). Feasible only because of §4.1.
+  (bounded by segment length × fields, tractable at the n=96 training grid).
+  *(AMENDED 2026-09-01 per D-R3-3, R3 Task 12: this bullet originally added "gradients
+  through the exponential-growth phase of the instability can explode — mitigated by
+  truncated backprop". That explosion did NOT reproduce — no segment length in
+  [1, 2048] blew up on either arm at the measured operating point; the patterned
+  attractor is contracting. What truncation actually buys there is bounded activation
+  memory — 24,576 B/step checkpointed vs 753 kB/step un-checkpointed, 30× — and a
+  gradient that stays finite-difference-verifiable; it does not buy protection from an
+  observed divergence. The segment length is no longer UNCALIBRATED: 128 steps,
+  CALIBRATED inside the saturated-warm-state regime and UNCALIBRATED outside it,
+  D-R3-2. Scope: one fixture, one box, two placeholder losses — not a claim that the
+  unrolled path cannot explode in general.)* Feasible only because of §4.1.
 - **A/B discipline.** Before either path feeds a training run at the operating point, a
   D1-style finite-difference check (10 directions × the active loss terms, tol 1e-4)
   runs on *both* paths at the same θ. During training: adjoint where the Newton polish
   converges to the 1e-9 bar, truncated-unrolled where it stalls. Promotion of the
   unrolled path to primary — if the A/B shows it FD-faithful at training tolerances —
   changes the gradient estimator the results depend on: owner-decision item 8.
+  *(AMENDED 2026-09-01: item 8 was ruled by the owner on 2026-08-19 — the unrolled path
+  IS promoted to primary/default for every member, and the adjoint path is retained as
+  the A/B verification path, not as a fallback. The "primary"/"structural fallback"
+  labels above describe the pre-promotion design; D-R3-5 carries the ruling and its
+  evidence, including the A0 bit-identity clause.)*
 
 ### 4.3 The forward-solve geometry: adaptive commensurate solve box (F-D1-5 resolution)
 

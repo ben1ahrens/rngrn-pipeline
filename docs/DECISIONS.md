@@ -4926,3 +4926,39 @@ clean invocation, total 7831.8 s); `scripts/r3_batch_curve.py`;
 `.superpowers/sdd/PLAN_redesign_R3/task-17-report.md`. Read with **D-R3-4** (IC
 variance), **D-R3-5** (unrolled promotion), and R2's `task-16-report.md` (the
 ignition-only curve this one is explicitly NOT a re-read of).
+
+### D-R3-9 — STATUS ROLL-UP: register item 14 ("B=512, K=16, ~20 % stall fraction, segment length — all UNCALIBRATED") after R3
+
+**Date:** 2026-09-01 (R3 Task 21, `docs/r3-docs-pass`). **Status:** RECORDED — a
+cross-reference entry; it decides nothing new and re-opens nothing.
+
+**Context.** `docs/REDESIGN_rngrn.md` §8 register item 14 listed four uncalibrated
+numbers for R3 to close. Task 21's brief ("roll up every UNCALIBRATED number R3 closed,
+and leave the ones it did not close explicitly still marked") is discharged by recording
+the actual per-number state, which the plan's own wording overstates in one place — the
+plan lists "the ~20 % stall-switch fraction (Task 16)" as if a fraction were calibrated;
+what actually happened is retirement.
+
+**The state, per number:**
+
+1. **Truncated-backprop segment length — CLOSED, scoped.** 128 steps
+   (`unrolled.py::SEGMENT_STEPS_DEFAULT`), CALIBRATED inside the saturated-warm-state
+   regime and UNCALIBRATED outside it. **D-R3-2**; rationale corrected by **D-R3-3**
+   (memory + FD-verifiability, not blow-up protection).
+2. **`stall_switch_fraction` (~20 %) — RETIRED, not calibrated.** It never gated
+   anything; the promotion (D-R3-5) moved every member to the unrolled path rather than
+   picking a rate. Kept as a recorded diagnostic only. **D-R3-7.** The measured input
+   that fed the retirement: pooled 25.7 % off-checkpoint, per-member 0–100 % (Task 16).
+3. **B — NOT closed.** Evidence measured and returned (wall-clock, not memory, bounds
+   B; largest measured B=64 at 1 thread; superlinear per-member cost), ruling
+   deliberately left to the owner via Task 22's roll-up. **D-R3-8, PROPOSED.**
+4. **K — NOT closed.** No R3 population has been run to convergence, so no
+   distinct-structure count of R3's own exists; R2's counts are cited-only. **D-R3-8**
+   carries this forward explicitly.
+
+**What was rejected.** Writing item 14 as "closed by R3" — rejected: two of four numbers
+remain open, and a roll-up that flattens PROPOSED into DECIDED is exactly the silent
+drift §8 forbids.
+
+**Where it lives:** `docs/DIAGNOSTICS_r3.md` (the collation); D-R3-2, D-R3-3, D-R3-5,
+D-R3-7, D-R3-8 (the substance). Read before Task 22's owner roll-up.

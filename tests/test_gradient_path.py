@@ -243,3 +243,96 @@ def test_gradient_path_is_threaded_from_config_into_recover(monkeypatch, configu
     assert seen.get("gradient_path") == configured, (
         f"train.fit() did not hand train.gradient_path to recover(); saw "
         f"{seen.get('gradient_path')!r}, configured {configured!r}")
+
+
+# ----------------------------------------------------------------------------------------
+# 5. the IFT bridges on a PINNED model, and the adjoint tripwire (Task 22 audit)
+# ----------------------------------------------------------------------------------------
+# Both classes need no forward solve: the payload is synthetic and `solve_adjoint` is
+# monkeypatched, so only the bridge's own backward — the F closure, the registered-theta
+# gradient assembly, and the tripwire — actually runs.
+
+def _serial_payload(model, n=12, L=40.0):
+    """The dict `recover._spectral_solve_with_stall_switch` hands `PatternSolve.apply`."""
+    from rngrn.eval.numerics import _spectral_k2
+    u_star = torch.rand(model.N, n, n, dtype=torch.float64) + 0.5
+    return dict(model=model, u_star=u_star, n=n, L=L, k2_full=_spectral_k2(n, L),
+                D_np=model.D.detach().cpu().numpy(), gamma=1.0,
+                k2h=None, k2_dev=None, D_dev=None)
+
+
+def test_pattern_solve_backward_works_on_a_pinned_model(monkeypatch):
+    """Task 22 audit (latent collision): the serial IFT bridge iterated `THETA_NAMES`, but a
+    `pin_xstar` model registers no `theta_beta` — the old backward died with a raw
+    `AttributeError` mid-step (RED confirmed against the pre-fix semantics). The bridge now
+    iterates the REGISTERED list; the derived-beta chain rule needs no special handling
+    because `make_spatial_F` reads `model.beta`, a property of the registered thetas."""
+    import rngrn.forward as F
+    m = F.RNGRN(N=2, seed=0, pin_xstar=[1.0, 1.0])
+    assert not hasattr(m, "theta_beta")            # the precondition that made this RED
+    monkeypatch.setattr(F, "solve_adjoint",
+                        lambda *a, **kw: (torch.ones(2 * 12 * 12, dtype=torch.float64),
+                                          1e-12))
+    payload = _serial_payload(m)
+    out = F.PatternSolve.apply(payload, *F._registered_theta_params(m))
+    out.sum().backward()
+    grads = [getattr(m, nm).grad for nm in F.theta_names_for(pinned=True)]
+    assert all(g is not None for g in grads), "a registered theta received no gradient"
+    assert all(torch.isfinite(g).all() for g in grads)
+
+
+def test_batched_pattern_solve_backward_works_on_a_pinned_model(monkeypatch):
+    """The batched bridge had the identical `THETA_NAMES` iteration; same fix, same
+    reasoning, member axis added."""
+    import rngrn.forward as F
+    from rngrn.model import BatchedRNGRN
+    from rngrn.eval.numerics import _spectral_k2
+    n, L, B = 12, 40.0, 2
+    bm = BatchedRNGRN.from_seeds(N=2, seeds=[0, 1], pin_xstar=[1.0, 1.0])
+    assert not hasattr(bm, "theta_beta")
+    monkeypatch.setattr(F, "solve_adjoint",
+                        lambda *a, **kw: (torch.ones(2 * n * n, dtype=torch.float64),
+                                          1e-12))
+    KX, KY = F._half_k_grids(n, L)
+    k2h = torch.from_numpy(KX ** 2 + KY ** 2)
+    idx = torch.arange(B)
+    u_stack = torch.rand(B, 2, n, n, dtype=torch.float64) + 0.5
+    payload = dict(model=bm, idx=idx, members=[0, 1], u_star=u_stack, n=n, L=L,
+                   k2_full=_spectral_k2(n, L),
+                   D_np=bm.D.detach().cpu().numpy(), gamma=np.ones(B),
+                   k2h=k2h, k2_dev=None, D_dev=bm.D.detach())
+    out = F.BatchedPatternSolve.apply(payload, *F._registered_theta_params(bm))
+    out.sum().backward()
+    grads = [getattr(bm, nm).grad for nm in F.theta_names_for(pinned=True)]
+    assert all(g is not None for g in grads)
+    assert all(torch.isfinite(g).all() for g in grads)
+
+
+@pytest.mark.parametrize("which", ["serial", "batched"])
+def test_adjoint_tripwire_raises_instead_of_handing_over_a_biased_gradient(
+        monkeypatch, which):
+    """The load-bearing fail-loud guard (D-FFT-10): an adjoint residual above
+    `_ADJOINT_RESIDUAL_TRIPWIRE` must RAISE in the bridge backward, never reach Adam.
+    Previously correct by inspection only (Task 22 numerics review, Low)."""
+    import rngrn.forward as F
+    from rngrn.model import BatchedRNGRN
+    from rngrn.eval.numerics import _spectral_k2
+    n, L = 12, 40.0
+    bad = F._ADJOINT_RESIDUAL_TRIPWIRE * 10.0
+    monkeypatch.setattr(F, "solve_adjoint",
+                        lambda *a, **kw: (torch.ones(2 * n * n, dtype=torch.float64), bad))
+    if which == "serial":
+        m = F.RNGRN(N=2, seed=0)
+        out = F.PatternSolve.apply(_serial_payload(m), *F._registered_theta_params(m))
+    else:
+        bm = BatchedRNGRN.from_seeds(N=2, seeds=[0, 1])
+        KX, KY = F._half_k_grids(n, L)
+        payload = dict(model=bm, idx=torch.arange(2), members=[0, 1],
+                       u_star=torch.rand(2, 2, n, n, dtype=torch.float64) + 0.5,
+                       n=n, L=L, k2_full=_spectral_k2(n, L),
+                       D_np=bm.D.detach().cpu().numpy(), gamma=np.ones(2),
+                       k2h=torch.from_numpy(KX ** 2 + KY ** 2), k2_dev=None,
+                       D_dev=bm.D.detach())
+        out = F.BatchedPatternSolve.apply(payload, *F._registered_theta_params(bm))
+    with pytest.raises(RuntimeError, match="tripwire"):
+        out.sum().backward()

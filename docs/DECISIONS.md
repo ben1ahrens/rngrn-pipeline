@@ -4962,3 +4962,35 @@ drift §8 forbids.
 
 **Where it lives:** `docs/DIAGNOSTICS_r3.md` (the collation); D-R3-2, D-R3-3, D-R3-5,
 D-R3-7, D-R3-8 (the substance). Read before Task 22's owner roll-up.
+
+### D-R3-10 — CORRECTING NOTE on D-R3-8's "~5×" citation, and D-R3-3's memory figures (Task 22 audit)
+
+**Date:** 2026-09-01 (R3 Task 22, `feature/r3-integration`). **Status:** RECORDED — this
+file is append-only, so the two defects below are corrected here rather than by editing
+the entries in place. Found independently by the Task 21 evidence audit (queued) and the
+Task 22 whole-branch evidence audit (Medium/Low).
+
+**1. D-R3-8 mis-cites D-R3-5.** D-R3-8's line "unrolled beat adjoint 4.9×/4.5× per
+member-step — independently consistent with D-R3-5's ~5×" cites a figure D-R3-5 does not
+contain and explicitly disclaims. D-R3-5's recorded number is **2.95×**, the
+per-member-step **estimator** cost measured with the relax hoisted out of both timings,
+and its rider 1 states outright that it is *not* a whole-solve speedup (the retained
+polish was unmeasured there). The batch curve's 4.9×/4.5× (D-R3-8,
+`experiments/redesign_r3/batch_curve/results/batch_curve.json`) is a **different
+quantity**: the first full-step measurement, fresh relax included. Same direction, not a
+confirmation — **do not cite the two numbers as confirming each other.** (The "~5×
+confirmed" phrasing traces to a session pickup note, not to any decision entry.)
+
+**2. D-R3-3's checkpointing memory figures are misaligned with the pinned measurement.**
+D-R3-3 wrote "24,576 B/step retained … against 753 kB/step un-checkpointed (30×)". The
+committed measurement is **773,184 B/step** (= 755 kB), ratio **31.5×**, pinned by
+`tests/test_unrolled_grad.py` and stated at `src/rngrn/unrolled.py`'s docstring; 753/24.576
+is also internally 31.4×, not 30×. The conclusion (checkpointing buys ~30× retained-memory
+reduction) is unchanged; the recorded numerals were wrong.
+
+**What was rejected:** editing D-R3-8/D-R3-3 in place (append-only discipline), and
+leaving the mis-citation standing until R4 (a wrong cross-reference between two committed
+decisions is exactly the drift class §8 exists to stop).
+
+**Where it lives:** this note; the corrected prose copies are in `docs/DIAGNOSTICS_r3.md`
+(T21 fix round, commit 16d6095) and the Task 22 fix-round commit.

@@ -60,7 +60,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 
-from .model import RNGRN, BatchedRNGRN, THETA_NAMES
+from .model import RNGRN, BatchedRNGRN
 from . import observables as obs
 from .losses import total as LT
 from .losses.total import SteadyStateError
@@ -295,16 +295,26 @@ def _spectral_solve_with_stall_switch(model, n, L, seed, *, device=None,
     `forward.PatternSolver`'s warm-start reuse. Simpler and always correct is the point of
     this being separate machinery rather than a `PatternSolver` extension -- reusing warm
     state for the switch-aware path is left to whichever task next needs the cost (the
-    unrolled path is SERIAL MODEL ONLY per `unrolled.py`'s docstring; Task 14 owns the
-    batched twin this would need anyway).
+    unrolled path is SERIAL MODEL ONLY per `unrolled.py`'s docstring; Task 14 (fd_ab,
+    D-R3-5) ran without producing the batched twin this would need anyway -- it is an
+    open, un-commissioned R4-scope gap).
+
+    CPU backend note (Task 22 numerics review): this path always relaxes via
+    `relax_to_pattern_torch`, while `forward.PatternSolver._relax` dispatches to the numpy
+    integrator on CPU. So `gradient_path="adjoint"` with vs without `stall_switch` runs
+    different FFT backends on CPU (D2-measured 1.1e-13/100 steps apart), and over a full
+    relax-to-saturation the two can select translationally DIFFERENT patterns: a
+    stall-switch on/off A/B on CPU is not bit-comparable. Losses are translation-invariant,
+    so no value is wrong either way.
 
     Returns (u_star | None, path | None, stalled: bool, reason). `reason` is "ok" whenever
     `u_star` is usable on EITHER path, else one of "steady_state_failed" / "relax_failed" /
     "not_patterned" / "solve_failed" -- the same non-"ok" contract
     `losses.total._apply_spectral` already treats as skip-this-step.
     """
-    from .forward import (PatternSolver, PatternSolve, make_spatial_F, newton_polish,
-                          relax_to_pattern_torch, translation_modes)
+    from .forward import (PatternSolver, PatternSolve, _registered_theta_params,
+                          make_spatial_F, newton_polish, relax_to_pattern_torch,
+                          translation_modes)
     from .eval.numerics import _spectral_k2
     from .losses.terms import steady_state
 
@@ -342,7 +352,7 @@ def _spectral_solve_with_stall_switch(model, n, L, seed, *, device=None,
     if gradient_path == "adjoint" and not stalled:
         payload = dict(model=model, u_star=u.detach(), n=n, L=L, k2_full=k2_full,
                        D_np=D_np, gamma=gamma, k2h=None, k2_dev=None, D_dev=None)
-        out = PatternSolve.apply(payload, *(getattr(model, nm) for nm in THETA_NAMES))
+        out = PatternSolve.apply(payload, *_registered_theta_params(model))
         path = "adjoint"
     else:
         # Either the promoted default (every member unrolled), or an adjoint-primary STALL.
@@ -825,8 +835,9 @@ def recover(recovery_input, form="competitive", strategy=None, weights=None,
         raise ValueError(
             "stall_switch=True is not supported with batched=True: unrolled.unrolled_relax "
             "(the stall fallback, spec 4.3) is SERIAL MODEL ONLY -- it has no BatchedRNGRN "
-            "twin yet (unrolled.py's docstring; Task 14 owns that). Run the switch on the "
-            "serial path (batched=False).")
+            "twin (unrolled.py's docstring; Task 14 ran without producing it -- an open, "
+            "un-commissioned R4-scope gap). Run the switch on the serial path "
+            "(batched=False).")
     if gradient_path == "unrolled" and batched and use_spectral:
         raise ValueError(
             "gradient_path='unrolled' (the promoted default, D-R3-5) is not supported with "

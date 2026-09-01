@@ -52,7 +52,7 @@ from .etdrk4_torch import (_phi_contour_torch, _torch_reaction_builder,
 from .eval.numerics import integrate_etdrk4_rfft, _spectral_k2, _spectral_k2_half
 from .eval.rollout import _reaction_np_builder
 from . import observables as obs
-from .model import RNGRN, THETA_NAMES, _reaction_raw
+from .model import RNGRN, THETA_NAMES, _reaction_raw, theta_names_for
 
 # Sanity tripwire on the backward adjoint solve, NOT a solver knob: the refinement loop
 # targets 1e-10 and D1 measured 2.3e-12-6.1e-12 at the committed 96^2 record
@@ -61,6 +61,20 @@ from .model import RNGRN, THETA_NAMES, _reaction_raw
 # gradient is untrustworthy — fail loud rather than hand Adam a silently biased gradient
 # (the exact D1 failure mode).
 _ADJOINT_RESIDUAL_TRIPWIRE = 1e-8
+
+
+def _registered_theta_params(model) -> list:
+    """The model's actually-REGISTERED raw parameters, in `THETA_NAMES` order.
+
+    A `pin_xstar` model registers no `theta_beta` (beta is DERIVED from the fixed-point
+    condition — `model.theta_names_for`'s reason for existing), so the IFT bridges must
+    iterate the registered list: `getattr(model, nm) for nm in THETA_NAMES` raises an
+    undiagnostic `AttributeError` mid-step on a pinned model (Task 22 audit finding).
+    The derived-beta chain needs no special handling in the backward — `make_spatial_F*`
+    reads `model.beta`, a property computed from the registered thetas, so
+    `torch.autograd.grad` carries dF/dbeta * dbeta/dtheta through the graph by itself.
+    Works for both `RNGRN` and `BatchedRNGRN` (both expose `pin_xstar`)."""
+    return [getattr(model, nm) for nm in theta_names_for(model.pin_xstar is not None)]
 
 
 # ------------------------------------------------------------------ field helpers
@@ -675,8 +689,10 @@ class PatternSolve(torch.autograd.Function):
     F closure. Exactly the chain D1 verified against finite differences."""
 
     @staticmethod
-    def forward(ctx, payload, theta_s, theta_g, theta_alpha, theta_delta, theta_beta,
-                theta_D):
+    def forward(ctx, payload, *thetas):
+        # *thetas: the model's REGISTERED raw parameters (`_registered_theta_params`) —
+        # variadic because a pinned model registers one fewer (no theta_beta). Their only
+        # role here is hooking the autograd graph; backward re-derives the same list.
         ctx.payload = payload
         return payload["u_star"].clone()
 
@@ -699,7 +715,7 @@ class PatternSolve(torch.autograd.Function):
                     f"biased by that order (D-FFT-10). Refusing to hand it to the "
                     f"optimiser.")
             p["last_adjoint_residual"] = adj_res
-            params = [getattr(model, nm) for nm in THETA_NAMES]
+            params = _registered_theta_params(model)
             Fv = F_fn(u_star)      # u_star fixed; graph runs through theta only
             g_theta = torch.autograd.grad(Fv, params,
                                           grad_outputs=-lam.reshape(u_star.shape))
@@ -853,7 +869,14 @@ class PatternSolver:
     def _relax(self, xstar: np.ndarray, dt: float, X0: torch.Tensor | None = None,
                max_chunks: int | None = None) -> torch.Tensor:
         """Dispatch the ETDRK4 relax by device. X0 = warm re-relax (warm_mode="relax");
-        None = fresh from x* + noise. Returns a (N, n, n) tensor on the solve device."""
+        None = fresh from x* + noise. Returns a (N, n, n) tensor on the solve device.
+
+        CPU backend note (Task 22 numerics review): on CPU this dispatches to the NUMPY
+        integrator, while `recover._spectral_solve_with_stall_switch` always relaxes via
+        `relax_to_pattern_torch`. The backends agree to 1.1e-13/100 steps (D2), but over a
+        full relax-to-saturation they can select translationally DIFFERENT patterns — so a
+        stall-switch on/off A/B on CPU is not bit-comparable. Losses are
+        translation-invariant, so no value is wrong either way."""
         mc = self.max_chunks if max_chunks is None else max_chunks
         if self.device.type == "cpu":
             X0_np = X0.detach().cpu().numpy() if X0 is not None else None
@@ -931,7 +954,7 @@ class PatternSolver:
                        k2h=self._k2h, k2_dev=self._k2_full_dev,
                        D_dev=model.D.detach())
         self.last_payload = payload
-        out = PatternSolve.apply(payload, *(getattr(model, nm) for nm in THETA_NAMES))
+        out = PatternSolve.apply(payload, *_registered_theta_params(model))
         return self._finish(out, "ok")
 
 
@@ -1215,8 +1238,9 @@ class BatchedPatternSolve(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, payload, theta_s, theta_g, theta_alpha, theta_delta, theta_beta,
-                theta_D):
+    def forward(ctx, payload, *thetas):
+        # *thetas: the model's REGISTERED raw parameters — variadic for the same pinned-
+        # model reason as the serial `PatternSolve.forward` (no theta_beta when pinned).
         ctx.payload = payload
         return payload["u_star"].clone()
 
@@ -1246,7 +1270,7 @@ class BatchedPatternSolve(torch.autograd.Function):
             p["last_adjoint_residual"] = worst
             lam_stack = torch.stack(lams)
             F_fn = make_spatial_F_batched(model, idx, n, L, k2h=p["k2h"])
-            params = [getattr(model, nm) for nm in THETA_NAMES]
+            params = _registered_theta_params(model)
             Fv = F_fn(u_star)          # u_star fixed; graph runs through theta only
             g_theta = torch.autograd.grad(Fv, params, grad_outputs=-lam_stack)
         return (None,) + tuple(g_theta)
@@ -1468,6 +1492,5 @@ class BatchedPatternSolver:
                        k2h=self._k2h, k2_dev=self._k2_full_dev,
                        D_dev=model.D.detach().index_select(0, idx))
         self.last_payload = payload
-        out = BatchedPatternSolve.apply(
-            payload, *(getattr(model, nm) for nm in THETA_NAMES))
+        out = BatchedPatternSolve.apply(payload, *_registered_theta_params(model))
         return out, ok_members, reasons

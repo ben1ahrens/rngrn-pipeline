@@ -29,13 +29,14 @@ can run from a loss back to k̂ through the box. `tests/test_solve_box.py` asser
 absence of a grad on the geometry and the absence of a grad PATH through a loss that
 genuinely depends on `L_solve`.
 
-WHAT IS UNMEASURED (§4.3, stated plainly):
+MEASUREMENT STATUS (§4.3, stated plainly; updated at the Task 22 audit pass):
 
-* The training-grid spectral fidelity at n = 96 is UNMEASURED — D2 measured band-limited
-  agreement with 512^2 at 256^2, not at 96^2. `docs/PLAN_redesign_R3.md` Task 15 measures
-  the 96^2-vs-512^2 RAPS band distance; if it does not clear D3's ~31 %/bin estimation
-  floor, `n` rises to the coarsest grid that does. `n = 96` here is therefore a spec-fixed
-  STARTING value, not a settled one.
+* The training-grid spectral fidelity at n = 96 is MEASURED at R3 (Task 15, paired-IC
+  design, D-R3-4): 96^2 clears D3's ~31 %/bin estimation floor on every seed of every
+  fixture, worst-case margin 1.85x
+  (`experiments/redesign_r3/raps_fidelity/results/raps_fidelity_paired.json`). n = 96 was
+  ruled kept for Phase II (D-R3-6); the scope caveats (three N=3 fixtures, p=8, one band,
+  `ic_noise=0.01`) travel with the ruling.
 * The target-interpolation error this module's `interpolate_targets` incurs is measured at
   R3 (Task 11 Step 5); the measurement and its method are recorded in
   `experiments/redesign_r3/solve_box_interp/`.
@@ -60,9 +61,9 @@ P_DEFAULT = 8
 
 #: Solve-box grid points per side. SPEC-FIXED by §4.3 as a STARTING value: 12
 #: px/wavelength at p = 8, D1's verified density *for the gradient*. Calibrator: D1.
-#: Explicitly subject to `docs/PLAN_redesign_R3.md` Task 15's 96^2-vs-512^2 RAPS band
-#: measurement — §4.3 raises it to the coarsest grid clearing D3's ~31 %/bin floor if 96
-#: does not. UNMEASURED at this grid until Task 15 reports.
+#: MEASURED at this grid by Task 15's paired-IC 96^2-vs-512^2 RAPS band measurement
+#: (D-R3-4): clears D3's ~31 %/bin floor on all seeds/fixtures, worst margin 1.85x;
+#: ruled kept for Phase II by D-R3-6 (scope caveats travel with the ruling).
 N_DEFAULT = 96
 
 

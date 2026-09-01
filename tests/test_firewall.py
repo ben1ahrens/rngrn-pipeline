@@ -70,7 +70,15 @@ SCORING_SIDE = [
 # have been pointless if utils were then free to import the answer key itself. The audit is
 # per-file and non-transitive, so a neutral module in the middle of the chain is exactly
 # where an unaudited hop would hide.
-SIDE_NEUTRAL = ["utils.py"]
+SIDE_NEUTRAL = [
+    "utils.py",
+    "viz.py",       # Task 22 audit: renders recovery-side TrainingHistory output; imports
+    # only matplotlib and history.DIAG_KEYS (verified by the firewall audit, 2026-09-01).
+    # Not imported by either side today (tests only), and it never runs during recover(),
+    # so RECOVERY_SIDE would overclaim — but leaving it off every list left it structurally
+    # unaudited (the completeness test's hand-set could not see it). Listed here so it gets
+    # the recovery-grade import audit and stays truth-free.
+]
 
 # answer-key-side names that must never appear in a recovery-side import.
 # `data.gate` and `data.registry` added 2026-08-04: gate.from_registry returns the full
@@ -184,15 +192,19 @@ def test_every_loss_and_eval_module_is_classified():
     # classification for EVERY package-root module (cli, config, io, index, train, validate,
     # export, plotdata, viz, tracking, ...), most of which fit neither existing category. It
     # is a taxonomy change, out of Task 11's scope; recorded here as the standing gap.
+    # viz.py added at the Task 22 audit (2026-09-01): a package-root module that had sat in
+    # exactly this blind spot — present in the tree, absent from every list, unaudited.
     discovered = {"history.py", "forward.py", "etdrk4_torch.py", "solve_box.py",
-                  "unrolled.py"}
+                  "unrolled.py", "viz.py"}
     for pkg in ("losses", "eval"):
         for path in sorted((SRC / pkg).glob("*.py")):
             if path.name == "__init__.py":
                 continue
             discovered.add(f"{pkg}/{path.name}")
 
-    classified = set(RECOVERY_SIDE) | set(SCORING_SIDE)
+    # SIDE_NEUTRAL counts as classified: those modules get the recovery-grade import audit
+    # (test_side_neutral_modules_are_import_clean) plus the scoring/plotdata/export ban.
+    classified = set(RECOVERY_SIDE) | set(SCORING_SIDE) | set(SIDE_NEUTRAL)
     unclassified = sorted(discovered - classified)
     assert not unclassified, (
         "UNCLASSIFIED MODULE(S): " + ", ".join(unclassified) + ".\n"
@@ -207,7 +219,7 @@ def test_every_loss_and_eval_module_is_classified():
     assert not both, f"module(s) on BOTH sides: {both}"
 
     # Every listed name must exist, so a rename cannot silently empty the audit.
-    for relpath in RECOVERY_SIDE + SCORING_SIDE:
+    for relpath in RECOVERY_SIDE + SCORING_SIDE + SIDE_NEUTRAL:
         assert (SRC / relpath).exists(), f"listed but missing: {relpath}"
 
 

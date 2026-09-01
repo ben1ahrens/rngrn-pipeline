@@ -58,8 +58,11 @@ SERIAL MODEL ONLY. `model` is an `RNGRN`; the leading axis of `X0` is a batch of
 CONDITIONS for that one model, not the member axis of a `BatchedRNGRN`. The batched twin
 would need `forward._batched_reaction_builder` and `forward._half_coeffs_batched` in place of
 the two builders used here; `torch_half_coeffs` refuses a (B, N) D loudly rather than
-flattening it into B*N fake species. That twin is not written — Task 14 needs it before this
-path can drive a batched training run.
+flattening it into B*N fake species. That twin is not written — Task 14 (fd_ab, D-R3-5) ran
+without producing it, so it is an open, un-commissioned R4-scope gap: until it exists, a
+batched spectral run must select `gradient_path='adjoint'` deliberately (`recover.py`'s
+refusal states this loudly). Plan citation: `docs/PLAN_redesign_R3.md` lives on
+`docs/redesign-rngrn` until merged.
 
 NOT WIRED HERE: what is scored on the relaxed field. The spectral targets on the solve box
 (`solve_box.interpolate_targets` + `band_bins`, and the model-side band selection that goes
@@ -86,9 +89,10 @@ from .model import RNGRN
 #:     (log band power) and relative norm gap 0.394% / 0.287% against the S=2048 reference,
 #:     FD-faithful at 9.2e-10 / 3.9e-10 — five orders below D1's 1e-4 acceptance.
 #: (b) UNCALIBRATED beyond that point. It is not established as transferable to another
-#:     fixture, box, k-hat or objective. `docs/PLAN_redesign_R3.md` Task 14's A/B against the
-#:     adjoint — over BOTH converged and stalled members, and against the real objective once
-#:     Task 13 wires it — is the next calibrator, and may move this number.
+#:     fixture, box, k-hat or objective. Task 14's A/B against the adjoint has since RUN at
+#:     the operating point and did not move this number (D-R3-5 rider 3: "Promotion does
+#:     not calibrate it; it raises the stakes on it") — it remains uncalibrated beyond
+#:     that point.
 #: (c) THE PATH MUST NOT BE INVOKED FROM A NON-SATURATED STATE. Measured from a growth-phase
 #:     warm start (20.4% of saturated amplitude), the band-power gradient is 35.6% off in
 #:     norm at S=128 (cosine 0.936) and NO segment length up to 1024 repairs it — the error

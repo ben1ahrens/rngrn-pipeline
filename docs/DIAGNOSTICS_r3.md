@@ -39,9 +39,15 @@ is F(u*)=0 and handing it F(u*)≈2e-3 produced O(1)-wrong gradients on every te
 the unrolled path — which needs no convergence — stayed FD-faithful at 1.44e-08 from
 the same displaced state. (2) Stated asymmetry: the stalled row tests the adjoint at
 1.786e-03 but the unrolled path at warm residual 46.77 (it relaxes the displacement
-away itself); it is not a like-for-like "at 1.8e-03" comparison. (3) This measurement
-plus the cost row is the evidence D-R3-5's owner-ruled promotion reads (unrolled →
-primary/default; adjoint retained as the A/B verification path).
+away itself); it is not a like-for-like "at 1.8e-03" comparison. (3) The forced stall carries the report's own construction caveats in full: the
+displaced state has the wrong residual *shape* relative to a natural stall, and the
+unrolled PASS on that row is a re-measurement from a displaced warm state — it must not
+be read as a survived stall. (4) The unrolled path's FD PASS rows (1.92e-08, 1.44e-08)
+are near-circular by construction: FD differences the same unrolled computation the
+analytic path backpropagates through, so they certify internal consistency more than
+independent correctness. (5) This measurement plus the cost row is the evidence
+D-R3-5's owner-ruled promotion reads (unrolled → primary/default; adjoint retained as
+the A/B verification path).
 
 ## 96²-vs-512² RAPS band fidelity (Task 15)  [status: **DONE** — with the paired-IC design, 96² clears the D3 floor on every seed of every fixture; the unpaired headline is SUPERSEDED (D-R3-4)]
 
@@ -69,7 +75,10 @@ model land 34–45 %/bin apart. (3) The training band holds the same 7 bins at e
 (`n_band_bins_by_grid` = [7] throughout): band resolution is a `p` question, not an `n`
 question. n=96 was subsequently ruled to stand for Phase II (D-R3-6, under the owner's
 delegation). (4) The IC-variance finding is a design lever: averaging over ICs, not
-raising n, is what reduces it.
+raising n, is what reduces it. (5) Caveats that travel with every number here: this is
+a model-side self-consistency test — the fixture's own 512² rollout plays "the observed
+frame" and `k_lin` plays `k*_obs`, with no observed data anywhere in the loop — and the
+fixture base is 3 models in 2 `k_lin` clusters from one N=3 config family.
 
 ## Population stall-rate distribution (Task 16)  [status: **DONE** — pooled 25.7 % off-checkpoint, per-member 0–100 %; `stall_switch_fraction` RETIRED as a threshold (D-R3-7)]
 
@@ -89,7 +98,11 @@ forced stall at 1.786e-03 and converged solves at ~5e-13. The two populations ar
 cleanly separated; nothing was observed near the bar itself. (3) Consequence, ruled:
 `stall_switch_fraction` is retired as a threshold — it never gated anything, and the
 promotion answered the routing question by moving every member to the unrolled path
-rather than picking a rate; the field survives as a recorded diagnostic only (D-R3-7).
+rather than picking a rate; the field survives as a recorded diagnostic only (D-R3-7). (4) The 25.7 % is NOT
+bit-comparable to a production run's `n_stalled/n_ignited`: D-R3-7's "Two divergences"
+records a more-permissive ignition gate and a different denominator in this survey; and
+the survey ran at the n=96 grid, so the rates' transfer to any other grid is
+unmeasured.
 
 ## Phase-II B/K cost curve, forward solve in the loop (Task 17)  [status: **DONE** — wall-clock, not memory, bounds B; evidence RETURNED, B/K deliberately un-ruled (D-R3-8 PROPOSED)]
 
@@ -110,12 +123,15 @@ fired (`refused` empty), MemAvailable never fell below 13,008 MB against the 819
 floor, peak RSS topped out at 3257 MB at B=64 — while an Adam step at B=64 already
 costs 38.3 minutes at 1 thread and B=128 exceeded the 3600 s valve. Largest measured
 B = 64. (2) Per-member cost is SUPERLINEAR in B (0.130 → 0.028 member-steps/s across
-B=1→64, ~2.2–2.6× per doubling), because the unrolled backward leg is serial per member
+B=1→64, ~2.2–2.6× per doubling — noisy: the single B=8→16 doubling measured 3.68×),
+because the unrolled backward leg is serial per member
 — which also means raising B buys less than proportional throughput, strengthening the
 IC-diversity-per-step reading of what B is for (framed under D-R3-4's variance finding;
 not ruled). (3) Adjoint cross-check at B ∈ {1, 8}: unrolled is 4.9× / 4.5× faster per
-member-step with the forward solve in the loop — consistent with D-R3-5's ~2.95×–5×
-full-step evidence. (4) B=512 / K=16 remain UNCALIBRATED (register item 14): the
+member-step with the forward solve in the loop — consistent in direction with D-R3-5's
+2.95× per-member-step estimator figure (which its rider 1 marks as not a whole-step
+number — the retained polish was unmeasured there); the 4.9×/4.5× here is the first
+full-step measurement of the gap. (4) B=512 / K=16 remain UNCALIBRATED (register item 14): the
 evidence is returned to the controller/owner un-ruled; B=512 unrolled at 1 thread
 projects (projection, not measurement) to hours per step on this host.
 
@@ -141,8 +157,8 @@ projects (projection, not measurement) to hours per step on this host.
 - **The D3 floor's own basis.** The ~31 %/bin floor is a spatial-subsampling estimate
   from quadrant patches of one 256² frame; whether it is the right bar for band
   fidelity remains open (Task 15's report, unresolved by the paired design).
-- **Single-measurement noise.** T17 is one step per cell with no error bars (its
-  B=8→16 3.68× doubling is a single noisy point, and the B=32/64 RSS jump above the
+- **Single-measurement noise.** T17 is one step per cell with no error bars (its B=8→16
+  doubling is the single noisy point restated inline above, and the B=32/64 RSS jump above the
   linear model is flagged OPEN); T14's adjoint B=8 cost row is confounded and not
   quotable standalone.
 - **Any recovery-quality claim.** No task here scored a recovery against a control on

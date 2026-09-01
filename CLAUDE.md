@@ -156,8 +156,9 @@ not appear in its imports.
   drifted twice: this paragraph said 12 names while the file held 29, counted 2026-09-01
   during the R3 docs pass; the R3 plan's own "27" was also stale by the time it was
   read.) The list covers the generation-side modules (`rd_models`, the dotted `data.*`
-  names, `AnswerKey`/`answer_key`) plus every payload-reading script importable by bare
-  top-level name — the class that grows, which is why the count rots. The `data.*` names
+  names, `AnswerKey`/`answer_key`) plus the payload-reading scripts known to
+  date, importable by bare top-level name — the class that grows, which is why the
+  count rots. The `data.*` names
   must stay **dotted**: a bare `registry` would false-positive on `rngrn/registry.py`,
   the component registry that `model.py` and `losses/weighting.py` legitimately import.
 - The answer key's *contents* are read in **exactly one place**: `validate.score_recovery`.

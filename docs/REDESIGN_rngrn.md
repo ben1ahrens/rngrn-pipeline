@@ -256,7 +256,9 @@ population. What exists and what is new work, stated plainly:
   originally read "Not batched, and refused by name" — that described the pre-R3 tree)*:
   the spectral terms and the forward solve are batched
   (`losses/total.py::compute_terms_batched`, `forward.BatchedPatternSolver`), and the
-  by-name refusal is replaced by input validation. The mandate in this section — a
+  by-name refusal is replaced by input validation (the `resid` term's batched refusal
+  survives unchanged — the batched reaction still has no per-pixel form;
+  `losses/total.py:326-335`). The mandate in this section — a
   bit-level equivalence test before the batched path trains anything — is satisfied by
   Phase A's equivalence suite. One refusal is deliberately retained (D-R3-5): the
   promoted default `gradient_path='unrolled'` is serial-only (`unrolled_relax` has no

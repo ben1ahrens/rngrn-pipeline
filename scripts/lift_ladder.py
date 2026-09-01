@@ -443,7 +443,180 @@ def run_v4(args):
     return _jsonable(out), arrays
 
 
-RUNGS = {"v0": run_v0, "v1": run_v1, "v2": run_v2, "v3": run_v3, "v4": run_v4}
+
+# ---------------------------------------------------------------------------------------
+# Task 20 (PLAN_redesign_R3): the two gate-point runs. MU_GATE is the owner-set gate point
+# (2026-08-17; docs/DIAGNOSTICS_lift.md header) -- mu_central = 7.2e-4 is NOT the gate.
+MU_GATE = 1e-3
+
+
+def run_v3b_gate(args):
+    """Task 20 (b): the V3(b) anchor re-run at mu_gate (closes F-L13).
+
+    Mirrors run_v3's anchor block EXACTLY -- same machinery, same driver, same morph
+    subset, same V3B_STEPS transient pair at 128^2 plus the 512^2 leg at the QSS dt --
+    with mu parameterized (--mu, default MU_GATE) instead of hardwired MU_BIO_CENTRAL.
+    run_v3 itself is untouched: the committed v3.json stays the record of the mu_central
+    run, and this rung writes its own v3b_gate.json beside it.
+    """
+    backend = "numpy" if args.cpu else "torch"
+    device = "cpu" if args.cpu else "cuda"
+    mu = float(args.mu)
+    models, labels = harvest_models()
+    sub_m, sub_l = _morph_subset(models, labels, args.morph_per_cell)
+    print(f"v3b_gate: {len(sub_m)} anchor systems at mu={mu:g}, backend={backend}",
+          flush=True)
+    anchor = []
+    for m, label in zip(sub_m, sub_l):
+        L, k, xstar = box_size(m)
+        D = m.D.detach().cpu().numpy()
+        dt_qss, _, _, _, _ = lifted.step_policy(m, xstar, D, L, V3_N_ANCHOR, None, None,
+                                                200000)
+        dt_policy = min(dt_qss, mu / 2.0)
+        T_b = V3B_STEPS * dt_policy          # the SAME horizon at both dt (see V3B_STEPS)
+        pair = {}
+        for tag, dt in (("dt", dt_policy), ("dt_half", 0.5 * dt_policy)):
+            r = ladder.v3_spatial(m, mus=[mu], n=V3_N_ANCHOR, L=L, seed=args.seed,
+                                  xstar=xstar, dt=dt, T=T_b, backend=backend, device=device)
+            pair[tag] = r
+        d1 = pair["dt"]["l2_diff_by_mu"][mu]
+        d2 = pair["dt_half"]["l2_diff_by_mu"][mu]
+        full = ladder.v3_spatial(m, mus=[mu], n=args.n_full, L=L, seed=args.seed,
+                                 xstar=xstar, backend=backend, device=device)
+        anchor.append(dict(label=label, L=L, kstar_qss_linear=k, dt_qss_128=float(dt_qss),
+                           dt_policy=float(dt_policy), n_anchor=V3_N_ANCHOR, mu=mu,
+                           T_transient=float(T_b), steps_at_dt=V3B_STEPS,
+                           l2_at_dt=d1, l2_at_dt_half=d2,
+                           dt_halving_ratio=(d1 / d2 if d2 > 0 else float("inf")),
+                           anchor_128=pair, full_grid=full, n_full=args.n_full))
+        print(f"  {label}: dt={dt_policy:.3g} l2 {d1:.3e} -> {d2:.3e} "
+              f"(ratio {d1 / d2 if d2 > 0 else float('inf'):.2f}); "
+              f"{args.n_full}^2 patterned_agree={full['patterned_agree']}", flush=True)
+    out = dict(
+        mu=mu, n_anchor=V3_N_ANCHOR, n_full=args.n_full,
+        morph_per_cell=args.morph_per_cell, backend=backend, device=device,
+        seed=args.seed, population="harvest", closes="F-L13",
+        anchor=anchor,
+        anchor_summary=dict(
+            n=len(anchor),
+            dt_halving_ratio_median=(float(np.median([a["dt_halving_ratio"]
+                                                      for a in anchor]))
+                                     if anchor else float("nan")),
+            full_grid_patterned_agree=dict(
+                n=len(anchor),
+                n_true=int(sum(bool(a["full_grid"]["patterned_agree"])
+                               for a in anchor)))))
+    return out, {}
+
+
+def run_l2_gate(args):
+    """Task 20 (a): L2's own operating point, never previously run (DIAGNOSTICS_lift
+    Sec 7.2): n_full^2, mu_gate, dt = mu/2, horizon 40/|sigma_max|, dt-halving pair.
+
+    THE HALVING CHECK IS THE LIFTED FIELD AGAINST ITS OWN dt/2 TWIN. Sec 5.4's L2 gates
+    on the lifted run's own properties -- amplitude above pattern_floor, stopped_reason
+    == 'horizon', a passing dt-halving check -- and lists the QSS-vs-lifted field
+    difference as REPORTED, NEVER GATED. The matched-dt QSS control is therefore not
+    run here, and could not be cheaply: measured on this machine (2026-09-01, 512^2,
+    N=3) the numpy QSS integrator costs 174 ms/step, i.e. ~17 h for the 3.54e5-step dt
+    leg and ~34 h for the dt/2 leg, per system. That gap is recorded in the payload
+    (`qss_matched_dt_control`) rather than silently skipped. The cheap QSS control at
+    the QSS dt (the same control the committed v3.json 512^2 block used) IS run, for
+    the report-only attractor comparison (patterned/kstar/morphology agreement).
+
+    stopped_reason != 'horizon' on either leg RAISES: Sec 5.4 says a step-budget
+    truncation is not evidence, so a run that cannot reach its horizon licenses
+    nothing and must fail loud, not report weakly. Requires CUDA (the whole point of
+    the raised max_steps is that the horizon is affordable on the GPU only).
+    """
+    from rngrn import observables as obs
+    from rngrn.eval import rollout
+    from rngrn.eval.ladder import _rel_l2, _rel_l2_dev, one_radial_bin
+    from rngrn.eval.lifted_torch import simulate_lifted_torch
+
+    if args.cpu:
+        raise SystemExit("l2_gate: --cpu refused -- the horizon needs the CUDA "
+                         "integrator (measured 174 ms/step numpy vs 11 ms/step CUDA "
+                         "at 512^2); a CPU run would be a step_budget truncation or "
+                         "a multi-day cell.")
+    mu = float(args.mu)
+    dt = mu / 2.0
+    models, labels = harvest_models()
+    if args.system not in labels:
+        raise SystemExit(f"l2_gate: unknown --system {args.system!r}; "
+                         f"known: {labels}")
+    m = models[labels.index(args.system)]
+    L, k_lin, xstar = box_size(m)
+    n = args.n_full
+    print(f"l2_gate: {args.system} at {n}^2, mu={mu:g}, dt={dt:g}, "
+          f"horizon 40/|sigma_max|", flush=True)
+
+    legs, arrays = {}, {}
+    for tag, d in (("dt", dt), ("dt_half", 0.5 * dt)):
+        r = simulate_lifted_torch(m, L=L, mu=mu, n=n, T=None, dt=d, seed=args.seed,
+                                  xstar=xstar, max_steps=int(args.max_steps),
+                                  device="cuda")
+        if r["stopped_reason"] != "horizon":
+            raise RuntimeError(
+                f"l2_gate leg {tag}: stopped_reason={r['stopped_reason']!r} after "
+                f"{r['nsteps_run']}/{r['nsteps']} steps -- Sec 5.4 L2 demands a "
+                "horizon stop; this run licenses nothing.")
+        arrays[f"lifted_{tag}"] = r.pop("fields")
+        r.pop("GA"); r.pop("GR"); r.pop("frames")
+        legs[tag] = r
+        print(f"  leg {tag}: dt={d:g} steps={r['nsteps_run']} "
+              f"amp={r['amplitude']:.4g} patterned={r['patterned']} "
+              f"kstar={r['kstar']:.4g} ({r['seconds']:.0f}s)", flush=True)
+
+    X1, X2 = arrays["lifted_dt"], arrays["lifted_dt_half"]
+    halving = dict(rel_l2=_rel_l2(X1, X2), rel_l2_dev=_rel_l2_dev(X1, X2),
+                   kstar_abs_diff=abs(legs["dt"]["kstar"] - legs["dt_half"]["kstar"]),
+                   one_radial_bin=one_radial_bin(L),
+                   kstar_within_one_bin=bool(
+                       abs(legs["dt"]["kstar"] - legs["dt_half"]["kstar"])
+                       <= one_radial_bin(L)),
+                   morphology_dt=obs.classify(X1[0]),
+                   morphology_dt_half=obs.classify(X2[0]),
+                   amplitude_rel_diff=abs(legs["dt"]["amplitude"]
+                                          - legs["dt_half"]["amplitude"])
+                                      / legs["dt"]["amplitude"])
+
+    # The cheap QSS control at the QSS dt: the report-only attractor comparison.
+    q = rollout.simulate(m, L=L, n=n, T=None, dt=None, seed=args.seed, xstar=xstar,
+                         max_steps=int(args.max_steps))
+    arrays["qss_qssdt"] = q["fields"]
+    qss = dict(dt=q["dt"], nsteps_run=q["nsteps_run"], stopped_reason=q["stopped_reason"],
+               patterned=bool(q["patterned"]), amplitude=float(q["amplitude"]),
+               kstar=float(q["kstar"]), morphology=obs.classify(q["fields"][0]),
+               patterned_agree=bool(q["patterned"]) == bool(legs["dt"]["patterned"]),
+               kstar_abs_diff_vs_lifted_dt=abs(float(q["kstar"]) - legs["dt"]["kstar"]),
+               kstar_within_one_bin_vs_lifted_dt=bool(
+                   abs(float(q["kstar"]) - legs["dt"]["kstar"]) <= one_radial_bin(L)),
+               note="QSS control at the QSS dt (dt/mu >> 1, the Sec 5.2 coupling-trap "
+                    "regime); the matched-dt control is the recorded gap below.")
+
+    pattern_floor = max(1e-3, 0.02 * abs(float(np.asarray(xstar).reshape(-1)[0])))
+    out = dict(
+        system=args.system, mu=mu, dt=dt, n=n, L=L, seed=args.seed,
+        kstar_qss_linear=k_lin, sig_max=legs["dt"]["sig_max"],
+        pattern_floor=pattern_floor, legs=legs, halving=halving, qss_at_qss_dt=qss,
+        qss_matched_dt_control=dict(
+            ran=False,
+            reason="numpy QSS at matched dt measured 174 ms/step at 512^2 on this "
+                   "machine -> ~17 h (dt) + ~34 h (dt/2) per system; Sec 5.4 lists "
+                   "the QSS-vs-lifted field difference as reported-never-gated, so "
+                   "the gate reading does not need it. Recorded, not skipped "
+                   "silently."),
+        l2_verdict_inputs=dict(
+            amplitude_above_floor=bool(legs["dt"]["amplitude"] > pattern_floor),
+            stopped_reason_horizon=all(legs[t]["stopped_reason"] == "horizon"
+                                       for t in legs),
+            patterned_both_legs=all(bool(legs[t]["patterned"]) for t in legs)))
+    return out, arrays
+
+
+RUNGS = {"v0": run_v0, "v1": run_v1, "v2": run_v2, "v3": run_v3, "v4": run_v4,
+         "v3b_gate": run_v3b_gate, "l2_gate": run_l2_gate}
 
 
 # ======================================================================================
@@ -494,6 +667,14 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="cap the population (smoke runs)")
     ap.add_argument("--cpu", action="store_true", help="V3 on the numpy integrator")
     ap.add_argument("--n-mu", type=int, default=V4_N_MU)
+    ap.add_argument("--mu", type=float, default=MU_GATE,
+                    help="gate-point mu for the v3b_gate / l2_gate rungs (Task 20)")
+    ap.add_argument("--system", default="harvest/competitive__mobile3/1",
+                    help="l2_gate: the one system to run (cheapest morphology_claimable "
+                         "per DIAGNOSTICS_lift Sec 7.2)")
+    ap.add_argument("--max-steps", type=int, default=6_000_000,
+                    help="l2_gate: step budget; must exceed the 40/|sigma_max| horizon "
+                         "at dt so stopped_reason can be 'horizon'")
     ap.add_argument("--no-robustness", action="store_true",
                     help="V4 without the 200-draw parameter cloud")
     args = ap.parse_args()

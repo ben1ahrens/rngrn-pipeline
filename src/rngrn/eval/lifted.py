@@ -643,7 +643,7 @@ def step_policy(model, xstar, D, L, n, dt, T, max_steps):
 
 
 def simulate_lifted(model, L, mu, n=64, T=None, dt=None, seed=0, noise=1e-2, xstar=None,
-                    max_steps=200000, record_every=0):
+                    max_steps=6_000_000, record_every=0):
     """Integrate the FULL lifted spatial system on an n x n periodic grid.
 
     Strang splitting, one step:  gates dt/2 (exact, frozen x)  ->  x over dt by ETDRK4 with

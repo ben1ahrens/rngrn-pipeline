@@ -83,7 +83,7 @@ def _reaction_from_gates_torch(p, GA, GR, alpha):
 
 
 def simulate_lifted_torch(model, L, mu, n=64, T=None, dt=None, seed=0, noise=1e-2,
-                          xstar=None, max_steps=200000, record_every=0, device="cuda"):
+                          xstar=None, max_steps=6_000_000, record_every=0, device="cuda"):
     """`lifted.simulate_lifted` on a torch device. Same signature plus `device`, same return
     contract (numpy arrays out), same `stopped_reason` vocabulary.
 

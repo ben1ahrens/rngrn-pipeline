@@ -4876,3 +4876,53 @@ artifact; the full per-member per-step `all_members` trace is persisted by the F
 future runs only and is NOT in the committed artifact, which predates the fix);
 `scripts/r3_stall_survey.py`. Read with **D-R3-1** (the FD protocol) and **D-R3-3** (the R3
 unrolled-path finding this task's residual comparison extends).
+### D-R3-8 — PROPOSED: the R3 Phase-II B/K curve — wall-clock, not memory, bounds B (register item 14)
+
+<!-- Task 17, feature/r3-bk-curve. Numbered D-R3-8 because D-R3-5..7 were taken on the
+rolling branch while this task was in flight; this block appends cleanly under the
+anti-conflict rule. -->
+
+**Date:** 2026-08-19/20 (measured), 2026-09-01 (harvested). R3 Task 17,
+`feature/r3-bk-curve`. **Status:** PROPOSED — evidence returned to the controller; the
+B/K ruling itself (B=512/K=16, register item 14) is NOT made here, and both stay
+UNCALIBRATED until it is.
+
+**Context.** The redesign register carries B=512/K=16 as uncalibrated placeholders. The
+only prior curve (R2 Task 16) is ignition-only — pinned x*, no steady-state solve, flat
+RSS — and its own report declines to set K from it. This task measured the missing
+object: per-Adam-step cost and memory of the R3 Phase-II step WITH the batched forward
+solve in the loop; primary arm unrolled (per D-R3-5), one fresh step per (arm, B) cell,
+1 thread, spawn-isolated, §7a-guarded (`scripts/r3_batch_curve.py`).
+
+**The finding.** Unrolled B=1..64 measured; B=128 timed out at the script's 3600 s/cell
+wall-clock valve; the §7a memory guard never fired (`refused` empty).
+1. **The binding constraint on B is wall-clock, not memory**: s/step grew 7.67 (B=1) →
+   2298 (B=64, 38.3 min), ≈2.2–2.6× per doubling (one doubling, B=8→16, measured 3.68×);
+   peak cell RSS reached only 3257 MB and MemAvailable never went below ~13 GB against
+   the 8192 MB floor. The RSS-budget arithmetic projects a memory ceiling near B≈516 —
+   moot on this host, wall-clock excludes B≥128 first.
+2. **Per-member cost is superlinear**: member-steps/s falls 0.1305 → 0.0278 (4.7×)
+   across B=1→64, so raising B buys much less than proportional throughput; what it buys
+   at full price is IC-diversity per Adam step, which D-R3-4's
+   pattern-selection-variance finding suggests is where B's statistical value lives
+   (framed, not ruled).
+3. **Adjoint cross-check** (B∈{1,8}): unrolled beat adjoint 4.9×/4.5× per member-step —
+   independently consistent with D-R3-5's ~5×; adjoint peak RSS lower (717–1009 MB).
+4. B=512 unrolled at this host/convention projects to several hours per single Adam
+   step (projection, not measurement).
+
+**What was NOT decided here:** the B/K ruling (returned to the controller); K's
+distinct-structure ceiling (cited from R2 Task 16 only — this task ran no population to
+convergence and adds no count); the IC-averaging-vs-throughput reading (framed per
+D-R3-4, not ruled); the B=32/64 RSS jump above the linear `_half_coeffs_batched` model
+(open, did not affect any finding). Cells are single-sample (reps=1, by design —
+fresh-relax steps at ~70 s/solve), so individual doubling ratios are noisy against R2's
+measured ≥1.65× repeat spread; the trend and orders of magnitude are the load-bearing
+content, and rejected alternatives (reps=3 warm-started, per `r3_fd_ab.py`) are
+documented in the script and report.
+
+**Where it lives:** `experiments/redesign_r3/batch_curve/results/batch_curve.json` (one
+clean invocation, total 7831.8 s); `scripts/r3_batch_curve.py`;
+`.superpowers/sdd/PLAN_redesign_R3/task-17-report.md`. Read with **D-R3-4** (IC
+variance), **D-R3-5** (unrolled promotion), and R2's `task-16-report.md` (the
+ignition-only curve this one is explicitly NOT a re-read of).

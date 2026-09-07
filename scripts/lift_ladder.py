@@ -492,7 +492,15 @@ def run_v3b_gate(args):
         print(f"  {label}: dt={dt_policy:.3g} l2 {d1:.3e} -> {d2:.3e} "
               f"(ratio {d1 / d2 if d2 > 0 else float('inf'):.2f}); "
               f"{args.n_full}^2 patterned_agree={full['patterned_agree']}", flush=True)
-    out = dict(
+        _write_partial(args.out, "v3b_gate",
+                       _v3b_payload(args, mu, backend, device, anchor))
+    return _v3b_payload(args, mu, backend, device, anchor), {}
+
+
+def _v3b_payload(args, mu, backend, device, anchor):
+    """The v3b_gate payload over the systems measured SO FAR — shared by the per-system
+    incremental checkpoint and the final return, so the two can never drift."""
+    return dict(
         mu=mu, n_anchor=V3_N_ANCHOR, n_full=args.n_full,
         morph_per_cell=args.morph_per_cell, backend=backend, device=device,
         seed=args.seed, population="harvest", closes="F-L13",
@@ -506,7 +514,6 @@ def run_v3b_gate(args):
                 n=len(anchor),
                 n_true=int(sum(bool(a["full_grid"]["patterned_agree"])
                                for a in anchor)))))
-    return out, {}
 
 
 def run_l2_gate(args):
@@ -567,6 +574,9 @@ def run_l2_gate(args):
         print(f"  leg {tag}: dt={d:g} steps={r['nsteps_run']} "
               f"amp={r['amplitude']:.4g} patterned={r['patterned']} "
               f"kstar={r['kstar']:.4g} ({r['seconds']:.0f}s)", flush=True)
+        _write_partial(args.out, "l2_gate",
+                       dict(system=args.system, mu=mu, dt=dt, n=n, L=L,
+                            seed=args.seed, legs=legs))
 
     X1, X2 = arrays["lifted_dt"], arrays["lifted_dt_half"]
     halving = dict(rel_l2=_rel_l2(X1, X2), rel_l2_dev=_rel_l2_dev(X1, X2),
@@ -622,6 +632,22 @@ RUNGS = {"v0": run_v0, "v1": run_v1, "v2": run_v2, "v3": run_v3, "v4": run_v4,
 # ======================================================================================
 # io
 # ======================================================================================
+def _write_partial(out_dir, rung, payload):
+    """Incremental checkpoint: atomically overwrite results/<rung>.json with the payload
+    measured so far, marked "partial": True, after each completed unit of work — so a
+    host death truncates the record instead of erasing it. Added for the Task 20
+    relaunch (2026-09-07): the 2026-09-01 WSL shutdown erased 7/8 measured v3b systems
+    that lived only in the launch log, because the only write happened at completion.
+    main()'s final write replaces this file WITHOUT the marker; a payload carrying
+    "partial": True is a truncated run and must not be reported as a complete one."""
+    rp = pathlib.Path(out_dir) / "results" / f"{rung}.json"
+    rp.parent.mkdir(parents=True, exist_ok=True)
+    tmp = rp.with_name(rp.name + ".tmp")
+    with open(tmp, "w") as f:
+        json.dump(_jsonable(dict(payload, partial=True)), f, indent=2)
+    tmp.replace(rp)
+
+
 def _jsonable(o):
     """numpy -> python, and float dict keys -> str, so json.dump does not silently reorder
     or refuse. Applied at the boundary only; the rung functions return native objects."""
